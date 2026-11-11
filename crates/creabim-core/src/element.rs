@@ -1485,6 +1485,10 @@ pub struct Opening {
     /// window with its outside face (and its sill) to the wall's interior.
     #[serde(default, skip_serializing_if = "is_false")]
     pub flip_facing: bool,
+    /// How the host wall's layers wrap into its reveals, where that isn't
+    /// as the wall's assembly says ([`crate::assembly::WrapSides`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<crate::assembly::WrapSides>,
 }
 
 impl Opening {

@@ -348,6 +348,7 @@ mod tests {
             frame,
             flip_hand: false,
             flip_facing: false,
+            wrap: None,
         }
     }
 

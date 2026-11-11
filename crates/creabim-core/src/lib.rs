@@ -63,7 +63,10 @@ pub use annotation::{
     text_style, DimAxis, DimensionKind, Font, Note, StyleUse, TagShape, Terminator, TextAlign,
     TextStyle,
 };
-pub use assembly::{assembly_of, Assembly, AssemblyUse, Layer, LayerFunction};
+pub use assembly::{
+    assembly_of, opening_wrap, Assembly, AssemblyUse, Layer, LayerFunction, OpeningWrap,
+    WrapReturn, WrapSides,
+};
 pub use constraint::{Constraint, SolveError};
 pub use cropbox::{CropBox, CropScope};
 pub use csg::BoolOp;

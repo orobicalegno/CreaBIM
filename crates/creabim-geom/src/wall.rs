@@ -1,6 +1,6 @@
 use crate::TriMesh;
 use creabim_core::walls::TopProfile;
-use creabim_core::{Opening, Wall, WallEnds};
+use creabim_core::{Opening, OpeningWrap, Wall, WallEnds};
 use glam::{DVec2, DVec3};
 
 /// Rectangles in wall-local coordinates: `u` along the wall, `v` up from its base.
@@ -26,6 +26,28 @@ impl Cut {
     fn contains(&self, u: f64, v: f64) -> bool {
         u > self.u0 && u < self.u1 && v > self.v0 && v < self.v1
     }
+
+    /// The cut grown by `by` at its jambs, its head, and its sill where
+    /// it has one (not at the wall's base).
+    fn grown(&self, by: f64) -> Cut {
+        Cut {
+            u0: self.u0 - by,
+            u1: self.u1 + by,
+            v0: if self.v0 > 1e-9 {
+                self.v0 - by
+            } else {
+                self.v0
+            },
+            v1: self.v1 + by,
+        }
+    }
+}
+
+/// An opening's cut and how the wall's layers wrap into its reveals.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WrappedCut {
+    pub cut: Cut,
+    pub wrap: OpeningWrap,
 }
 
 /// Build a closed solid for a straight wall with rectangular openings.
@@ -81,17 +103,70 @@ pub fn wall_layer_mesh_v(
     ext: [f64; 2],
     vext: [f64; 2],
 ) -> TriMesh {
+    let cuts: Vec<WrappedCut> = openings
+        .iter()
+        .filter_map(|o| Cut::of(o, wall))
+        .map(|cut| WrappedCut {
+            cut,
+            wrap: OpeningWrap::default(),
+        })
+        .collect();
+    wall_layer_mesh_wrapped(wall, base_z, &cuts, ends, top, band, None, core, ext, vext)
+}
+
+/// [`wall_layer_mesh_v`] for layer `layer` of the wall's assembly, with
+/// the layers wrapping into the reveals of its openings as each cut's
+/// [`OpeningWrap`] says: where returns pass, the layer stops short of the
+/// opening by their thickness, and where it wraps itself it turns in and
+/// lines the jambs, head and sill as far as the frame. One closed solid.
+#[allow(clippy::too_many_arguments)]
+pub fn wall_layer_mesh_wrapped(
+    wall: &Wall,
+    base_z: f64,
+    cuts: &[WrappedCut],
+    ends: &WallEnds,
+    top: Option<&TopProfile>,
+    band: (f64, f64),
+    layer: Option<usize>,
+    core: bool,
+    ext: [f64; 2],
+    vext: [f64; 2],
+) -> TriMesh {
     let len = wall.length();
     let h = wall.height;
-    let cuts: Vec<Cut> = openings.iter().filter_map(|o| Cut::of(o, wall)).collect();
+    let (lo, hi) = band;
+    let returns = |c: &WrappedCut| layer.and_then(|l| c.wrap.return_of(l));
+
+    // across the wall: the layer itself, split where returns stop, and
+    // on to where its own returns run
+    let mut ss = vec![lo, hi];
+    for c in cuts {
+        ss.extend(c.wrap.stops().filter(|s| *s > lo && *s < hi));
+        if let Some(r) = returns(c) {
+            ss.extend([r.from, r.to]);
+        }
+    }
 
     let mut us = vec![0.0, len];
     // a curved wall bends at even steps round its arc (MU40)
     us.extend(wall.bends());
     let mut vs = vec![0.0, h];
-    for c in &cuts {
-        us.extend([c.u0, c.u1]);
-        vs.extend([c.v0, c.v1]);
+    for c in cuts {
+        // the opening's edges, and each step back where layers wrap
+        let mut steps = vec![0.0];
+        if !c.wrap.is_empty() {
+            let mut at = ss.clone();
+            at.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            steps.extend(at.windows(2).map(|w| c.wrap.inset_at((w[0] + w[1]) / 2.0)));
+            if let Some(r) = returns(c) {
+                steps.extend([r.inset, r.inset + r.thickness]);
+            }
+        }
+        for by in steps {
+            let g = c.cut.grown(by);
+            us.extend([g.u0, g.u1].into_iter().filter(|u| *u > 0.0 && *u < len));
+            vs.extend([g.v0, g.v1].into_iter().filter(|v| *v > 0.0 && *v < h));
+        }
     }
     for g in &ends.gaps {
         us.extend([g.lo_mid(), g.hi_mid()]);
@@ -113,20 +188,40 @@ pub fn wall_layer_mesh_v(
     };
     sort(&mut us);
     sort(&mut vs);
+    sort(&mut ss);
 
-    let (ni, nj) = (us.len() - 1, vs.len() - 1);
-    let solid = |i: isize, j: isize| -> bool {
-        if i < 0 || j < 0 || i as usize >= ni || j as usize >= nj {
+    let (ni, nj, nk) = (us.len() - 1, vs.len() - 1, ss.len() - 1);
+    let solid = |i: isize, j: isize, k: isize| -> bool {
+        if i < 0 || j < 0 || k < 0 || i as usize >= ni || j as usize >= nj || k as usize >= nk {
             return false;
         }
-        let (i, j) = (i as usize, j as usize);
+        let (i, j, k) = (i as usize, j as usize, k as usize);
         let (u, v) = ((us[i] + us[i + 1]) / 2.0, (vs[j] + vs[j + 1]) / 2.0);
-        !ends.in_gap(u) && !cuts.iter().any(|c| c.contains(u, v))
+        let s = (ss[k] + ss[k + 1]) / 2.0;
+        if ends.in_gap(u) {
+            return false;
+        }
+        if s > lo && s < hi {
+            // the layer itself, short of each opening by the returns
+            // that pass between them
+            !cuts
+                .iter()
+                .any(|c| c.cut.grown(c.wrap.inset_at(s)).contains(u, v))
+        } else {
+            // its own return: a lining round the opening
+            cuts.iter().any(|c| {
+                returns(c).is_some_and(|r| {
+                    s > r.from
+                        && s < r.to
+                        && c.cut.grown(r.inset + r.thickness).contains(u, v)
+                        && !c.cut.grown(r.inset).contains(u, v)
+                })
+            })
+        }
     };
 
     let d = wall.direction();
     let n2 = DVec2::new(-d.y, d.x);
-    let (lo, hi) = band;
     let z0 = base_z + wall.base_offset;
     // an attached top comes down no lower than the heads of openings
     let floor = vs[vs.len().saturating_sub(2)].max(0.0) + 0.01;
@@ -173,49 +268,56 @@ pub fn wall_layer_mesh_v(
     let mut m = TriMesh::default();
     for i in 0..ni as isize {
         for j in 0..nj as isize {
-            if !solid(i, j) {
-                continue;
-            }
-            let (ua, ub) = (us[i as usize], us[i as usize + 1]);
-            let (va, vb) = (vs[j as usize], vs[j as usize + 1]);
-            // on a curve, the faces turn with it
-            let (along, across) = if wall.is_arc() {
-                let t = wall.tangent_at((ua + ub) / 2.0);
-                (DVec3::new(t.x, t.y, 0.0), DVec3::new(-t.y, t.x, 0.0))
-            } else {
-                (along, across)
-            };
-            m.add_quad(
-                [p(ua, va, hi), p(ub, va, hi), p(ub, vb, hi), p(ua, vb, hi)],
-                across,
-            );
-            m.add_quad(
-                [p(ua, va, lo), p(ub, va, lo), p(ub, vb, lo), p(ua, vb, lo)],
-                -across,
-            );
-            if !solid(i - 1, j) {
-                m.add_quad(
-                    [p(ua, va, lo), p(ua, va, hi), p(ua, vb, hi), p(ua, vb, lo)],
-                    end_normal(p(ua, va, lo), p(ua, va, hi), -along),
-                );
-            }
-            if !solid(i + 1, j) {
-                m.add_quad(
-                    [p(ub, va, lo), p(ub, va, hi), p(ub, vb, hi), p(ub, vb, lo)],
-                    end_normal(p(ub, va, lo), p(ub, va, hi), along),
-                );
-            }
-            if !solid(i, j - 1) {
-                m.add_quad(
-                    [p(ua, va, lo), p(ub, va, lo), p(ub, va, hi), p(ua, va, hi)],
-                    -DVec3::Z,
-                );
-            }
-            if !solid(i, j + 1) {
-                let q = [p(ua, vb, lo), p(ub, vb, lo), p(ub, vb, hi), p(ua, vb, hi)];
-                // an attached top slopes: shade it as it lies
-                let n = (q[2] - q[0]).cross(q[3] - q[1]).normalize_or(DVec3::Z);
-                m.add_quad(q, if n.z < 0.0 { -n } else { n });
+            for k in 0..nk as isize {
+                if !solid(i, j, k) {
+                    continue;
+                }
+                let (ua, ub) = (us[i as usize], us[i as usize + 1]);
+                let (va, vb) = (vs[j as usize], vs[j as usize + 1]);
+                let (lo, hi) = (ss[k as usize], ss[k as usize + 1]);
+                // on a curve, the faces turn with it
+                let (along, across) = if wall.is_arc() {
+                    let t = wall.tangent_at((ua + ub) / 2.0);
+                    (DVec3::new(t.x, t.y, 0.0), DVec3::new(-t.y, t.x, 0.0))
+                } else {
+                    (along, across)
+                };
+                if !solid(i, j, k + 1) {
+                    m.add_quad(
+                        [p(ua, va, hi), p(ub, va, hi), p(ub, vb, hi), p(ua, vb, hi)],
+                        across,
+                    );
+                }
+                if !solid(i, j, k - 1) {
+                    m.add_quad(
+                        [p(ua, va, lo), p(ub, va, lo), p(ub, vb, lo), p(ua, vb, lo)],
+                        -across,
+                    );
+                }
+                if !solid(i - 1, j, k) {
+                    m.add_quad(
+                        [p(ua, va, lo), p(ua, va, hi), p(ua, vb, hi), p(ua, vb, lo)],
+                        end_normal(p(ua, va, lo), p(ua, va, hi), -along),
+                    );
+                }
+                if !solid(i + 1, j, k) {
+                    m.add_quad(
+                        [p(ub, va, lo), p(ub, va, hi), p(ub, vb, hi), p(ub, vb, lo)],
+                        end_normal(p(ub, va, lo), p(ub, va, hi), along),
+                    );
+                }
+                if !solid(i, j - 1, k) {
+                    m.add_quad(
+                        [p(ua, va, lo), p(ub, va, lo), p(ub, va, hi), p(ua, va, hi)],
+                        -DVec3::Z,
+                    );
+                }
+                if !solid(i, j + 1, k) {
+                    let q = [p(ua, vb, lo), p(ub, vb, lo), p(ub, vb, hi), p(ua, vb, hi)];
+                    // an attached top slopes: shade it as it lies
+                    let n = (q[2] - q[0]).cross(q[3] - q[1]).normalize_or(DVec3::Z);
+                    m.add_quad(q, if n.z < 0.0 { -n } else { n });
+                }
             }
         }
     }
@@ -263,7 +365,85 @@ mod tests {
             frame: Default::default(),
             flip_hand: false,
             flip_facing: false,
+            wrap: None,
         }
+    }
+
+    #[test]
+    fn layers_that_wrap_line_the_reveals_and_the_rest_stop_short() {
+        use creabim_core::{opening_wrap, Assembly, AssemblyUse, Layer, LayerFunction, WrapSides};
+        // 20 render, 160 block, 20 plaster; a window with a 60 mm frame
+        let mut a = Assembly::new(
+            AssemblyUse::Wall,
+            vec![
+                Layer::new(LayerFunction::Finish, None, 0.02),
+                Layer::new(LayerFunction::Structure, None, 0.16),
+                Layer::new(LayerFunction::Finish, None, 0.02),
+            ],
+        );
+        let w = wall();
+        let o = opening(1.0, 0.9, 1.2, 1.3);
+        let layers = |a: &Assembly, o: &Opening| -> Vec<f64> {
+            let cuts = [WrappedCut {
+                cut: Cut::of(o, &w).unwrap(),
+                wrap: opening_wrap(a, &w, o, 0.06),
+            }];
+            creabim_core::assembly::wall_bands(a, &w)
+                .iter()
+                .map(|b| {
+                    wall_layer_mesh_wrapped(
+                        &w,
+                        0.0,
+                        &cuts,
+                        &WallEnds::default(),
+                        None,
+                        (b.s0, b.s1),
+                        Some(b.index),
+                        b.core,
+                        [0.0; 2],
+                        [0.0; 2],
+                    )
+                    .volume()
+                })
+                .collect()
+        };
+        let face = 5.0 * 3.0 - 1.2 * 1.3;
+        let square = layers(&a, &o);
+        for (v, t) in square.iter().zip([0.02, 0.16, 0.02]) {
+            assert!((v - face * t).abs() < 1e-6, "{v}");
+        }
+        // a 20 mm lining round the opening, 50 mm from the face to the frame
+        let ring = (1.24 * 1.34 - 1.2 * 1.3) * 0.05;
+        a.wrap_openings = WrapSides::Exterior;
+        let ext = layers(&a, &o);
+        assert!((ext[0] - (face * 0.02 + ring)).abs() < 1e-6, "{}", ext[0]);
+        assert!((ext[1] - (face * 0.16 - ring)).abs() < 1e-6, "{}", ext[1]);
+        assert!((ext[2] - square[2]).abs() < 1e-9);
+        a.wrap_openings = WrapSides::Both;
+        let both = layers(&a, &o);
+        assert!((both[2] - (face * 0.02 + ring)).abs() < 1e-6);
+        assert!((both[1] - (face * 0.16 - 2.0 * ring)).abs() < 1e-6);
+        // the wall as a whole is what it was
+        let (sq, bo): (f64, f64) = (square.iter().sum(), both.iter().sum());
+        assert!((sq - bo).abs() < 1e-6);
+        // a layer told not to wrap stops square, and an opening can go
+        // its own way
+        a.layers[2].wraps = Some(false);
+        assert!((layers(&a, &o)[2] - square[2]).abs() < 1e-9);
+        let own = Opening {
+            wrap: Some(WrapSides::None),
+            ..o.clone()
+        };
+        assert_eq!(layers(&a, &own), square);
+        // a door has no sill to line
+        let door = opening(1.0, 0.0, 1.0, 2.1);
+        let ring = (1.04 * 2.12 - 1.0 * 2.1) * 0.05;
+        let d = layers(&a, &door);
+        assert!(
+            (d[0] - ((15.0 - 2.1) * 0.02 + ring)).abs() < 1e-6,
+            "{}",
+            d[0]
+        );
     }
 
     #[test]
