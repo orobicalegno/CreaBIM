@@ -71,7 +71,7 @@ pub use constraint::{Constraint, SolveError};
 pub use cropbox::{CropBox, CropScope};
 pub use csg::BoolOp;
 pub use curtain::{CurtainGrid, GridRule, PanelKind};
-pub use detail::{DetailItem, DetailKind, DrawingFrame, MembraneLook};
+pub use detail::{DetailItem, DetailKind, DraftShape, DrawingFrame, LinePen, MembraneLook};
 pub use document::{Document, Step, StepId};
 pub use editmesh::EditMesh;
 pub use element::{layer_edge_offsets, set_layer_edge, LayerEdge, LayerEnd, LocationLine, WallTop};

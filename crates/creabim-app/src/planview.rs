@@ -223,7 +223,7 @@ impl Tool {
             Tool::Room => "Click inside walls for a room that follows them (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch) where no walls close it off. Its name, number and finishes are in Properties.",
             Tool::RoomSeparator => "Click two points for a line that splits a room in two where there is no wall, such as between a kitchen and a dining room.",
             Tool::Callout => "On a plan or section, click two corners of a box round what to detail: it becomes a detail view at the scale in the top bar, numbered in a bubble on this view.",
-            Tool::Detail => "Pick what to draw in the top bar, then click its points; Enter, a double-click or a right-click finishes (the first point again closes a region). Esc keeps what is drawn. Detail components show in this view only.",
+            Tool::Detail => "Pick what to draw in the top bar, a detail component or plain linework (line, rectangle, polygon, circle, arc, ellipse, spline), then click its points; Enter, a double-click or a right-click finishes (the first point again closes a region or a closed line). Esc keeps what is drawn. It shows in this view only.",
             Tool::Ceiling => "Click inside a room for a ceiling over it that follows its walls (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch). Set its height and thickness in the top bar or Properties.",
         }
     }

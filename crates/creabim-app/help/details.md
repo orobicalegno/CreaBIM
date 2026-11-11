@@ -34,6 +34,23 @@ The kinds are:
 
 A detail component belongs to the view it is drawn in and shows in no other view. Detail components are drafting, not building parts: they don't appear in schedules, and IFC export leaves them out. To name them, add [notes](notes) with leaders.
 
+## Linework
+
+The same tool draws plain lines, as a CAD program does, for anything the components don't cover. Its second group in the tool options has the shapes:
+
+- **Line**: click its points; one stretch or many. Click the last point again, or press Enter, to finish.
+- **Closed line**: the same, closed back to its start. Click the first point again to close it.
+- **Rectangle**: two opposite corners.
+- **Polygon**: its centre, then a corner. Set the number of *Sides* in the tool options.
+- **Circle**: its centre, then a point on it.
+- **Arc**: its start, a point it passes through, then its end.
+- **Ellipse**: its centre, the end of one axis, then a point that gives the other axis its length.
+- **Spline**: a smooth curve through the points you click.
+
+Pick the **pen** beside the shapes: heavy, medium, light, fine or dashed. These are the drawing's own line weights, so linework prints like the rest of the view. Change a line's pen, or open and close it, in *Properties*.
+
+A rectangle or a polygon is kept as a closed line once drawn, so it can turn and be reshaped corner by corner. Linework moves, rotates, mirrors, copies and deletes like a detail component, and like one it shows only in the view it was drawn in.
+
 ## The details in the starter house
 
 The [starter house](starter-house) has a sheet **A501 Details**. It shows section C-C through the south wall at 1:25, with three callouts at 1:10: the wall base, the window head and sill, and the eaves.

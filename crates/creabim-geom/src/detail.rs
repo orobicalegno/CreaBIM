@@ -3,7 +3,7 @@
 //! its parent.
 
 use crate::plan::{Pen, PlanItem};
-use creabim_core::{DetailItem, DetailKind, ElementId, Hatch, MembraneLook};
+use creabim_core::{DetailItem, DetailKind, ElementId, Hatch, LinePen, MembraneLook};
 use glam::DVec2;
 
 /// How far off the line it follows a membrane's heavy line lies, in paper
@@ -170,6 +170,23 @@ pub fn detail_items(id: ElementId, d: &DetailItem, mm: f64, look: MembraneLook) 
                 }
             }
         }
+        DetailKind::Draft { pen, .. } => {
+            let pen = match pen {
+                LinePen::Heavy => Pen::Cut,
+                LinePen::Medium => Pen::Projection,
+                LinePen::Light => Pen::Symbol,
+                LinePen::Fine => Pen::Fine,
+                LinePen::Dashed => Pen::Hidden,
+            };
+            if let Some((path, closed)) = d.draft_path() {
+                for w in path.windows(2) {
+                    line(&mut out, pen, w[0], w[1]);
+                }
+                if let (true, Some(a), Some(b)) = (closed, path.last(), path.first()) {
+                    line(&mut out, pen, *a, *b);
+                }
+            }
+        }
         DetailKind::BreakLine => {
             for &(a, b) in &segs {
                 let len = a.distance(b);
@@ -247,7 +264,10 @@ mod tests {
     #[test]
     fn each_kind_draws_within_its_band() {
         for kind in DetailKind::ALL {
-            let pts: &[(f64, f64)] = if kind.is_area() {
+            let pts: &[(f64, f64)] = if kind.as_draft().is_some() {
+                // a circle, an ellipse or a polygon about (0.5, 0)
+                &[(0.5, 0.0), (1.0, 0.0), (0.7, 0.3)]
+            } else if kind.is_area() {
                 &[(0.0, 0.0), (1.0, 0.0), (1.0, 0.5)]
             } else {
                 &[(0.0, 0.0), (1.0, 0.0)]
@@ -294,6 +314,85 @@ mod tests {
         let items = detail_items(ElementId::new(), &d, 0.01, MembraneLook::Dashed);
         assert!(items.iter().any(|i| matches!(i,
             PlanItem::Line { pen: Pen::Cut, a, .. } if a.distance(DVec2::new(0.0, -0.02)) < 1e-9)));
+    }
+
+    #[test]
+    fn plain_linework_draws_its_shape_in_its_pen() {
+        use creabim_core::DraftShape as S;
+        let lines = |shape: S, pen: LinePen, pts: &[(f64, f64)]| -> Vec<(DVec2, DVec2)> {
+            let d = item(DetailKind::Draft { shape, pen }, pts);
+            detail_items(ElementId::new(), &d, 0.01, MembraneLook::default())
+                .into_iter()
+                .map(|i| match i {
+                    PlanItem::Line { pen: p, a, b, .. } => {
+                        assert_eq!(p == Pen::Hidden, pen == LinePen::Dashed);
+                        (a, b)
+                    }
+                    other => panic!("{other:?}"),
+                })
+                .collect()
+        };
+        let p = DVec2::new;
+        // a line of two stretches; closed, a third back to its start
+        assert_eq!(
+            lines(S::Line, LinePen::Medium, &[(0., 0.), (1., 0.), (1., 1.)]).len(),
+            2
+        );
+        assert_eq!(
+            lines(S::Closed, LinePen::Heavy, &[(0., 0.), (1., 0.), (1., 1.)]).len(),
+            3
+        );
+        // a rectangle from two corners, a hexagon from centre and corner
+        assert_eq!(
+            lines(S::Rectangle, LinePen::Fine, &[(0., 0.), (2., 1.)]).len(),
+            4
+        );
+        let hex = lines(
+            S::Polygon { sides: 6 },
+            LinePen::Light,
+            &[(0., 0.), (1., 0.)],
+        );
+        assert_eq!(hex.len(), 6);
+        assert!(hex.iter().all(|(a, b)| (a.distance(*b) - 1.0).abs() < 1e-9));
+        // every chord of a circle ends on it
+        let circle = lines(S::Circle, LinePen::Dashed, &[(1., 1.), (3., 1.)]);
+        assert!(circle
+            .iter()
+            .all(|(a, _)| (a.distance(p(1., 1.)) - 2.0).abs() < 1e-9));
+        assert!(circle[0].0.distance(circle.last().unwrap().1) < 1e-9);
+        // an arc runs from its start through its middle point to its end,
+        // whichever way round that is
+        for mid in [1.0, -1.0] {
+            let arc = lines(S::Arc, LinePen::Medium, &[(-1., 0.), (0., mid), (1., 0.)]);
+            assert!(arc[0].0.distance(p(-1., 0.)) < 1e-9);
+            assert!(arc.last().unwrap().1.distance(p(1., 0.)) < 1e-9);
+            assert!(arc.iter().all(|(a, _)| (a.length() - 1.0).abs() < 1e-9));
+            assert!(arc.iter().any(|(a, _)| a.distance(p(0., mid)) < 0.05));
+            assert!(arc.iter().all(|(a, _)| a.y * mid > -1e-9));
+        }
+        // three points in a row are a straight line
+        assert_eq!(
+            lines(S::Arc, LinePen::Medium, &[(0., 0.), (1., 0.), (2., 0.)]).len(),
+            2
+        );
+        // an ellipse 2 by 1 about the origin, turned 90 degrees
+        let ell = lines(S::Ellipse, LinePen::Medium, &[(0., 0.), (0., 2.), (1., 5.)]);
+        assert!(ell
+            .iter()
+            .all(|(a, _)| ((a.y / 2.0).powi(2) + a.x.powi(2) - 1.0).abs() < 1e-9));
+        // a spline passes through every point it was given
+        let pts = [(0., 0.), (1., 1.), (2., 0.), (3., 1.)];
+        let sp = lines(S::Spline, LinePen::Medium, &pts);
+        for (x, y) in pts {
+            assert!(sp
+                .iter()
+                .any(|(a, b)| a.distance(p(x, y)) < 1e-9 || b.distance(p(x, y)) < 1e-9));
+        }
+        // a rectangle is kept as a closed outline that can turn
+        let baked = item(DetailKind::draft(S::Rectangle), &[(0., 0.), (2., 1.)]).baked();
+        assert_eq!(baked.kind, DetailKind::draft(S::Closed));
+        assert_eq!(baked.points.len(), 4);
+        assert!((baked.length() - 6.0).abs() < 1e-9);
     }
 
     #[test]

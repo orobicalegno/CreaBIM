@@ -158,8 +158,12 @@ pub fn detail_click(
         d.view = Some(view);
     }
     let near = |a: DVec2| a.distance(p) < 0.004_f64.max(view_scale(doc.model(), view) * 0.0015);
+    let fixed = d.kind.fixed_points();
     let done = match (d.path.first(), d.path.last()) {
         (Some(first), _) if d.kind.is_area() && d.path.len() >= 3 && near(*first) => true,
+        // a shape of a set number of clicks takes them all: a click on
+        // the last point again is dropped, not the end of it
+        (_, Some(last)) if near(*last) && fixed.is_some() => false,
         (_, Some(last)) if near(*last) => true,
         _ => {
             if d.path.is_empty() {
@@ -169,7 +173,7 @@ pub fn detail_click(
             d.off.truncate(d.path.len() - 1);
             d.off.resize(d.path.len() - 1, DVec2::ZERO);
             d.off.push(raw - p);
-            matches!(d.kind, DetailKind::BreakLine) && d.path.len() == 2
+            fixed == Some(d.path.len())
         }
     };
     if done {
@@ -188,6 +192,9 @@ pub fn path_hint(kind: DetailKind, n: usize) -> String {
         format!("{n} points")
     };
     let label = kind.label();
+    if let (Some((shape, _)), Some(_)) = (kind.as_draft(), kind.fixed_points()) {
+        return format!("{label}: click {}. Esc cancels.", shape.next_point(n));
+    }
     match (kind.is_area(), n) {
         (true, n) if n >= 3 => format!(
             "{label}: {points}. Enter to finish (or click the first corner); double-click or right-click also finish."
@@ -206,8 +213,7 @@ pub fn path_hint(kind: DetailKind, n: usize) -> String {
 /// Has the path enough points to make its component?
 pub fn finishable(state: &PlanState) -> bool {
     let d = &state.details;
-    let need = if d.kind.is_area() { 3 } else { 2 };
-    d.view.is_some() && d.path.len() >= need
+    d.view.is_some() && d.path.len() >= d.kind.min_points()
 }
 
 /// Esc, a right-click or another tool while a path is drawn: one that can
@@ -246,7 +252,7 @@ pub fn finish(
     let (Some(view), path) = (d.view, std::mem::take(&mut d.path)) else {
         return Ok(());
     };
-    let need = if d.kind.is_area() { 3 } else { 2 };
+    let need = d.kind.min_points();
     if path.len() < need {
         state.status = Some(format!(
             "A {} needs {need} points or more.",
@@ -262,11 +268,14 @@ pub fn finish(
     item.width = d.width;
     item.flip = flip && matches!(d.kind, DetailKind::Membrane);
     let label = d.kind.label();
-    let e = Element::new(label, ElementKind::Detail(item));
+    // a rectangle or a polygon is kept as the closed outline it draws
+    let e = Element::new(label, ElementKind::Detail(item.baked()));
     selection.only(e.id);
-    state.status = Some(format!(
-        "{label} drawn. Its width and kind are in Properties; it shows in this view only."
-    ));
+    state.status = Some(if d.kind.as_draft().is_some() {
+        format!("{label} drawn. Its pen is in Properties; it shows in this view only.")
+    } else {
+        format!("{label} drawn. Its width and kind are in Properties; it shows in this view only.")
+    });
     doc.commit(Transaction::new(format!("Draw {}", label.to_lowercase())).insert(e))
 }
 
@@ -297,11 +306,20 @@ pub fn preview(
             }
             let mut pts = d.path.clone();
             pts.extend(hover);
+            // an arc or an ellipse with a point still to come: the line so far
+            let short = d.kind.fixed_points().is_some_and(|n| pts.len() < n);
+            let kind = match d.kind.as_draft() {
+                Some((_, pen)) if short => DetailKind::Draft {
+                    shape: creabim_core::DraftShape::Line,
+                    pen,
+                },
+                _ => d.kind,
+            };
             // the side as it will be with the pointer's point added
             let mut next = d.clone();
             next.path = pts.clone();
             next.off.resize(pts.len(), DVec2::ZERO);
-            let mut item = DetailItem::new(view, d.kind, pts);
+            let mut item = DetailItem::new(view, kind, pts);
             item.width = d.width;
             item.flip = next.clicked_right();
             let look = creabim_core::styles::active_pack(model).membranes;
@@ -317,11 +335,48 @@ pub fn preview(
 /// changed.
 pub fn detail_fields(ui: &mut egui::Ui, d: &mut DetailItem) -> &'static str {
     let mut label = "";
+    if let DetailKind::Draft { shape, pen } = &mut d.kind {
+        // plain linework: its shape is what its points mean, its pen can change
+        let name = shape.label();
+        crate::props::Combo::new("Pen")
+            .selected_text(pen.label())
+            .show_ui(ui, |ui| {
+                for p in creabim_core::LinePen::ALL {
+                    if ui.selectable_value(pen, p, p.label()).changed() {
+                        label = "Line pen";
+                    }
+                }
+            });
+        if let creabim_core::DraftShape::Line | creabim_core::DraftShape::Closed = shape {
+            let mut closed = *shape == creabim_core::DraftShape::Closed;
+            if d.points.len() >= 3
+                && crate::props::switch(ui, &mut closed, "Closed")
+                    .on_hover_text("Join its end back to its start.")
+                    .changed()
+            {
+                *shape = if closed {
+                    creabim_core::DraftShape::Closed
+                } else {
+                    creabim_core::DraftShape::Line
+                };
+                label = "Close line";
+            }
+        }
+        ui.label(
+            egui::RichText::new(format!(
+                "{name}, {} long. Linework is drafting: it shows in this view only, never in 3D, schedules or IFC.",
+                crate::units::len(d.length())
+            ))
+            .weak(),
+        );
+        return label;
+    }
     egui::ComboBox::from_id_salt("detail.kind")
         .icon(crate::props::combo_icon)
         .selected_text(d.kind.label())
         .show_ui(ui, |ui| {
-            for k in DetailKind::ALL {
+            for k in &DetailKind::ALL[..DetailKind::COMPONENTS] {
+                let k = *k;
                 if ui.selectable_label(d.kind.same(k), k.label()).clicked() && !d.kind.same(k) {
                     d.kind = k;
                     if d.width <= 0.0 {
@@ -331,10 +386,7 @@ pub fn detail_fields(ui: &mut egui::Ui, d: &mut DetailItem) -> &'static str {
                 }
             }
         });
-    if !matches!(
-        d.kind,
-        DetailKind::Membrane | DetailKind::Region { .. } | DetailKind::BreakLine
-    ) {
+    if d.kind.has_width() {
         crate::props::flow(ui, |ui| {
             ui.label("Width");
             if ui
@@ -501,6 +553,67 @@ mod tests {
         assert_eq!(items[0].points.len(), 3);
         assert_eq!(items[0].view, section);
         assert!(state.details.path.is_empty());
+    }
+
+    #[test]
+    fn linework_takes_the_clicks_its_shape_needs() {
+        use creabim_core::{DraftShape as S, LinePen};
+        let (mut doc, section) = doc_with_section();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        let mut sel = Selection::default();
+        let p = DVec2::new;
+        let mut draw = |shape: S, clicks: &[DVec2]| -> DetailItem {
+            state.details.pick(DetailKind::Draft {
+                shape,
+                pen: LinePen::Heavy,
+            });
+            for q in clicks {
+                detail_click(&mut doc, section, *q, *q, &mut state, &mut sel).unwrap();
+            }
+            assert!(state.details.path.is_empty(), "{shape:?} is finished");
+            let id = sel.all()[0];
+            match &doc.model().get(id).unwrap().kind {
+                ElementKind::Detail(d) => d.clone(),
+                _ => panic!(),
+            }
+        };
+        // a circle is done at its second click, an arc at its third
+        let c = draw(S::Circle, &[p(1.0, 1.0), p(2.0, 1.0)]);
+        assert_eq!(
+            (c.points.len(), c.kind.as_draft().unwrap().0),
+            (2, S::Circle)
+        );
+        let a = draw(S::Arc, &[p(0.0, 0.0), p(1.0, 1.0), p(2.0, 0.0)]);
+        assert_eq!(a.points.len(), 3);
+        // a second click on the same spot is not the end of a circle
+        let c = draw(S::Circle, &[p(1.0, 1.0), p(1.0, 1.0), p(1.0, 3.0)]);
+        assert!((c.points[1].y - 3.0).abs() < 1e-9);
+        // a rectangle and a polygon are kept as closed outlines, in their pen
+        let r = draw(S::Rectangle, &[p(0.0, 0.0), p(2.0, 1.0)]);
+        assert_eq!(
+            r.kind,
+            DetailKind::Draft {
+                shape: S::Closed,
+                pen: LinePen::Heavy
+            }
+        );
+        assert_eq!(r.points.len(), 4);
+        let h = draw(S::Polygon { sides: 5 }, &[p(0.0, 0.0), p(1.0, 0.0)]);
+        assert_eq!(h.points.len(), 5);
+        // a line goes on until its last point is clicked again; a closed
+        // line closes on its first
+        let l = draw(
+            S::Line,
+            &[p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(1.0, 1.0)],
+        );
+        assert_eq!(l.points.len(), 3);
+        let k = draw(
+            S::Closed,
+            &[p(0.0, 0.0), p(1.0, 0.0), p(1.0, 1.0), p(0.0, 0.0)],
+        );
+        assert_eq!(k.points.len(), 3);
+        assert!((k.length() - (2.0 + 2f64.sqrt())).abs() < 1e-9);
     }
 
     #[test]

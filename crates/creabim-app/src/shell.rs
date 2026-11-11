@@ -1919,8 +1919,23 @@ impl CreaBimApp {
             "note.leader" => self.plan.anno.leader = !self.plan.anno.leader,
             "detail.kind" => {
                 if let Some(k) = index.and_then(|i| creabim_core::DetailKind::ALL.get(i)) {
+                    // linework keeps the pen it was last drawn in
+                    let pen = self.plan.details.kind.as_draft().map(|d| d.1);
                     self.plan.details.pick(*k);
+                    if let (Some(pen), creabim_core::DetailKind::Draft { pen: p, .. }) =
+                        (pen, &mut self.plan.details.kind)
+                    {
+                        *p = pen;
+                    }
                     self.plan.details.path.clear();
+                }
+            }
+            "detail.pen" => {
+                if let (Some(pen), creabim_core::DetailKind::Draft { pen: p, .. }) = (
+                    index.and_then(|i| creabim_core::LinePen::ALL.get(i)),
+                    &mut self.plan.details.kind,
+                ) {
+                    *p = *pen;
                 }
             }
             "callout.scale" => {
@@ -2561,6 +2576,15 @@ impl CreaBimApp {
             }
             "view.number" => self.set_view_number(v),
             "detail.width" => self.plan.details.width = v.clamp(0.0, 5.0),
+            "detail.sides" => {
+                if let creabim_core::DetailKind::Draft {
+                    shape: creabim_core::DraftShape::Polygon { sides },
+                    ..
+                } = &mut self.plan.details.kind
+                {
+                    *sides = v.round().clamp(3.0, 64.0) as u8;
+                }
+            }
             "dim.spacing" => {
                 self.plan.dim_step_size = v.clamp(0.5, 100.0);
                 self.plan.dim_step_mm = self.plan.dim_step_size;
@@ -2731,24 +2755,52 @@ impl CreaBimApp {
                 }),
         );
         if tool == Tool::Detail {
-            options.push(seg(creabim_core::DetailKind::ALL
-                .iter()
-                .enumerate()
-                .map(|(i, k)| {
-                    opt(
-                        format!("detail.kind:{i}"),
-                        k.label(),
-                        self.plan.details.kind.same(*k),
-                        "What the next clicks draw",
-                    )
-                })
-                .collect()));
-            if !matches!(
-                self.plan.details.kind,
-                creabim_core::DetailKind::Membrane
-                    | creabim_core::DetailKind::Region { .. }
-                    | creabim_core::DetailKind::BreakLine
-            ) {
+            use creabim_core::DetailKind;
+            // the components first, then plain linework: each a group
+            let kinds = |range: std::ops::Range<usize>, hint: &str| {
+                seg(DetailKind::ALL[range.clone()]
+                    .iter()
+                    .zip(range)
+                    .map(|(k, i)| {
+                        opt(
+                            format!("detail.kind:{i}"),
+                            k.label(),
+                            self.plan.details.kind.same(*k),
+                            hint,
+                        )
+                    })
+                    .collect())
+            };
+            options.push(kinds(
+                0..DetailKind::COMPONENTS,
+                "A detail component: what the next clicks draw",
+            ));
+            options.push(kinds(
+                DetailKind::COMPONENTS..DetailKind::ALL.len(),
+                "Plain linework: what the next clicks draw",
+            ));
+            if let Some((shape, pen)) = self.plan.details.kind.as_draft() {
+                options.push(seg(creabim_core::LinePen::ALL
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        opt(
+                            format!("detail.pen:{i}"),
+                            p.label(),
+                            pen == *p,
+                            "The pen the line is drawn in",
+                        )
+                    })
+                    .collect()));
+                if let creabim_core::DraftShape::Polygon { sides } = shape {
+                    options.push(json!({
+                        "kind": "number", "key": "detail.sides", "label": "Sides",
+                        "value": sides, "step": 1.0, "min": 3.0, "max": 64.0,
+                        "hint": "How many sides the polygon has",
+                    }));
+                }
+            }
+            if self.plan.details.kind.has_width() {
                 options.push(json!({
                     "kind": "number", "key": "detail.width", "label": "Width",
                     "value": self.plan.details.width, "unit": "m", "step": 0.005, "min": 0.0, "max": 5.0,
