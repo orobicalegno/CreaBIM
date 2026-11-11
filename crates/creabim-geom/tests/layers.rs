@@ -135,3 +135,54 @@ fn sections_cut_floors_walls_and_roofs_layer_by_layer() {
         assert!(n >= at_least, "{n} fills");
     }
 }
+
+#[test]
+fn layers_wrap_into_the_jambs_of_openings_in_plan() {
+    use creabim_core::{Document, Transaction, WrapSides};
+    let mut doc = Document::from_model(layered_house());
+    let wall = id_of(doc.model(), "GF Wall 1");
+    let fills = |m: &Model| -> Vec<Vec<DVec2>> {
+        plan_view(m, ground(m), 1.2)
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                PlanItem::Fill { id, points, .. } if *id == wall => Some(points.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let square = fills(doc.model());
+    // the wall's assembly wraps on both faces
+    let e = doc.model().get(wall).unwrap();
+    let (asm, _) = assembly_of(doc.model(), e).unwrap();
+    let mut wrapped = asm.clone();
+    if let ElementKind::Assembly(a) = &mut wrapped.kind {
+        a.wrap_openings = WrapSides::Both;
+    }
+    let tx = Transaction::new("Wrap").replace(asm.clone(), wrapped);
+    doc.commit(tx).unwrap();
+    let wraps = fills(doc.model());
+    // each jamb gains the returns of the finishes on both faces
+    assert!(
+        wraps.len() > square.len(),
+        "{} {}",
+        wraps.len(),
+        square.len()
+    );
+    // and nothing is lost or doubled: the wall's cut area is the same
+    let area = |ps: &Vec<Vec<DVec2>>| -> f64 {
+        ps.iter()
+            .map(|p| {
+                (0..p.len())
+                    .map(|i| p[i].perp_dot(p[(i + 1) % p.len()]))
+                    .sum::<f64>()
+                    .abs()
+                    / 2.0
+            })
+            .sum()
+    };
+    assert!((area(&wraps) - area(&square)).abs() < 1e-6);
+    // the 3D view lines those reveals with the layers themselves
+    let scene = build_scene(doc.model());
+    assert!(scene.iter().any(|i| i.id == wall && i.layer.is_some()));
+}

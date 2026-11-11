@@ -312,6 +312,32 @@ pub(super) fn opening_fields(ui: &mut egui::Ui, model: &Model, o: &mut Opening) 
             ui.label("A bare opening: a hole through the wall with no door or window in it");
         }
     }
+    // how the wall's layers line its reveals, where the wall is layered
+    let layered = model
+        .get(o.host)
+        .and_then(|e| creabim_core::assembly_of(model, e))
+        .map(|(_, a)| a.wrap_openings);
+    if let Some(by_wall) = layered {
+        use creabim_core::WrapSides;
+        let name = |w: Option<WrapSides>| match w {
+            None => format!("As the wall ({})", by_wall.label().to_lowercase()),
+            Some(w) => w.label().to_string(),
+        };
+        let mut wrap = o.wrap;
+        crate::props::Combo::new("Layers wrap")
+            .selected_text(name(wrap))
+            .show_ui(ui, |ui| {
+                for w in std::iter::once(None).chain(WrapSides::ALL.map(Some)) {
+                    ui.selectable_value(&mut wrap, w, name(w));
+                }
+            })
+            .response
+            .on_hover_text("Which faces of the wall its layers turn in from to line this opening's reveals, up to the frame. The wall's assembly sets it for all its openings; this one can differ.");
+        if wrap != o.wrap {
+            o.wrap = wrap;
+            label = "Wrap layers at opening"
+        }
+    }
     label
 }
 

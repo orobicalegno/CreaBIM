@@ -3910,6 +3910,7 @@ fn section_tool(
                         frame: Default::default(),
                         flip_hand: false,
                         flip_facing: false,
+                        wrap: None,
                     }),
                 ),
             );
@@ -7256,6 +7257,7 @@ fn place_opening(
                 frame: Default::default(),
                 flip_hand: false,
                 flip_facing: false,
+                wrap: None,
             }),
         ),
     );

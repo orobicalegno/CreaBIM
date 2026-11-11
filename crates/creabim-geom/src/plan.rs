@@ -1065,7 +1065,9 @@ pub fn plan_view_with(
                     }
                     continue;
                 }
-                let mut gaps: Vec<(f64, f64)> = Vec::new();
+                // each with how the wall's layers wrap into its reveals
+                let mut gaps: Vec<(f64, f64, creabim_core::OpeningWrap)> = Vec::new();
+                let layered = creabim_core::assembly_of(model, e);
                 for oid in model.dependents(e.id) {
                     let Some(oe) = model.get(oid) else { continue };
                     let ElementKind::Opening(o) = &oe.kind else {
@@ -1073,7 +1075,13 @@ pub fn plan_view_with(
                     };
                     let Some(c) = Cut::of(o, w) else { continue };
                     if cut_v > c.v0 && cut_v < c.v1 {
-                        gaps.push((c.u0, c.u1));
+                        let wrap = layered
+                            .zip(crate::opening::Fitted::of(o, w))
+                            .map(|((_, asm), f)| {
+                                creabim_core::opening_wrap(asm, w, o, f.frame.depth)
+                            })
+                            .unwrap_or_default();
+                        gaps.push((c.u0, c.u1, wrap));
                         items.extend(opening_symbol(oid, o, w, &c, cut_v, &at));
                     } else if c.v0 >= cut_v {
                         // wholly above the cut (a duct hole, a high
@@ -1096,26 +1104,35 @@ pub fn plan_view_with(
                 for o in voids.into_iter().map(|v| v.1).chain(screen) {
                     if let Some(c) = Cut::of(&o, w) {
                         if cut_v > c.v0 && cut_v < c.v1 {
-                            gaps.push((c.u0, c.u1));
+                            gaps.push((c.u0, c.u1, Default::default()));
                         }
                     }
                 }
                 gaps.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                // the stretches between crossing walls, less the openings
+                // the stretches between crossing walls, less the openings;
+                // with each, the opening at its start and at its end
                 let mut pieces = Vec::new();
+                let mut jambs: Vec<[Option<&creabim_core::OpeningWrap>; 2]> = Vec::new();
                 for (lo, hi) in ends.solid_spans(w) {
                     let mut u = lo;
-                    for &(g0, g1) in &gaps {
+                    let mut before = None;
+                    for (g0, g1, wrap) in &gaps {
+                        let (g0, g1) = (*g0, *g1);
                         if g1 <= u || g0 >= hi {
                             continue;
                         }
                         if g0 > u + 1e-9 {
                             pieces.push((u, g0));
+                            jambs.push([before, Some(wrap)]);
+                        }
+                        if g1 >= u {
+                            before = Some(wrap);
                         }
                         u = u.max(g1);
                     }
                     if hi > u + 1e-9 {
                         pieces.push((u, hi));
+                        jambs.push([before, None]);
                     }
                 }
                 if let Some((_, asm)) = creabim_core::assembly_of(model, e) {
@@ -1128,12 +1145,57 @@ pub fn plan_view_with(
                                 w.start + d * ends.place_layer(w, u, s, band.core, band.ext) + n * s
                             }
                         };
-                        for &(a, b) in &pieces {
-                            layers.push(CutPiece {
-                                id: e.id,
-                                points: wall_band(w, &at, a, b, band.s0, band.s1),
-                                layer: Some(crate::scene::LayerPart::of(&band)),
-                            });
+                        let mut piece = |a: f64, b: f64, s0: f64, s1: f64| {
+                            if b > a + 1e-9 && s1 > s0 + 1e-9 {
+                                layers.push(CutPiece {
+                                    id: e.id,
+                                    points: wall_band(w, &at, a, b, s0, s1),
+                                    layer: Some(crate::scene::LayerPart::of(&band)),
+                                });
+                            }
+                        };
+                        for (&(a, b), [start, end]) in pieces.iter().zip(&jambs) {
+                            fn wraps(
+                                j: Option<&creabim_core::OpeningWrap>,
+                            ) -> Option<&creabim_core::OpeningWrap> {
+                                j.filter(|x| !x.is_empty())
+                            }
+                            let (start, end) = (wraps(*start), wraps(*end));
+                            if start.is_none() && end.is_none() {
+                                piece(a, b, band.s0, band.s1);
+                                continue;
+                            }
+                            // the layer itself, short of each opening by
+                            // the returns passing between them: a strip
+                            // for each stretch across it where that changes
+                            let mut ss = vec![band.s0, band.s1];
+                            for j in [start, end].into_iter().flatten() {
+                                ss.extend(j.stops().filter(|s| *s > band.s0 && *s < band.s1));
+                            }
+                            ss.sort_by(|x, y| x.partial_cmp(y).unwrap());
+                            ss.dedup_by(|x, y| (*x - *y).abs() < 1e-9);
+                            let mid = (a + b) / 2.0;
+                            for k in ss.windows(2) {
+                                let s = (k[0] + k[1]) / 2.0;
+                                let inset = |j: Option<&creabim_core::OpeningWrap>| {
+                                    j.map_or(0.0, |x| x.inset_at(s))
+                                };
+                                piece(
+                                    (a + inset(start)).min(mid),
+                                    (b - inset(end)).max(mid),
+                                    k[0],
+                                    k[1],
+                                );
+                            }
+                            // and where it wraps, its return down the jamb
+                            if let Some(r) = start.and_then(|j| j.return_of(band.index)) {
+                                let u = (a + r.inset).min(mid);
+                                piece(u, (u + r.thickness).min(mid), r.from, r.to);
+                            }
+                            if let Some(r) = end.and_then(|j| j.return_of(band.index)) {
+                                let u = (b - r.inset).max(mid);
+                                piece((u - r.thickness).max(mid), u, r.from, r.to);
+                            }
                         }
                     }
                     continue;
@@ -2696,6 +2758,7 @@ mod tests {
                 frame: Default::default(),
                 flip_hand: false,
                 flip_facing: false,
+                wrap: None,
             }),
         );
         let hole = duct.id;
