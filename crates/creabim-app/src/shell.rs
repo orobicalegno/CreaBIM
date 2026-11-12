@@ -829,6 +829,9 @@ impl CreaBimApp {
                 .hint("Every element as a solid with its BIM type and CreaBIM id; open it in FreeCAD, edit, save, and link it back."),
             Item::new("export.pdf", "Sheets as PDF").icon("file-text"),
             Item::new("export.svg", "This view or sheet as SVG").icon("file"),
+            Item::new("export.dxf", "This view or sheet as DXF")
+                .icon("file")
+                .hint("For CAD programs: a view full size in millimetres, a sheet in paper millimetres, with line weights as layers."),
             Item::new("export.xlsx", "Schedules to Excel (.xlsx)")
                 .icon("table-2")
                 .hint("A summary, then a sheet for each schedule, with numbers as numbers so the spreadsheet can sum them."),
@@ -1665,7 +1668,7 @@ impl CreaBimApp {
                 }
             }
             "export.glb" | "export.fcstd" | "export.ifcx" | "export.ifc4" | "export.pdf"
-            | "export.svg" | "export.xlsx" => self.export(head),
+            | "export.svg" | "export.dxf" | "export.xlsx" => self.export(head),
             "export.folder" => self.open_export_folder(),
             "footing.foundation" => self.show_foundation_plan(),
             "placement" => {
@@ -2222,6 +2225,41 @@ impl CreaBimApp {
                     if let Some(d) = self.drawing(view) {
                         let r = std::fs::write(&out, d.to_svg(scale));
                         self.report(r, format!("Exported {out} at 1:{scale:.0}"));
+                    }
+                }
+            }
+            "export.dxf" => {
+                if let Some(sheet) = self.active_view.filter(|id| self.is_sheet(*id)) {
+                    let number = sheets::sheet_of(self.doc.model(), sheet)
+                        .map(|s| s.number.clone())
+                        .unwrap_or_default();
+                    let Some(out) =
+                        self.export_to(with_extension(&self.path, &format!("{number}.dxf")))
+                    else {
+                        return;
+                    };
+                    if let Some(dxf) =
+                        sheets::sheet_dxf(self.doc.model(), sheet, &self.sheet_info())
+                    {
+                        let r = std::fs::write(&out, dxf);
+                        self.report(r, format!("Exported {out}"));
+                    }
+                } else if let Some(view) = self.active_view {
+                    let name = self
+                        .doc
+                        .model()
+                        .get(view)
+                        .map(|e| e.name.replace(' ', "-"))
+                        .unwrap_or_default();
+                    let scale = self.view(view).map_or(100.0, |v| v.scale);
+                    let Some(out) =
+                        self.export_to(with_extension(&self.path, &format!("{name}.dxf")))
+                    else {
+                        return;
+                    };
+                    if let Some(d) = self.drawing(view) {
+                        let r = std::fs::write(&out, d.to_dxf(scale));
+                        self.report(r, format!("Exported {out}, full size in millimetres"));
                     }
                 }
             }

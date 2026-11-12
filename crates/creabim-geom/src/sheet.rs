@@ -954,6 +954,15 @@ pub fn sheet_svg(model: &Model, sheet: ElementId, info: &SheetInfo) -> Option<St
     Some(svg.finish())
 }
 
+/// A sheet as DXF for CAD programs, in paper millimetres.
+pub fn sheet_dxf(model: &Model, sheet: ElementId, info: &SheetInfo) -> Option<String> {
+    sheet_of(model, sheet)?;
+    let views = placed_views(model, sheet, &mut |v| view_drawing(model, v));
+    let mut dxf = crate::dxf::DxfCanvas::new(1.0);
+    draw_sheet(&mut dxf, model, sheet, &views, info);
+    Some(dxf.finish())
+}
+
 /// All sheets as one PDF, a page per sheet in sheet-number order.
 pub fn sheets_pdf(model: &Model, info: &SheetInfo) -> Vec<u8> {
     let all: Vec<ElementId> = sheets(model).into_iter().map(|(id, _)| id).collect();

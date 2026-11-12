@@ -833,6 +833,21 @@ impl PlanView {
         crate::paper::draw(&mut svg, self, &map);
         svg.finish()
     }
+
+    /// The drawing as DXF for CAD programs, full size in millimetres:
+    /// what [`PlanView::to_svg`] draws at 1:`scale`, its line weights as
+    /// layers (see [`crate::dxf`]).
+    pub fn to_dxf(&self, scale: f64) -> String {
+        let (lo, _) = self.bounds().unwrap_or((DVec2::ZERO, DVec2::ONE));
+        let map = crate::paper::PaperMap {
+            model: lo,
+            paper: DVec2::ZERO,
+            scale,
+        };
+        let mut dxf = crate::dxf::DxfCanvas::new(scale);
+        crate::paper::draw(&mut dxf, self, &map);
+        dxf.finish()
+    }
 }
 
 /// Generate the plan of one level, cut `cut_height` metres above it.
