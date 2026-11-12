@@ -1933,6 +1933,12 @@ impl CreaBimApp {
                     self.plan.details.path.clear();
                 }
             }
+            "detail.edit" => {
+                if let Some(e) = index.and_then(|i| crate::detailtool::DraftEdit::ALL.get(i)) {
+                    self.plan.details.pick_edit(*e);
+                    self.plan.status = Some(e.hint().into());
+                }
+            }
             "detail.pen" => {
                 if let (Some(pen), creabim_core::DetailKind::Draft { pen: p, .. }) = (
                     index.and_then(|i| creabim_core::LinePen::ALL.get(i)),
@@ -2614,6 +2620,15 @@ impl CreaBimApp {
             }
             "view.number" => self.set_view_number(v),
             "detail.width" => self.plan.details.width = v.clamp(0.0, 5.0),
+            "detail.radius" => self.plan.details.radius = v.clamp(0.0, 100.0),
+            "detail.chamfer" => self.plan.details.chamfer = v.clamp(0.0, 100.0),
+            "detail.offset" => self.plan.details.offset = v.clamp(0.0, 1000.0),
+            "detail.across" => self.plan.details.across = v.round().clamp(1.0, 200.0) as u32,
+            "detail.up" => self.plan.details.up = v.round().clamp(1.0, 200.0) as u32,
+            "detail.stepx" => self.plan.details.step.x = v.clamp(-1000.0, 1000.0),
+            "detail.stepy" => self.plan.details.step.y = v.clamp(-1000.0, 1000.0),
+            "detail.count" => self.plan.details.count = v.round().clamp(1.0, 360.0) as u32,
+            "detail.angle" => self.plan.details.angle = v.clamp(1.0, 360.0),
             "detail.sides" => {
                 if let creabim_core::DetailKind::Draft {
                     shape: creabim_core::DraftShape::Polygon { sides },
@@ -2803,7 +2818,7 @@ impl CreaBimApp {
                         opt(
                             format!("detail.kind:{i}"),
                             k.label(),
-                            self.plan.details.kind.same(*k),
+                            self.plan.details.edit.is_none() && self.plan.details.kind.same(*k),
                             hint,
                         )
                     })
@@ -2817,7 +2832,125 @@ impl CreaBimApp {
                 DetailKind::COMPONENTS..DetailKind::ALL.len(),
                 "Plain linework: what the next clicks draw",
             ));
-            if let Some((shape, pen)) = self.plan.details.kind.as_draft() {
+            // editing what is drawn, in place of drawing
+            let d = &self.plan.details;
+            options.push(seg(crate::detailtool::DraftEdit::ALL
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    opt(
+                        format!("detail.edit:{i}"),
+                        e.label(),
+                        d.edit == Some(*e),
+                        e.hint(),
+                    )
+                })
+                .collect()));
+            if let Some(edit) = d.edit {
+                use crate::detailtool::DraftEdit as E;
+                let mut number = |key: &str,
+                                  label: &str,
+                                  value: f64,
+                                  unit: &str,
+                                  step: f64,
+                                  max: f64,
+                                  hint: &str| {
+                    options.push(json!({
+                        "kind": "number", "key": key, "label": label, "value": value,
+                        "unit": unit, "step": step, "min": 0.0, "max": max, "hint": hint,
+                    }));
+                };
+                match edit {
+                    E::Fillet => number(
+                        "detail.radius",
+                        "Radius",
+                        d.radius,
+                        "m",
+                        0.005,
+                        100.0,
+                        "The radius of the rounded corner; 0 makes a sharp corner",
+                    ),
+                    E::Chamfer => number(
+                        "detail.chamfer",
+                        "Distance",
+                        d.chamfer,
+                        "m",
+                        0.005,
+                        100.0,
+                        "How far back from the corner each line is cut",
+                    ),
+                    E::Offset => number(
+                        "detail.offset",
+                        "Distance",
+                        d.offset,
+                        "m",
+                        0.005,
+                        1000.0,
+                        "How far to the side the copy is made",
+                    ),
+                    E::Array => {
+                        number(
+                            "detail.across",
+                            "Columns",
+                            d.across as f64,
+                            "",
+                            1.0,
+                            200.0,
+                            "How many across",
+                        );
+                        number(
+                            "detail.stepx",
+                            "Step",
+                            d.step.x,
+                            "m",
+                            0.05,
+                            1000.0,
+                            "From one column to the next",
+                        );
+                        number(
+                            "detail.up",
+                            "Rows",
+                            d.up as f64,
+                            "",
+                            1.0,
+                            200.0,
+                            "How many up",
+                        );
+                        number(
+                            "detail.stepy",
+                            "Step",
+                            d.step.y,
+                            "m",
+                            0.05,
+                            1000.0,
+                            "From one row to the next",
+                        );
+                    }
+                    E::Polar => {
+                        number(
+                            "detail.count",
+                            "Count",
+                            d.count as f64,
+                            "",
+                            1.0,
+                            360.0,
+                            "How many round the centre, the first included",
+                        );
+                        number(
+                            "detail.angle",
+                            "Angle",
+                            d.angle,
+                            "°",
+                            5.0,
+                            360.0,
+                            "The angle they are spread over; 360 goes all the way round",
+                        );
+                    }
+                    E::Trim | E::Extend => {}
+                }
+            }
+            let drawing = self.plan.details.edit.is_none();
+            if let (true, Some((shape, pen))) = (drawing, self.plan.details.kind.as_draft()) {
                 options.push(seg(creabim_core::LinePen::ALL
                     .iter()
                     .enumerate()
@@ -2838,7 +2971,7 @@ impl CreaBimApp {
                     }));
                 }
             }
-            if self.plan.details.kind.has_width() {
+            if drawing && self.plan.details.kind.has_width() {
                 options.push(json!({
                     "kind": "number", "key": "detail.width", "label": "Width",
                     "value": self.plan.details.width, "unit": "m", "step": 0.005, "min": 0.0, "max": 5.0,

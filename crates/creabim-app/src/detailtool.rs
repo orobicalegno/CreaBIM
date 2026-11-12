@@ -31,6 +31,71 @@ pub struct DetailSettings {
     pub view: Option<ElementId>,
     /// Scale of the next detail view, 1:`callout_scale`.
     pub callout_scale: f64,
+    /// Editing linework instead of drawing: what the next clicks do.
+    pub edit: Option<DraftEdit>,
+    /// The piece picked first, and where, by an edit that takes two clicks.
+    pub picked: Option<(ElementId, DVec2)>,
+    /// A fillet's radius, a chamfer's distance back from the corner and
+    /// an offset's distance.
+    pub radius: f64,
+    pub chamfer: f64,
+    pub offset: f64,
+    /// An array's columns and rows, and the step between them.
+    pub across: u32,
+    pub up: u32,
+    pub step: DVec2,
+    /// A polar array's count and the angle it is spread over, degrees.
+    pub count: u32,
+    pub angle: f64,
+}
+
+/// An edit of plain linework against other linework, CAD-style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DraftEdit {
+    Trim,
+    Extend,
+    Fillet,
+    Chamfer,
+    Offset,
+    Array,
+    Polar,
+}
+
+impl DraftEdit {
+    pub const ALL: [DraftEdit; 7] = [
+        DraftEdit::Trim,
+        DraftEdit::Extend,
+        DraftEdit::Fillet,
+        DraftEdit::Chamfer,
+        DraftEdit::Offset,
+        DraftEdit::Array,
+        DraftEdit::Polar,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DraftEdit::Trim => "Trim",
+            DraftEdit::Extend => "Extend",
+            DraftEdit::Fillet => "Fillet",
+            DraftEdit::Chamfer => "Chamfer",
+            DraftEdit::Offset => "Offset",
+            DraftEdit::Array => "Array",
+            DraftEdit::Polar => "Polar array",
+        }
+    }
+
+    /// What to click, for the status bar.
+    pub fn hint(self) -> &'static str {
+        match self {
+            DraftEdit::Trim => "Trim: click the stretch of a line to take away, back to the lines that cross it.",
+            DraftEdit::Extend => "Extend: click a line near the end to run on to the next line it meets.",
+            DraftEdit::Fillet => "Fillet: click the two lines of a corner; it is rounded to the radius in the top bar (0 makes it sharp).",
+            DraftEdit::Chamfer => "Chamfer: click the two lines of a corner; it is cut off the distance in the top bar back along each.",
+            DraftEdit::Offset => "Offset: click a line, then the side to copy it to, at the distance in the top bar.",
+            DraftEdit::Array => "Array: click a line to repeat it in the columns and rows in the top bar.",
+            DraftEdit::Polar => "Polar array: click a line, then the centre to repeat it round.",
+        }
+    }
 }
 
 impl Default for DetailSettings {
@@ -43,6 +108,16 @@ impl Default for DetailSettings {
             swap: false,
             view: None,
             callout_scale: 10.0,
+            edit: None,
+            picked: None,
+            radius: 0.05,
+            chamfer: 0.05,
+            offset: 0.1,
+            across: 3,
+            up: 1,
+            step: DVec2::new(1.0, 1.0),
+            count: 6,
+            angle: 360.0,
         }
     }
 }
@@ -79,6 +154,16 @@ impl DetailSettings {
     pub fn pick(&mut self, kind: DetailKind) {
         self.kind = kind;
         self.width = kind.default_width();
+        self.edit = None;
+        self.picked = None;
+    }
+
+    /// Pick an edit of linework: the next clicks edit instead of drawing.
+    pub fn pick_edit(&mut self, edit: DraftEdit) {
+        self.edit = Some(edit);
+        self.picked = None;
+        self.path.clear();
+        self.off.clear();
     }
 }
 
@@ -151,6 +236,9 @@ pub fn detail_click(
     state: &mut PlanState,
     selection: &mut Selection,
 ) -> Result<(), ModelError> {
+    if let Some(edit) = state.details.edit {
+        return edit_click(doc, view, edit, p, raw, state, selection);
+    }
     let d = &mut state.details;
     if d.view != Some(view) {
         d.path.clear();
@@ -181,6 +269,211 @@ pub fn detail_click(
     }
     state.status = Some(path_hint(d.kind, d.path.len()));
     Ok(())
+}
+
+/// The plain linework drawn in `view`.
+fn linework(model: &Model, view: ElementId) -> Vec<(Element, DetailItem)> {
+    model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            ElementKind::Detail(d) if d.view == view && d.kind.as_draft().is_some() => {
+                Some((e.clone(), d.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A click while editing linework in `view`: `raw` is where the pointer
+/// is, to pick a line by, and `p` that point snapped, for a side or a
+/// centre.
+fn edit_click(
+    doc: &mut Document,
+    view: ElementId,
+    edit: DraftEdit,
+    p: DVec2,
+    raw: DVec2,
+    state: &mut PlanState,
+    selection: &mut Selection,
+) -> Result<(), ModelError> {
+    use creabim_core::draftedit as de;
+    let lines = linework(doc.model(), view);
+    // within 3 mm on paper of a line picks it
+    let reach = view_scale(doc.model(), view) * 0.003;
+    let under = |at: DVec2| -> Option<usize> {
+        lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (_, d))| Some((i, de::hit(d, at)?.distance)))
+            .filter(|(_, dist)| *dist <= reach)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
+    let others = |i: usize| -> Vec<&DetailItem> {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| *k != i)
+            .map(|(_, l)| &l.1)
+            .collect()
+    };
+    let changed = |e: &Element, d: DetailItem| {
+        let mut after = e.clone();
+        after.kind = ElementKind::Detail(d);
+        after
+    };
+    let fresh = |d: DetailItem| Element::new(d.kind.label(), ElementKind::Detail(d));
+    let d = &mut state.details;
+    d.view = Some(view);
+    // an edit of two clicks: the piece picked first, if it is still there
+    let first = d
+        .picked
+        .take()
+        .and_then(|(id, at)| Some((lines.iter().position(|l| l.0.id == id)?, at)));
+    let nothing = |state: &mut PlanState| {
+        state.status = Some(format!(
+            "{} Nothing drawn is under the pointer.",
+            edit.hint()
+        ));
+        Ok(())
+    };
+    match (edit, first) {
+        (DraftEdit::Trim, _) => {
+            let Some(i) = under(raw) else {
+                return nothing(state);
+            };
+            let Some(mut left) = de::trim(&lines[i].1, &others(i), raw) else {
+                state.status = Some(
+                    "Trim: nothing crosses that line to trim it back to. Delete removes it whole."
+                        .into(),
+                );
+                return Ok(());
+            };
+            let mut tx = Transaction::new("Trim line");
+            let kept = left.remove(0);
+            tx = tx.replace(lines[i].0.clone(), changed(&lines[i].0, kept));
+            for d in left {
+                tx = tx.insert(fresh(d));
+            }
+            state.status = Some(
+                "Trimmed. Click another stretch, or pick something else in the top bar.".into(),
+            );
+            doc.commit(tx)
+        }
+        (DraftEdit::Extend, _) => {
+            let Some(i) = under(raw) else {
+                return nothing(state);
+            };
+            let Some(longer) = de::extend(&lines[i].1, &others(i), raw) else {
+                state.status = Some(
+                    "Extend: that end meets no line if it runs straight on (only open lines extend).".into(),
+                );
+                return Ok(());
+            };
+            state.status = Some("Extended. Click another end.".into());
+            doc.commit(
+                Transaction::new("Extend line")
+                    .replace(lines[i].0.clone(), changed(&lines[i].0, longer)),
+            )
+        }
+        (DraftEdit::Fillet | DraftEdit::Chamfer, None) => {
+            let Some(i) = under(raw) else {
+                return nothing(state);
+            };
+            state.details.picked = Some((lines[i].0.id, raw));
+            selection.only(lines[i].0.id);
+            state.status = Some(format!(
+                "{}: click the other line of the corner.",
+                edit.label()
+            ));
+            Ok(())
+        }
+        (DraftEdit::Fillet | DraftEdit::Chamfer, Some((a, at))) => {
+            let Some(b) = under(raw) else {
+                return nothing(state);
+            };
+            let how = if edit == DraftEdit::Fillet {
+                de::Join::Fillet(state.details.radius)
+            } else {
+                de::Join::Chamfer(state.details.chamfer)
+            };
+            match de::join(&lines[a].1, at, &lines[b].1, raw, a == b, how) {
+                Err(why) => {
+                    state.status = Some(format!("{}: {why}", edit.label()));
+                    Ok(())
+                }
+                Ok(j) => {
+                    let mut tx = Transaction::new(format!("{} corner", edit.label()))
+                        .replace(lines[a].0.clone(), changed(&lines[a].0, j.a));
+                    if let Some(nb) = j.b {
+                        tx = tx.replace(lines[b].0.clone(), changed(&lines[b].0, nb));
+                    }
+                    if let Some(link) = j.between {
+                        tx = tx.insert(fresh(link));
+                    }
+                    state.status = Some(format!(
+                        "{} done. Click the next corner's first line.",
+                        edit.label()
+                    ));
+                    doc.commit(tx)
+                }
+            }
+        }
+        (DraftEdit::Offset | DraftEdit::Polar, None) => {
+            let Some(i) = under(raw) else {
+                return nothing(state);
+            };
+            state.details.picked = Some((lines[i].0.id, raw));
+            selection.only(lines[i].0.id);
+            state.status = Some(if edit == DraftEdit::Offset {
+                "Offset: click the side to copy it to.".into()
+            } else {
+                "Polar array: click the centre to repeat it round.".into()
+            });
+            Ok(())
+        }
+        (DraftEdit::Offset, Some((i, _))) => {
+            let Some(copy) = de::offset(&lines[i].1, state.details.offset, p) else {
+                state.status = Some("Offset: there is no room for a copy that far inside.".into());
+                return Ok(());
+            };
+            let e = fresh(copy);
+            // the copy is the next to offset, as CAD programs do
+            state.details.picked = None;
+            selection.only(e.id);
+            state.status = Some("Offset. Click another line to offset.".into());
+            doc.commit(Transaction::new("Offset line").insert(e))
+        }
+        (DraftEdit::Polar, Some((i, _))) => {
+            let copies = de::array_polar(
+                &lines[i].1,
+                p,
+                state.details.count,
+                state.details.angle.to_radians(),
+            );
+            let n = copies.len();
+            let mut tx = Transaction::new("Polar array");
+            for d in copies.into_iter().skip(1) {
+                tx = tx.insert(fresh(d));
+            }
+            state.status = Some(format!("{n} round the centre, the first where it was."));
+            doc.commit(tx)
+        }
+        (DraftEdit::Array, _) => {
+            let Some(i) = under(raw) else {
+                return nothing(state);
+            };
+            let d = &state.details;
+            let copies = de::array_grid(&lines[i].1, d.across, d.up, d.step);
+            let n = copies.len();
+            let mut tx = Transaction::new("Array");
+            for d in copies.into_iter().skip(1) {
+                tx = tx.insert(fresh(d));
+            }
+            state.status = Some(format!("{n} in rows and columns, the first where it was."));
+            doc.commit(tx)
+        }
+    }
 }
 
 /// What the status bar says while a path is drawn: how many points it has
@@ -614,6 +907,73 @@ mod tests {
         );
         assert_eq!(k.points.len(), 3);
         assert!((k.length() - (2.0 + 2f64.sqrt())).abs() < 1e-9);
+    }
+
+    #[test]
+    fn linework_is_trimmed_filleted_offset_and_arrayed_by_clicks() {
+        use creabim_core::DraftShape as S;
+        let (mut doc, section) = doc_with_section();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        let mut sel = Selection::default();
+        let p = DVec2::new;
+        let lines = |doc: &Document| -> Vec<DetailItem> {
+            linework(doc.model(), section)
+                .into_iter()
+                .map(|l| l.1)
+                .collect()
+        };
+        // a line along the floor, and two uprights crossing it
+        for pts in [
+            [p(0.0, 0.0), p(4.0, 0.0)],
+            [p(1.0, -0.5), p(1.0, 2.0)],
+            [p(3.0, -0.5), p(3.0, 2.0)],
+        ] {
+            state.details.pick(DetailKind::draft(S::Line));
+            for q in [pts[0], pts[1], pts[1]] {
+                detail_click(&mut doc, section, q, q, &mut state, &mut sel).unwrap();
+            }
+        }
+        assert_eq!(lines(&doc).len(), 3);
+        // trim the floor line between the uprights: two pieces of it are left
+        state.details.pick_edit(DraftEdit::Trim);
+        let at = p(2.0, 0.0);
+        detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
+        assert_eq!(lines(&doc).len(), 4);
+        // a click on nothing changes nothing and says so
+        let off = p(2.0, 1.0);
+        detail_click(&mut doc, section, off, off, &mut state, &mut sel).unwrap();
+        assert_eq!(lines(&doc).len(), 4);
+        assert!(state.status.as_deref().unwrap().contains("Nothing drawn"));
+        // undo puts the line back whole
+        assert!(doc.undo());
+        assert_eq!(lines(&doc).len(), 3);
+        // fillet the floor line's start with the first upright's foot:
+        // two clicks, and an arc joins them
+        state.details.pick_edit(DraftEdit::Fillet);
+        state.details.radius = 0.2;
+        for at in [p(0.5, 0.0), p(1.0, 1.0)] {
+            detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
+        }
+        let now = lines(&doc);
+        assert_eq!(now.len(), 4, "{:?}", state.status);
+        assert!(now.iter().any(|d| d.kind.as_draft().unwrap().0 == S::Arc));
+        // offset the second upright 0.5 to its right
+        state.details.pick_edit(DraftEdit::Offset);
+        state.details.offset = 0.5;
+        for at in [p(3.0, 1.0), p(3.8, 1.0)] {
+            detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
+        }
+        assert!(lines(&doc)
+            .iter()
+            .any(|d| d.points.iter().all(|q| (q.x - 3.5).abs() < 1e-9)));
+        // an array of it: 3 across by 2 up adds five
+        let before = lines(&doc).len();
+        state.details.pick_edit(DraftEdit::Array);
+        (state.details.across, state.details.up) = (3, 2);
+        let at = p(3.5, 1.0);
+        detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
+        assert_eq!(lines(&doc).len(), before + 5);
     }
 
     #[test]

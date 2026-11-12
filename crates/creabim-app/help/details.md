@@ -51,6 +51,20 @@ Pick the **pen** beside the shapes: heavy, medium, light, fine or dashed. These 
 
 A rectangle or a polygon is kept as a closed line once drawn, so it can turn and be reshaped corner by corner. Linework moves, rotates, mirrors, copies and deletes like a detail component, and like one it shows only in the view it was drawn in.
 
+## Editing linework
+
+The third group in the tool options edits what is drawn, as a CAD program does. Pick one, then click:
+
+- **Trim**: click the stretch of a line to take away. It goes back to the lines that cross it on either side. A circle trimmed leaves an arc; a closed line trimmed opens.
+- **Extend**: click a line near one end. That end runs straight on to the next line it meets.
+- **Fillet**: click the two lines of a corner. They are cut back or run on to meet, and rounded with an arc of the *Radius* in the tool options; radius 0 makes a sharp corner. Two sides of one rectangle or closed line work too.
+- **Chamfer**: the same, with the corner cut off the *Distance* back along each line.
+- **Offset**: click a line, then the side to copy it to. The copy is the *Distance* away: beside a line, inside or outside a closed shape, a circle or an arc.
+- **Array**: click a line to repeat it in *Columns* and *Rows*, a *Step* apart.
+- **Polar array**: click a line, then a centre. It is repeated *Count* times over the *Angle* round that centre.
+
+Each is one undo step. Trim, Extend, Fillet and Chamfer only see the linework of the view; they don't cut the model or detail components.
+
 ## The details in the starter house
 
 The [starter house](starter-house) has a sheet **A501 Details**. It shows section C-C through the south wall at 1:25, with three callouts at 1:10: the wall base, the window head and sill, and the eaves.

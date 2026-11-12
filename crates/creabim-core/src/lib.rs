@@ -15,6 +15,7 @@ pub mod curtain;
 pub mod detail;
 pub mod divide;
 pub mod document;
+pub mod draftedit;
 pub mod editmesh;
 pub mod element;
 pub mod footing;
