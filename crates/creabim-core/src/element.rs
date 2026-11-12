@@ -115,6 +115,8 @@ impl Element {
             ElementKind::Units(_)
             | ElementKind::Project(_)
             | ElementKind::MarkRules(_)
+            | ElementKind::DraftLayers(_)
+            | ElementKind::Symbol(_)
             | ElementKind::StylePack(_) => vec![],
             // types are soft too: an element whose type is gone keeps its values
             ElementKind::ElementType(_) => vec![],
@@ -138,7 +140,11 @@ impl Element {
             ElementKind::Ceiling(c) => vec![c.level],
             ElementKind::Cut(c) => vec![c.target, c.cutter],
             ElementKind::Join(j) => vec![j.a, j.b],
-            ElementKind::Detail(d) => vec![d.view],
+            // a placed symbol goes with the symbol it shows
+            ElementKind::Detail(d) => match d.kind {
+                crate::DetailKind::Symbol { def } => vec![d.view, def],
+                _ => vec![d.view],
+            },
             ElementKind::Guide(g) => g.level.into_iter().collect(),
             ElementKind::Railing(r) => std::iter::once(r.level)
                 .chain(r.stair.map(|s| s.stair))
@@ -180,6 +186,8 @@ impl Element {
             ElementKind::Reference(_) => "Reference",
             ElementKind::PaperMark(_) => "IfcAnnotation",
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
+            ElementKind::Symbol(_) => "Symbol",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::Sketch(_) => "Sketch",
@@ -368,6 +376,8 @@ impl Element {
                 }
             }
             ElementKind::MarkRules(r) => r.validate(),
+            ElementKind::DraftLayers(l) => l.validate(),
+            ElementKind::Symbol(s) => s.validate(),
             ElementKind::StylePack(p) => p.validate(),
             ElementKind::CropBox(c) => c.validate(),
             ElementKind::Assembly(a) => a.validate(),
@@ -484,6 +494,11 @@ pub enum ElementKind {
     Join(crate::joins::JoinRule),
     /// A detail component drawn in one view: a flashing, a membrane...
     Detail(crate::detail::DetailItem),
+    /// The project's drafting layers, for plain linework: at most one per
+    /// project, read through [`crate::detail::layers`].
+    DraftLayers(crate::detail::DraftLayers),
+    /// A symbol: linework drawn once and placed many times.
+    Symbol(crate::detail::DraftSymbol),
 }
 
 impl ElementKind {
@@ -527,6 +542,8 @@ impl ElementKind {
                 crate::papermark::PaperMarkKind::Vector { .. } => "Vector picture",
             },
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
+            ElementKind::Symbol(_) => "Symbol",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::ElementType(_) => "ElementType",
@@ -1485,6 +1502,10 @@ pub struct Opening {
     /// window with its outside face (and its sill) to the wall's interior.
     #[serde(default, skip_serializing_if = "is_false")]
     pub flip_facing: bool,
+    /// How the host wall's layers wrap into its reveals, where that isn't
+    /// as the wall's assembly says ([`crate::assembly::WrapSides`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<crate::assembly::WrapSides>,
 }
 
 impl Opening {

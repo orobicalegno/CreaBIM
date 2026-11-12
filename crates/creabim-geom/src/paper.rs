@@ -157,7 +157,18 @@ pub fn pen_stroke(pen: Pen) -> Stroke {
 /// medium, symbols, furniture and hatching light, hidden lines light and
 /// dashed.
 pub fn pen_stroke_with(pen: Pen, w: &LineWeights) -> Stroke {
+    use creabim_core::LinePen;
     match pen {
+        // linework drawn by hand: as the pen of its weight, in black
+        Pen::Draft { weight, .. } => Stroke::solid(
+            match weight {
+                LinePen::Heavy => w.cut,
+                LinePen::Medium => w.projection,
+                LinePen::Light | LinePen::Dashed => w.symbol,
+                LinePen::Fine => w.fine,
+            },
+            0.0,
+        ),
         Pen::Cut => Stroke {
             width: w.cut,
             ..CUT

@@ -1178,10 +1178,7 @@ fn detail_grips(model: &Model, d: &creabim_core::DetailItem) -> Vec<Handle> {
     };
     let across = d.across();
     let dir = |v: DVec2| (frame.to_model(v) - frame.to_model(DVec2::ZERO)).normalize_or_zero();
-    let widened = !matches!(
-        d.kind,
-        DetailKind::Membrane | DetailKind::Region { .. } | DetailKind::BreakLine
-    );
+    let widened = d.kind.has_width();
     if widened {
         let at = frame.to_model((*a + *b) / 2.0 + across * d.width / 2.0);
         out.push(Handle {

@@ -811,6 +811,23 @@ pub fn sheet_notes(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
         .collect()
 }
 
+/// The linework and detail components drawn on the sheet itself, in
+/// paper millimetres.
+pub fn sheet_linework(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
+    let drafting = creabim_core::Drafting::of(model);
+    let look = creabim_core::styles::active_pack(model).membranes;
+    model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            ElementKind::Detail(d) if d.view == sheet => {
+                Some(crate::detail::detail_items(e.id, d, 1.0, look, &drafting))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 /// The dimensions, tags, notes and detail components placed in a view,
 /// and the boxes of the detail views called out from it, as drawing items.
 pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanItem> {
@@ -818,6 +835,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
         return vec![];
     };
     let mut out = Vec::new();
+    let drafting = creabim_core::Drafting::of(model);
     for e in model.iter() {
         match &e.kind {
             ElementKind::Detail(d) if d.view == view_id => {
@@ -827,6 +845,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     d,
                     view.scale / 1000.0,
                     look,
+                    &drafting,
                 ));
             }
             ElementKind::View(v) => {

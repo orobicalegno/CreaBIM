@@ -292,6 +292,8 @@ pub fn element_page(kind: &ElementKind) -> &'static str {
         ElementKind::Ceiling(_) => "ceilings",
         ElementKind::Join(_) => "joins",
         ElementKind::Detail(_) => "details#detail-components",
+        ElementKind::DraftLayers(_) => "details#colours-line-types-and-layers",
+        ElementKind::Symbol(_) => "details#symbols",
         ElementKind::Dimension(_) => "dimensions",
         ElementKind::Tag(_) => "tags",
         ElementKind::Note(_) => "notes",

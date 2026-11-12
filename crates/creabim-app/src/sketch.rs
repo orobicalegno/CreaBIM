@@ -405,6 +405,7 @@ impl SketchDraft {
             frame: Default::default(),
             flip_hand: false,
             flip_facing: false,
+            wrap: None,
         };
         let e = Element::new("Opening", ElementKind::Opening(o));
         let id = e.id;

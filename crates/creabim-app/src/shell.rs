@@ -332,6 +332,34 @@ fn command_icon(c: Command) -> &'static str {
 pub(super) static MODS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 impl CreaBimApp {
+    /// Make a symbol of the plain linework selected, and select the one
+    /// placed where it was.
+    pub(super) fn make_symbol(&mut self) {
+        let model = self.doc.model();
+        let name = (1..)
+            .map(|n| format!("Symbol {n}"))
+            .find(|n| !model.iter().any(|e| &e.name == n))
+            .expect("unbounded");
+        let Some((tx, placed)) =
+            creabim_core::detail::make_symbol(model, &self.selection.all(), &name)
+        else {
+            self.plan.status = Some(
+                "Make symbol: select the linework to make it of first (lines, circles, arcs... in one view)."
+                    .into(),
+            );
+            return;
+        };
+        match self.doc.commit(tx) {
+            Ok(()) => {
+                self.selection.only(placed);
+                self.plan.status = Some(format!(
+                    "{name} made. Rename it in Properties; place it again with the Detail tool."
+                ));
+            }
+            Err(e) => self.plan.status = Some(e.to_string()),
+        }
+    }
+
     fn cmd_item(&self, c: Command) -> Item {
         let enabled = match c {
             Command::Undo => self.doc.can_undo(),
@@ -829,6 +857,9 @@ impl CreaBimApp {
                 .hint("Every element as a solid with its BIM type and CreaBIM id; open it in FreeCAD, edit, save, and link it back."),
             Item::new("export.pdf", "Sheets as PDF").icon("file-text"),
             Item::new("export.svg", "This view or sheet as SVG").icon("file"),
+            Item::new("export.dxf", "This view or sheet as DXF")
+                .icon("file")
+                .hint("For CAD programs: a view full size in millimetres, a sheet in paper millimetres, with line weights as layers."),
             Item::new("export.xlsx", "Schedules to Excel (.xlsx)")
                 .icon("table-2")
                 .hint("A summary, then a sheet for each schedule, with numbers as numbers so the spreadsheet can sum them."),
@@ -1665,7 +1696,7 @@ impl CreaBimApp {
                 }
             }
             "export.glb" | "export.fcstd" | "export.ifcx" | "export.ifc4" | "export.pdf"
-            | "export.svg" | "export.xlsx" => self.export(head),
+            | "export.svg" | "export.dxf" | "export.xlsx" => self.export(head),
             "export.folder" => self.open_export_folder(),
             "footing.foundation" => self.show_foundation_plan(),
             "placement" => {
@@ -1919,8 +1950,51 @@ impl CreaBimApp {
             "note.leader" => self.plan.anno.leader = !self.plan.anno.leader,
             "detail.kind" => {
                 if let Some(k) = index.and_then(|i| creabim_core::DetailKind::ALL.get(i)) {
+                    // linework keeps the pen it was last drawn in
+                    let pen = self.plan.details.kind.as_draft().map(|d| d.1);
                     self.plan.details.pick(*k);
+                    if let (Some(pen), creabim_core::DetailKind::Draft { pen: p, .. }) =
+                        (pen, &mut self.plan.details.kind)
+                    {
+                        *p = pen;
+                    }
                     self.plan.details.path.clear();
+                }
+            }
+            "detail.symbol" => {
+                let def = index
+                    .and_then(|i| creabim_core::detail::symbols(self.doc.model()).get(i).map(|s| s.0));
+                if let Some(def) = def {
+                    self.plan.details.pick(creabim_core::DetailKind::Symbol { def });
+                    self.plan.details.path.clear();
+                }
+            }
+            "detail.makesymbol" => self.make_symbol(),
+            "detail.layer" => {
+                let table = creabim_core::detail::layers(self.doc.model());
+                self.plan.details.layer = index
+                    .and_then(|i| i.checked_sub(1))
+                    .and_then(|i| table.layers.get(i))
+                    .map(|l| l.name.clone());
+            }
+            "detail.linetype" => {
+                self.plan.details.linetype = index
+                    .and_then(|i| i.checked_sub(1))
+                    .and_then(|i| creabim_core::LineType::ALL.get(i))
+                    .copied();
+            }
+            "detail.edit" => {
+                if let Some(e) = index.and_then(|i| crate::detailtool::DraftEdit::ALL.get(i)) {
+                    self.plan.details.pick_edit(*e);
+                    self.plan.status = Some(e.hint().into());
+                }
+            }
+            "detail.pen" => {
+                if let (Some(pen), creabim_core::DetailKind::Draft { pen: p, .. }) = (
+                    index.and_then(|i| creabim_core::LinePen::ALL.get(i)),
+                    &mut self.plan.details.kind,
+                ) {
+                    *p = *pen;
                 }
             }
             "callout.scale" => {
@@ -2207,6 +2281,41 @@ impl CreaBimApp {
                     if let Some(d) = self.drawing(view) {
                         let r = std::fs::write(&out, d.to_svg(scale));
                         self.report(r, format!("Exported {out} at 1:{scale:.0}"));
+                    }
+                }
+            }
+            "export.dxf" => {
+                if let Some(sheet) = self.active_view.filter(|id| self.is_sheet(*id)) {
+                    let number = sheets::sheet_of(self.doc.model(), sheet)
+                        .map(|s| s.number.clone())
+                        .unwrap_or_default();
+                    let Some(out) =
+                        self.export_to(with_extension(&self.path, &format!("{number}.dxf")))
+                    else {
+                        return;
+                    };
+                    if let Some(dxf) =
+                        sheets::sheet_dxf(self.doc.model(), sheet, &self.sheet_info())
+                    {
+                        let r = std::fs::write(&out, dxf);
+                        self.report(r, format!("Exported {out}"));
+                    }
+                } else if let Some(view) = self.active_view {
+                    let name = self
+                        .doc
+                        .model()
+                        .get(view)
+                        .map(|e| e.name.replace(' ', "-"))
+                        .unwrap_or_default();
+                    let scale = self.view(view).map_or(100.0, |v| v.scale);
+                    let Some(out) =
+                        self.export_to(with_extension(&self.path, &format!("{name}.dxf")))
+                    else {
+                        return;
+                    };
+                    if let Some(d) = self.drawing(view) {
+                        let r = std::fs::write(&out, d.to_dxf(scale));
+                        self.report(r, format!("Exported {out}, full size in millimetres"));
                     }
                 }
             }
@@ -2561,6 +2670,24 @@ impl CreaBimApp {
             }
             "view.number" => self.set_view_number(v),
             "detail.width" => self.plan.details.width = v.clamp(0.0, 5.0),
+            "detail.radius" => self.plan.details.radius = v.clamp(0.0, 100.0),
+            "detail.chamfer" => self.plan.details.chamfer = v.clamp(0.0, 100.0),
+            "detail.offset" => self.plan.details.offset = v.clamp(0.0, 1000.0),
+            "detail.across" => self.plan.details.across = v.round().clamp(1.0, 200.0) as u32,
+            "detail.up" => self.plan.details.up = v.round().clamp(1.0, 200.0) as u32,
+            "detail.stepx" => self.plan.details.step.x = v.clamp(-1000.0, 1000.0),
+            "detail.stepy" => self.plan.details.step.y = v.clamp(-1000.0, 1000.0),
+            "detail.count" => self.plan.details.count = v.round().clamp(1.0, 360.0) as u32,
+            "detail.angle" => self.plan.details.angle = v.clamp(1.0, 360.0),
+            "detail.sides" => {
+                if let creabim_core::DetailKind::Draft {
+                    shape: creabim_core::DraftShape::Polygon { sides },
+                    ..
+                } = &mut self.plan.details.kind
+                {
+                    *sides = v.round().clamp(3.0, 64.0) as u8;
+                }
+            }
             "dim.spacing" => {
                 self.plan.dim_step_size = v.clamp(0.5, 100.0);
                 self.plan.dim_step_mm = self.plan.dim_step_size;
@@ -2731,24 +2858,233 @@ impl CreaBimApp {
                 }),
         );
         if tool == Tool::Detail {
-            options.push(seg(creabim_core::DetailKind::ALL
+            use creabim_core::DetailKind;
+            // the components first, then plain linework: each a group
+            let kinds = |range: std::ops::Range<usize>, hint: &str| {
+                seg(DetailKind::ALL[range.clone()]
+                    .iter()
+                    .zip(range)
+                    .map(|(k, i)| {
+                        opt(
+                            format!("detail.kind:{i}"),
+                            k.label(),
+                            self.plan.details.edit.is_none() && self.plan.details.kind.same(*k),
+                            hint,
+                        )
+                    })
+                    .collect())
+            };
+            options.push(kinds(
+                0..DetailKind::COMPONENTS,
+                "A detail component: what the next clicks draw",
+            ));
+            options.push(kinds(
+                DetailKind::COMPONENTS..DetailKind::ALL.len(),
+                "Plain linework: what the next clicks draw",
+            ));
+            // the project's symbols, to place; and one made of the selection
+            let symbols = creabim_core::detail::symbols(self.doc.model());
+            if !symbols.is_empty() {
+                options.push(seg(symbols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (id, name))| {
+                        opt(
+                            format!("detail.symbol:{i}"),
+                            name,
+                            self.plan.details.edit.is_none()
+                                && self.plan.details.kind
+                                    == (DetailKind::Symbol { def: *id }),
+                            "Place this symbol: click where it goes, then a point to turn it towards",
+                        )
+                    })
+                    .collect()));
+            }
+            options.push(json!({
+                "kind": "button", "id": "detail.makesymbol", "icon": "copy", "label": "Make symbol",
+                "hint": "Make a symbol of the linework selected, to place again and again",
+            }));
+            // editing what is drawn, in place of drawing
+            let d = &self.plan.details;
+            options.push(seg(crate::detailtool::DraftEdit::ALL
                 .iter()
                 .enumerate()
-                .map(|(i, k)| {
+                .map(|(i, e)| {
                     opt(
-                        format!("detail.kind:{i}"),
-                        k.label(),
-                        self.plan.details.kind.same(*k),
-                        "What the next clicks draw",
+                        format!("detail.edit:{i}"),
+                        e.label(),
+                        d.edit == Some(*e),
+                        e.hint(),
                     )
                 })
                 .collect()));
-            if !matches!(
-                self.plan.details.kind,
-                creabim_core::DetailKind::Membrane
-                    | creabim_core::DetailKind::Region { .. }
-                    | creabim_core::DetailKind::BreakLine
-            ) {
+            if let Some(edit) = d.edit {
+                use crate::detailtool::DraftEdit as E;
+                let mut number = |key: &str,
+                                  label: &str,
+                                  value: f64,
+                                  unit: &str,
+                                  step: f64,
+                                  max: f64,
+                                  hint: &str| {
+                    options.push(json!({
+                        "kind": "number", "key": key, "label": label, "value": value,
+                        "unit": unit, "step": step, "min": 0.0, "max": max, "hint": hint,
+                    }));
+                };
+                match edit {
+                    E::Fillet => number(
+                        "detail.radius",
+                        "Radius",
+                        d.radius,
+                        "m",
+                        0.005,
+                        100.0,
+                        "The radius of the rounded corner; 0 makes a sharp corner",
+                    ),
+                    E::Chamfer => number(
+                        "detail.chamfer",
+                        "Distance",
+                        d.chamfer,
+                        "m",
+                        0.005,
+                        100.0,
+                        "How far back from the corner each line is cut",
+                    ),
+                    E::Offset => number(
+                        "detail.offset",
+                        "Distance",
+                        d.offset,
+                        "m",
+                        0.005,
+                        1000.0,
+                        "How far to the side the copy is made",
+                    ),
+                    E::Array => {
+                        number(
+                            "detail.across",
+                            "Columns",
+                            d.across as f64,
+                            "",
+                            1.0,
+                            200.0,
+                            "How many across",
+                        );
+                        number(
+                            "detail.stepx",
+                            "Step",
+                            d.step.x,
+                            "m",
+                            0.05,
+                            1000.0,
+                            "From one column to the next",
+                        );
+                        number(
+                            "detail.up",
+                            "Rows",
+                            d.up as f64,
+                            "",
+                            1.0,
+                            200.0,
+                            "How many up",
+                        );
+                        number(
+                            "detail.stepy",
+                            "Step",
+                            d.step.y,
+                            "m",
+                            0.05,
+                            1000.0,
+                            "From one row to the next",
+                        );
+                    }
+                    E::Polar => {
+                        number(
+                            "detail.count",
+                            "Count",
+                            d.count as f64,
+                            "",
+                            1.0,
+                            360.0,
+                            "How many round the centre, the first included",
+                        );
+                        number(
+                            "detail.angle",
+                            "Angle",
+                            d.angle,
+                            "°",
+                            5.0,
+                            360.0,
+                            "The angle they are spread over; 360 goes all the way round",
+                        );
+                    }
+                    E::Trim | E::Extend => {}
+                }
+            }
+            let drawing = self.plan.details.edit.is_none();
+            if let (true, Some((shape, pen))) = (drawing, self.plan.details.kind.as_draft()) {
+                options.push(seg(creabim_core::LinePen::ALL
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        opt(
+                            format!("detail.pen:{i}"),
+                            p.label(),
+                            pen == *p,
+                            "The pen the line is drawn in",
+                        )
+                    })
+                    .collect()));
+                // the layer and line type new linework takes
+                let table = creabim_core::detail::layers(self.doc.model());
+                if !table.layers.is_empty() {
+                    let current = self.plan.details.layer.clone();
+                    let mut names = vec![opt(
+                        "detail.layer:0".to_string(),
+                        "No layer",
+                        current.is_none(),
+                        "The drafting layer the line goes on",
+                    )];
+                    names.extend(table.layers.iter().enumerate().map(|(i, l)| {
+                        opt(
+                            format!("detail.layer:{}", i + 1),
+                            &l.name,
+                            current.as_deref() == Some(l.name.as_str()),
+                            "The drafting layer the line goes on",
+                        )
+                    }));
+                    options.push(seg(names));
+                }
+                let linetype = self.plan.details.linetype;
+                let mut types = vec![opt(
+                    "detail.linetype:0".to_string(),
+                    "By layer",
+                    linetype.is_none(),
+                    "The line type: its layer's, or its pen's",
+                )];
+                types.extend(
+                    creabim_core::LineType::ALL
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            opt(
+                                format!("detail.linetype:{}", i + 1),
+                                t.label(),
+                                linetype == Some(*t),
+                                "How the line is broken along its length",
+                            )
+                        }),
+                );
+                options.push(seg(types));
+                if let creabim_core::DraftShape::Polygon { sides } = shape {
+                    options.push(json!({
+                        "kind": "number", "key": "detail.sides", "label": "Sides",
+                        "value": sides, "step": 1.0, "min": 3.0, "max": 64.0,
+                        "hint": "How many sides the polygon has",
+                    }));
+                }
+            }
+            if drawing && self.plan.details.kind.has_width() {
                 options.push(json!({
                     "kind": "number", "key": "detail.width", "label": "Width",
                     "value": self.plan.details.width, "unit": "m", "step": 0.005, "min": 0.0, "max": 5.0,

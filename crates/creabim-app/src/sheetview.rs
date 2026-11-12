@@ -205,6 +205,7 @@ fn on_sheet(doc: &Document, sheet: ElementId, selection: &Selection) -> Vec<crea
         .filter(|e| match &e.kind {
             ElementKind::Note(n) => n.view == sheet,
             ElementKind::PaperMark(m) => m.sheet == sheet,
+            ElementKind::Detail(d) => d.view == sheet,
             _ => false,
         })
         .cloned()
@@ -388,6 +389,7 @@ fn sheet_move(
                         }
                     }
                     ElementKind::PaperMark(m) => m.at += by,
+                    ElementKind::Detail(d) => d.points.iter_mut().for_each(|p| *p += by),
                     _ => {}
                 }
             });
@@ -454,6 +456,7 @@ fn move_items(
                     }
                 }
                 ElementKind::PaperMark(m) => m.at += by,
+                ElementKind::Detail(d) => d.points.iter_mut().for_each(|p| *p += by),
                 _ => {}
             }
         });
@@ -476,6 +479,7 @@ fn outline_items(
     for e in model.iter().filter(|e| ids.contains(&e.id)) {
         let b = match &e.kind {
             ElementKind::PaperMark(m) if m.sheet == sheet => Some(m.bounds()),
+            ElementKind::Detail(d) if d.view == sheet => Some(crate::detailtool::bounds(model, d)),
             ElementKind::Note(n) if n.view == sheet => {
                 let items = creabim_geom::annotate::sheet_notes(model, sheet);
                 items.iter().find_map(|it| match it {
@@ -812,6 +816,9 @@ pub fn show(
             } else {
                 match model.get(id).map(|e| &e.kind) {
                     Some(ElementKind::PaperMark(m)) if m.sheet == sheet_id => Some(m.bounds()),
+                    Some(ElementKind::Detail(d)) if d.view == sheet_id => {
+                        Some(crate::detailtool::bounds(model, d))
+                    }
                     Some(ElementKind::Note(n)) if n.view == sheet_id => {
                         Some((n.at - DVec2::new(5.0, 5.0), n.at + DVec2::new(60.0, 10.0)))
                     }
@@ -1108,6 +1115,12 @@ pub fn show(
         .iter()
         .filter_map(|e| match &e.kind {
             ElementKind::PaperMark(m) if m.sheet == sheet_id => Some((e.id, m.bounds())),
+            // linework drawn on the paper is picked by its box, with a
+            // little room round a thin line
+            ElementKind::Detail(d) if d.view == sheet_id => {
+                let (lo, hi) = crate::detailtool::bounds(doc.model(), d);
+                Some((e.id, (lo - DVec2::splat(1.0), hi + DVec2::splat(1.0))))
+            }
             _ => None,
         })
         .collect();
@@ -1271,6 +1284,29 @@ pub fn show(
     }
     if response.drag_stopped() {
         state.crop_drag = None;
+    }
+
+    // linework drawn on the paper itself with the Detail tool
+    if state.active.is_none() && state.moving.is_none() && plan.tool == planview::Tool::Detail {
+        let pxf = planview::Xf {
+            rect,
+            center,
+            scale: zoom,
+        };
+        let mut failed = None;
+        if crate::detailtool::sheet_input(
+            ui,
+            doc,
+            sheet_id,
+            &painter,
+            &response,
+            plan,
+            selection,
+            &pxf,
+            &mut failed,
+        ) {
+            return failed.or(error);
+        }
     }
 
     // as everywhere (MU23): a right-click or Esc cancels what a tool has

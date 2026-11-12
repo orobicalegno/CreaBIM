@@ -15,7 +15,7 @@
 //! thicknesses keeps working, and an element whose assembly goes missing
 //! is simply a single-material element again.
 
-use crate::{Element, ElementId, ElementKind, Model, Transaction, Wall};
+use crate::{Element, ElementId, ElementKind, Model, Opening, OpeningKind, Transaction, Wall};
 use serde::{Deserialize, Serialize};
 
 /// What a layer does, as Revit and IFC name layer functions.
@@ -113,6 +113,11 @@ pub struct Layer {
     /// ([`crate::joins::layer_priority`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
+    /// Does it turn into the reveals of doors and windows, where its
+    /// assembly wraps on its side ([`Assembly::wrap_openings`])? `None`
+    /// takes its function's: finishes do, the rest stop square.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wraps: Option<bool>,
 }
 
 impl Layer {
@@ -122,7 +127,14 @@ impl Layer {
             material,
             thickness,
             priority: None,
+            wraps: None,
         }
+    }
+
+    /// Does it turn into the reveals of openings: its own choice, or its
+    /// function's (a finish does).
+    pub fn wraps_openings(&self) -> bool {
+        self.wraps.unwrap_or(self.function == LayerFunction::Finish)
     }
 
     /// Its join priority: its own, or its function's.
@@ -186,6 +198,202 @@ pub struct Assembly {
     pub layers: Vec<Layer>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// At doors and windows, the faces its wrapping layers turn in from
+    /// to line the reveals up to the frame (walls only).
+    #[serde(default, skip_serializing_if = "WrapSides::is_none")]
+    pub wrap_openings: WrapSides,
+}
+
+/// Which faces of a wall its layers turn in from at a door or window, to
+/// line the reveal: Revit's "wrapping at inserts".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WrapSides {
+    /// Every layer stops square at the opening.
+    #[default]
+    None,
+    Exterior,
+    Interior,
+    Both,
+}
+
+impl WrapSides {
+    pub const ALL: [WrapSides; 4] = [
+        WrapSides::None,
+        WrapSides::Exterior,
+        WrapSides::Interior,
+        WrapSides::Both,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WrapSides::None => "Do not wrap",
+            WrapSides::Exterior => "Exterior",
+            WrapSides::Interior => "Interior",
+            WrapSides::Both => "Both",
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        *self == WrapSides::None
+    }
+
+    pub fn exterior(self) -> bool {
+        matches!(self, WrapSides::Exterior | WrapSides::Both)
+    }
+
+    pub fn interior(self) -> bool {
+        matches!(self, WrapSides::Interior | WrapSides::Both)
+    }
+}
+
+/// A layer turned into an opening's reveal: a lining `thickness` thick
+/// round the opening, `inset` back from its edge (behind the layers that
+/// wrap outside it), running across the wall from `from` to `to`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WrapReturn {
+    pub layer: usize,
+    pub inset: f64,
+    pub thickness: f64,
+    pub from: f64,
+    pub to: f64,
+}
+
+/// One face's wrapping: from the face in to where the returns stop.
+#[derive(Clone, Debug, PartialEq)]
+struct WrapZone {
+    face: f64,
+    stop: f64,
+    /// Outermost first, each with the depth of its layer's inner face.
+    returns: Vec<(WrapReturn, f64)>,
+}
+
+/// How a wall's layers wrap at one opening ([`opening_wrap`]). Across
+/// the wall, positions are as [`Band`]'s: centreline 0, left positive.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OpeningWrap {
+    zones: Vec<WrapZone>,
+}
+
+impl OpeningWrap {
+    /// Nothing wraps: every layer stops square.
+    pub fn is_empty(&self) -> bool {
+        self.zones.is_empty()
+    }
+
+    /// How far back from the opening's edge the wall's own material stops
+    /// at `s` across the wall: the thickness of the returns passing there.
+    pub fn inset_at(&self, s: f64) -> f64 {
+        self.zones
+            .iter()
+            .filter(|z| (s - z.face) * (s - z.stop) < 0.0)
+            .map(|z| {
+                let depth = (s - z.face).abs();
+                z.returns
+                    .iter()
+                    .filter(|(_, d)| *d <= depth + 1e-9)
+                    .map(|(r, _)| r.thickness)
+                    .sum::<f64>()
+            })
+            .sum()
+    }
+
+    /// The return of layer `layer`, if it wraps here.
+    pub fn return_of(&self, layer: usize) -> Option<WrapReturn> {
+        self.zones
+            .iter()
+            .flat_map(|z| &z.returns)
+            .find(|(r, _)| r.layer == layer)
+            .map(|(r, _)| *r)
+    }
+
+    /// Every return, for drawing.
+    pub fn returns(&self) -> impl Iterator<Item = WrapReturn> + '_ {
+        self.zones.iter().flat_map(|z| &z.returns).map(|(r, _)| *r)
+    }
+
+    /// Where across the wall the returns stop: the frame's faces.
+    pub fn stops(&self) -> impl Iterator<Item = f64> + '_ {
+        self.zones.iter().map(|z| z.stop)
+    }
+
+    /// The parts of the reveal the returns line, across the wall, each
+    /// `(low, high)`.
+    pub fn lined(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.zones
+            .iter()
+            .map(|z| (z.face.min(z.stop), z.face.max(z.stop)))
+    }
+}
+
+/// How the layers of `wall` wrap at opening `o`, whose frame is
+/// `frame_depth` deep through the wall and centred in it: on each face
+/// the assembly (or the opening itself, [`Opening::wrap`]) wraps, the
+/// layers that wrap turn in and run to the frame, the outermost against
+/// the opening and each next one behind it; what they cover stops short
+/// by their thickness, so the opening keeps its size. A bare hole has no
+/// frame: its returns stop at the core.
+pub fn opening_wrap(a: &Assembly, wall: &Wall, o: &Opening, frame_depth: f64) -> OpeningWrap {
+    let sides = o.wrap.unwrap_or(a.wrap_openings);
+    if sides.is_none() || a.usage != AssemblyUse::Wall {
+        return OpeningWrap::default();
+    }
+    let bands = wall_bands(a, wall);
+    let t = wall.thickness / 2.0;
+    let hd = (frame_depth / 2.0).clamp(0.0, t);
+    let (core_lo, core_hi) = wall_core(a, wall);
+    // the exterior face is on the wall's right, or its left when flipped
+    let exterior = if wall.flip { t } else { -t };
+    let mut zones = Vec::new();
+    for (on, face) in [(sides.exterior(), exterior), (sides.interior(), -exterior)] {
+        if !on {
+            continue;
+        }
+        let stop = match (o.kind, face < 0.0) {
+            (OpeningKind::Hole, true) => core_lo,
+            (OpeningKind::Hole, false) => core_hi,
+            (_, true) => -hd,
+            (_, false) => hd,
+        };
+        let reach = (stop - face).abs();
+        // from the face inwards
+        let mut order: Vec<&Band> = bands.iter().collect();
+        order.sort_by(|x, y| {
+            let d = |b: &Band| ((b.s0 + b.s1) / 2.0 - face).abs();
+            d(x).total_cmp(&d(y))
+        });
+        let mut inset = 0.0;
+        let mut returns = Vec::new();
+        for b in order {
+            let inner = if face < 0.0 { b.s1 } else { b.s0 };
+            let depth = (inner - face).abs();
+            if depth >= reach - 1e-6 {
+                break;
+            }
+            if !a.layers[b.index].wraps_openings() || b.function == LayerFunction::AirGap {
+                continue;
+            }
+            let thickness = b.s1 - b.s0;
+            returns.push((
+                WrapReturn {
+                    layer: b.index,
+                    inset,
+                    thickness,
+                    from: inner.min(stop),
+                    to: inner.max(stop),
+                },
+                depth,
+            ));
+            inset += thickness;
+        }
+        if !returns.is_empty() {
+            zones.push(WrapZone {
+                face,
+                stop,
+                returns,
+            });
+        }
+    }
+    OpeningWrap { zones }
 }
 
 /// The thinnest layer the editor and validation accept: 1 mm.
@@ -197,6 +405,7 @@ impl Assembly {
             usage,
             layers,
             description: String::new(),
+            wrap_openings: WrapSides::None,
         }
     }
 
