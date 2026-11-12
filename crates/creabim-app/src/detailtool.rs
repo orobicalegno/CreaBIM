@@ -566,7 +566,97 @@ pub fn keep(doc: &mut Document, state: &mut PlanState, selection: &mut Selection
 }
 
 fn view_scale(model: &Model, view: ElementId) -> f64 {
-    view_of(model, view).map_or(100.0, |v| v.scale)
+    match model.get(view).map(|e| &e.kind) {
+        Some(ElementKind::View(v)) => v.scale,
+        // on a sheet a drawing unit is a paper millimetre
+        Some(ElementKind::Sheet(_)) => 1000.0,
+        _ => 100.0,
+    }
+}
+
+/// The box round a detail component or a piece of linework, in its
+/// view's drawing units (on a sheet, paper millimetres).
+pub fn bounds(model: &Model, d: &DetailItem) -> (DVec2, DVec2) {
+    let mut pts = match (d.kind, d.draft_path()) {
+        (_, Some((path, _))) => path,
+        (DetailKind::Symbol { def }, _) => match model.get(def).map(|e| &e.kind) {
+            Some(ElementKind::Symbol(s)) => d
+                .symbol_pieces(s)
+                .iter()
+                .flat_map(|p| p.draft_path().map(|q| q.0).unwrap_or_default())
+                .collect(),
+            _ => d.points.clone(),
+        },
+        _ => d.points.clone(),
+    };
+    if pts.is_empty() {
+        pts.push(DVec2::ZERO);
+    }
+    let lo = pts.iter().copied().fold(DVec2::splat(f64::MAX), DVec2::min);
+    let hi = pts.iter().copied().fold(DVec2::splat(f64::MIN), DVec2::max);
+    let pad = DVec2::splat(d.width / 2.0);
+    (lo - pad, hi + pad)
+}
+
+/// The Detail tool on a sheet, outside any view: linework and symbols
+/// drawn on the paper itself, in millimetres. `xf` maps paper to the
+/// screen. True when it took this frame's input.
+#[allow(clippy::too_many_arguments)]
+pub fn sheet_input(
+    ui: &egui::Ui,
+    doc: &mut Document,
+    sheet: ElementId,
+    painter: &egui::Painter,
+    response: &egui::Response,
+    state: &mut PlanState,
+    selection: &mut Selection,
+    xf: &Xf,
+    error: &mut Option<String>,
+) -> bool {
+    let hover = response.hover_pos().map(|p| xf.to_world(p));
+    preview(
+        doc.model(),
+        painter,
+        xf,
+        crate::planview::Tool::Detail,
+        state,
+        sheet,
+        hover,
+        1.0,
+    );
+    let keys = !ui.ctx().egui_wants_keyboard_input();
+    let enter = keys && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let esc = keys && ui.input(|i| i.key_pressed(egui::Key::Escape));
+    let here = state.details.view == Some(sheet);
+    // Esc or a right-click keeps a path that can be made
+    if response.hovered() && (esc || response.secondary_clicked()) && here {
+        if keep(doc, state, selection) {
+            return true;
+        }
+        if !state.details.path.is_empty() || state.details.picked.is_some() {
+            state.details.path.clear();
+            state.details.off.clear();
+            state.details.picked = None;
+            return true;
+        }
+        return false;
+    }
+    let double = response.double_clicked() && finishable(state);
+    if (enter || double) && here && finishable(state) {
+        if let Err(e) = finish(doc, state, selection) {
+            *error = Some(e.to_string());
+        }
+        return true;
+    }
+    if response.clicked() {
+        if let Some(p) = response.interact_pointer_pos().map(|p| xf.to_world(p)) {
+            if let Err(e) = detail_click(doc, sheet, p, p, state, selection) {
+                *error = Some(e.to_string());
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Make the component from the points clicked so far.
@@ -1267,6 +1357,44 @@ mod tests {
         let at = p(3.5, 1.0);
         detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
         assert_eq!(lines(&doc).len(), before + 5);
+    }
+
+    #[test]
+    fn linework_is_drawn_on_a_sheet_in_paper_millimetres() {
+        use creabim_core::DraftShape as S;
+        let mut doc = Document::from_model(creabim_core::starter::starter_house());
+        let (sheet, _) = creabim_geom::sheet::sheets(doc.model())[0];
+        let before = creabim_geom::annotate::sheet_linework(doc.model(), sheet).len();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        let mut sel = Selection::default();
+        let p = DVec2::new;
+        // a rectangle 100 by 50 mm on the paper
+        state.details.pick(DetailKind::draft(S::Rectangle));
+        for q in [p(40.0, 40.0), p(140.0, 90.0)] {
+            detail_click(&mut doc, sheet, q, q, &mut state, &mut sel).unwrap();
+        }
+        let drawn = creabim_geom::annotate::sheet_linework(doc.model(), sheet);
+        assert_eq!(drawn.len(), before + 4);
+        let ElementKind::Detail(d) = &doc.model().get(sel.all()[0]).unwrap().kind else {
+            panic!()
+        };
+        assert_eq!(d.view, sheet);
+        assert_eq!(bounds(doc.model(), d), (p(40.0, 40.0), p(140.0, 90.0)));
+        // clicks 5 mm apart are points of their own, and a click on the
+        // last one again ends the line: on paper the reach is millimetres
+        state.details.pick(DetailKind::draft(S::Line));
+        for q in [p(10.0, 10.0), p(15.0, 10.0), p(30.0, 10.0), p(30.5, 10.0)] {
+            detail_click(&mut doc, sheet, q, q, &mut state, &mut sel).unwrap();
+        }
+        let ElementKind::Detail(l) = &doc.model().get(sel.all()[0]).unwrap().kind else {
+            panic!()
+        };
+        assert_eq!(l.points.len(), 3);
+        // and it is on the sheet's SVG and DXF
+        let info = creabim_geom::sheet::SheetInfo::default();
+        let dxf = creabim_geom::sheet::sheet_dxf(doc.model(), sheet, &info).unwrap();
+        assert!(dxf.contains("140.0000"));
     }
 
     #[test]

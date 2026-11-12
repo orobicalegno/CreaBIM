@@ -651,9 +651,10 @@ pub const PAPER: PaperMap = PaperMap {
 
 /// The notes written on the sheet itself, outside any view.
 pub fn draw_sheet_notes(c: &mut dyn Canvas, model: &Model, sheet: ElementId) {
-    let notes = crate::PlanView {
-        items: crate::annotate::sheet_notes(model, sheet),
-    };
+    // linework drawn on the paper, then the notes over it
+    let mut items = crate::annotate::sheet_linework(model, sheet);
+    items.extend(crate::annotate::sheet_notes(model, sheet));
+    let notes = crate::PlanView { items };
     paper::draw(c, &notes, &PAPER);
     draw_paper_marks(c, model, sheet);
 }

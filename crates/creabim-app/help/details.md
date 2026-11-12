@@ -64,6 +64,12 @@ A **drafting layer** is a name you put linework on, to style and hide it togethe
 
 The layers belong to the project, so they are the same in every view. While you draw, pick the layer and line type of the next line in the tool options.
 
+## Drawing on a sheet
+
+Pick the Detail tool on a [sheet](sheets), outside any view, to draw on the paper itself: a frame, a key plan, a logo, a legend. Everything above works there, with lengths in millimetres on the paper: the shapes, pens, line types, colours, fills, layers, symbols and the editing commands. Select and move what you drew with the Select tool, like a note on the sheet.
+
+A symbol made in a view is in metres, and one made on a sheet in millimetres: set a placed symbol's *Scale* when you use it on the other.
+
 ## Symbols
 
 A **symbol** is linework drawn once and placed many times, as a block in a CAD program: a north point, a tap, a tree in plan, a fixing.
