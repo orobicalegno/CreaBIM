@@ -73,8 +73,8 @@ pub use cropbox::{CropBox, CropScope};
 pub use csg::BoolOp;
 pub use curtain::{CurtainGrid, GridRule, PanelKind};
 pub use detail::{
-    DetailItem, DetailKind, DraftLayer, DraftLayers, DraftShape, DrawingFrame, LineLook, LinePen,
-    LineType, MembraneLook,
+    DetailItem, DetailKind, DraftLayer, DraftLayers, DraftShape, DraftSymbol, Drafting,
+    DrawingFrame, LineLook, LinePen, LineType, MembraneLook,
 };
 pub use document::{Document, Step, StepId};
 pub use editmesh::EditMesh;

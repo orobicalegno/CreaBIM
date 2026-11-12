@@ -64,6 +64,17 @@ A **drafting layer** is a name you put linework on, to style and hide it togethe
 
 The layers belong to the project, so they are the same in every view. While you draw, pick the layer and line type of the next line in the tool options.
 
+## Symbols
+
+A **symbol** is linework drawn once and placed many times, as a block in a CAD program: a north point, a tap, a tree in plan, a fixing.
+
+- **Make one**: select the linework it is made of (with the Select tool), then press **Make symbol** in a line's *Properties* or in the Detail tool's options. The pieces become one placed symbol, where they were. It is named *Symbol 1*; rename it in *Properties*.
+- **Place it**: pick it by name in the Detail tool's options, click where it goes, then click a point to turn it towards. Click the same spot twice to place it level.
+- **Size and turn it**: a placed symbol has a *Scale* and an *Angle* in *Properties*, and moves, rotates, mirrors and copies like any linework.
+- **Change it**: **Explode** one placed symbol to get its linework back, edit that, and make a symbol of it again.
+
+Deleting a symbol from the project deletes every placing of it.
+
 ## Editing linework
 
 The third group in the tool options edits what is drawn, as a CAD program does. Pick one, then click:

@@ -40,6 +40,10 @@ pub enum DetailKind {
     /// Plain linework, as a CAD program draws it: a line, a circle, an
     /// arc... in a pen. The points mean what the shape says.
     Draft { shape: DraftShape, pen: LinePen },
+    /// A symbol placed: linework drawn once ([`DraftSymbol`]) and shown
+    /// here. Its two points are where the symbol's origin goes and the
+    /// end of its x axis: one unit long at the size it was drawn.
+    Symbol { def: ElementId },
 }
 
 /// What a piece of plain linework is, and so what its points are.
@@ -198,6 +202,7 @@ impl DetailKind {
     pub fn label(self) -> &'static str {
         match self {
             DetailKind::Draft { shape, .. } => shape.label(),
+            DetailKind::Symbol { .. } => "Symbol",
             DetailKind::Batt => "Insulation batt",
             DetailKind::Membrane => "Membrane",
             DetailKind::Flashing => "Flashing",
@@ -235,13 +240,14 @@ impl DetailKind {
                 | DetailKind::Region { .. }
                 | DetailKind::BreakLine
                 | DetailKind::Draft { .. }
+                | DetailKind::Symbol { .. }
         )
     }
 
     /// The kinds made of a set number of clicks, and that number.
     pub fn fixed_points(self) -> Option<usize> {
         match self {
-            DetailKind::BreakLine => Some(2),
+            DetailKind::BreakLine | DetailKind::Symbol { .. } => Some(2),
             DetailKind::Draft { shape, .. } => shape.fixed_points(),
             _ => None,
         }
@@ -266,7 +272,7 @@ impl DetailKind {
             DetailKind::Repeat { .. } => 0.065,
             DetailKind::Region { .. } => 0.0,
             DetailKind::BreakLine => 0.0,
-            DetailKind::Draft { .. } => 0.0,
+            DetailKind::Draft { .. } | DetailKind::Symbol { .. } => 0.0,
         }
     }
 
@@ -363,6 +369,138 @@ pub struct LineLook {
     /// None is the drawing's own ink.
     pub rgb: Option<[u8; 3]>,
     pub linetype: LineType,
+}
+
+/// A symbol: linework drawn once and placed many times, as a CAD block.
+/// The element's name is the symbol's name. Its pieces are in the
+/// symbol's own coordinates, from its origin; their `view` means nothing.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DraftSymbol {
+    pub pieces: Vec<DetailItem>,
+}
+
+impl DraftSymbol {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.pieces.is_empty() {
+            return Err("a symbol needs linework in it".into());
+        }
+        for p in &self.pieces {
+            if p.kind.as_draft().is_none() {
+                return Err("a symbol holds plain linework only".into());
+            }
+            p.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// What drawing linework needs of the project: its drafting layers and
+/// its symbols.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Drafting {
+    pub layers: DraftLayers,
+    pub symbols: std::collections::HashMap<ElementId, DraftSymbol>,
+}
+
+impl Drafting {
+    pub fn of(model: &Model) -> Self {
+        Self {
+            layers: layers(model),
+            symbols: model
+                .iter()
+                .filter_map(|e| match &e.kind {
+                    ElementKind::Symbol(s) => Some((e.id, s.clone())),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The project's symbols, by name.
+pub fn symbols(model: &Model) -> Vec<(ElementId, &str)> {
+    model
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::Symbol(_)))
+        .map(|e| (e.id, e.name.as_str()))
+        .collect()
+}
+
+/// The edit that makes a symbol named `name` of the plain linework among
+/// `ids` (all in one view), and puts one of it in their place; with it,
+/// the id of that placed symbol. `None` when there is no linework there,
+/// or it is in several views.
+pub fn make_symbol(
+    model: &Model,
+    ids: &[ElementId],
+    name: &str,
+) -> Option<(Transaction, ElementId)> {
+    let picked: Vec<(&Element, &DetailItem)> = ids
+        .iter()
+        .filter_map(|id| model.get(*id))
+        .filter_map(|e| match &e.kind {
+            ElementKind::Detail(d) if d.kind.as_draft().is_some() => Some((e, d)),
+            _ => None,
+        })
+        .collect();
+    let view = picked.first()?.1.view;
+    if picked.iter().any(|(_, d)| d.view != view) {
+        return None;
+    }
+    // its origin: the lower left of everything in it
+    let origin = picked
+        .iter()
+        .flat_map(|(_, d)| d.draft_path().map(|p| p.0).unwrap_or_default())
+        .fold(DVec2::splat(f64::MAX), |a, p| a.min(p));
+    if !origin.is_finite() {
+        return None;
+    }
+    let pieces = picked
+        .iter()
+        .map(|(_, d)| {
+            let mut piece = (*d).clone();
+            for p in &mut piece.points {
+                *p -= origin;
+            }
+            piece
+        })
+        .collect();
+    let def = Element::new(name, ElementKind::Symbol(DraftSymbol { pieces }));
+    let placed = Element::new(
+        name,
+        ElementKind::Detail(DetailItem::new(
+            view,
+            DetailKind::Symbol { def: def.id },
+            vec![origin, origin + DVec2::X],
+        )),
+    );
+    let id = placed.id;
+    let gone: Vec<ElementId> = picked.iter().map(|(e, _)| e.id).collect();
+    let tx = Transaction::new("Make symbol")
+        .insert(def)
+        .insert(placed)
+        .remove_all_cascade(model, &gone);
+    Some((tx, id))
+}
+
+/// The edit that turns placed symbol `id` back into linework of its own,
+/// where it is. `None` when it isn't a placed symbol.
+pub fn explode(model: &Model, id: ElementId) -> Option<Transaction> {
+    let e = model.get(id)?;
+    let ElementKind::Detail(d) = &e.kind else {
+        return None;
+    };
+    let DetailKind::Symbol { def } = d.kind else {
+        return None;
+    };
+    let ElementKind::Symbol(symbol) = &model.get(def)?.kind else {
+        return None;
+    };
+    let mut tx = Transaction::new("Explode symbol");
+    for piece in d.symbol_pieces(symbol) {
+        tx = tx.insert(Element::new(piece.kind.label(), ElementKind::Detail(piece)));
+    }
+    Some(tx.remove_cascade(model, id))
 }
 
 /// A drafting layer: a name linework is put on, to colour, break and
@@ -540,6 +678,28 @@ impl DetailItem {
         })
     }
 
+    /// A placed symbol's pieces where it puts them: turned, sized and
+    /// moved from the symbol's own coordinates into this view's.
+    pub fn symbol_pieces(&self, symbol: &DraftSymbol) -> Vec<DetailItem> {
+        let (Some(o), Some(x)) = (self.points.first(), self.points.get(1)) else {
+            return vec![];
+        };
+        let u = *x - *o;
+        let v = u.perp();
+        symbol
+            .pieces
+            .iter()
+            .map(|piece| {
+                let mut out = piece.clone();
+                out.view = self.view;
+                for p in &mut out.points {
+                    *p = *o + u * p.x + v * p.y;
+                }
+                out
+            })
+            .collect()
+    }
+
     /// Can it be filled: plain linework that closes on itself?
     pub fn fillable(&self) -> bool {
         self.draft_path().is_some_and(|(_, closed)| closed)
@@ -572,6 +732,11 @@ impl DetailItem {
         if let DetailKind::Repeat { module, joint } = self.kind {
             if !(module > 1e-3 && joint >= 0.0) {
                 return Err("a repeating detail needs a unit length".into());
+            }
+        }
+        if let DetailKind::Symbol { .. } = self.kind {
+            if self.points[0].distance(self.points[1]) < 1e-9 {
+                return Err("a symbol needs a size".into());
             }
         }
         Ok(())

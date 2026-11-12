@@ -818,6 +818,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
         return vec![];
     };
     let mut out = Vec::new();
+    let drafting = creabim_core::Drafting::of(model);
     for e in model.iter() {
         match &e.kind {
             ElementKind::Detail(d) if d.view == view_id => {
@@ -827,7 +828,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     d,
                     view.scale / 1000.0,
                     look,
-                    &creabim_core::detail::layers(model),
+                    &drafting,
                 ));
             }
             ElementKind::View(v) => {

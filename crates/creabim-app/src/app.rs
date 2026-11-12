@@ -9671,6 +9671,12 @@ impl CreaBimApp {
                 }
                 // edited from any piece of linework's Properties
                 ElementKind::DraftLayers(_) => {}
+                ElementKind::Symbol(sym) => {
+                    ui.label(format!(
+                        "A symbol of {} pieces of linework. Place it with the Detail tool.",
+                        sym.pieces.len()
+                    ));
+                }
                 ElementKind::StylePack(p) => {
                     ui.label(egui::RichText::new(p.description.clone()).weak());
                     if ui.button("Graphic styles…").clicked() {
@@ -9897,6 +9903,17 @@ impl CreaBimApp {
                                 &old,
                                 &new,
                             ))
+                        }
+                        Some(crate::detailtool::LayerEdit::MakeSymbol) => {
+                            self.make_symbol();
+                            None
+                        }
+                        Some(crate::detailtool::LayerEdit::Explode) => {
+                            let tx = creabim_core::detail::explode(self.doc.model(), e.id);
+                            if tx.is_some() {
+                                self.selection.clear();
+                            }
+                            tx
                         }
                         None => None,
                     };
@@ -11699,6 +11716,7 @@ pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
         ElementKind::PaperMark(_) => "paper mark",
         ElementKind::MarkRules(_) => "mark numbering",
         ElementKind::DraftLayers(_) => "drafting layers",
+        ElementKind::Symbol(_) => "symbol",
         ElementKind::StylePack(_) => "style pack",
         ElementKind::View(_) => "view",
         ElementKind::Sheet(_) => "sheet",

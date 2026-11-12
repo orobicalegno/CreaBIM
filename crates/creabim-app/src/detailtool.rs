@@ -60,6 +60,10 @@ pub enum LayerEdit {
     Set(creabim_core::DraftLayers),
     /// A layer renamed, on its linework too.
     Rename { old: String, new: String },
+    /// Make a symbol of the linework selected.
+    MakeSymbol,
+    /// Turn this placed symbol back into linework.
+    Explode,
 }
 
 /// An edit of plain linework against other linework, CAD-style.
@@ -264,6 +268,13 @@ pub fn detail_click(
     let fixed = d.kind.fixed_points();
     let done = match (d.path.first(), d.path.last()) {
         (Some(first), _) if d.kind.is_area() && d.path.len() >= 3 && near(*first) => true,
+        // a symbol clicked twice on one spot is placed level
+        (_, Some(last)) if near(*last) && matches!(d.kind, DetailKind::Symbol { .. }) => {
+            let level = *last + DVec2::X;
+            d.path.push(level);
+            d.off.push(DVec2::ZERO);
+            true
+        }
         // a shape of a set number of clicks takes them all: a click on
         // the last point again is dropped, not the end of it
         (_, Some(last)) if near(*last) && fixed.is_some() => false,
@@ -500,6 +511,14 @@ pub fn path_hint(kind: DetailKind, n: usize) -> String {
         format!("{n} points")
     };
     let label = kind.label();
+    if let DetailKind::Symbol { .. } = kind {
+        return if n == 0 {
+            "Symbol: click where it goes.".into()
+        } else {
+            "Symbol: click a point to turn it towards, or the same spot again to place it level."
+                .into()
+        };
+    }
     if let (Some((shape, _)), Some(_)) = (kind.as_draft(), kind.fixed_points()) {
         return format!("{label}: click {}. Esc cancels.", shape.next_point(n));
     }
@@ -579,9 +598,23 @@ pub fn finish(
         item.layer = d.layer.clone();
         item.linetype = d.linetype;
     }
+    if let DetailKind::Symbol { .. } = d.kind {
+        // the second click only turns it: it is placed at its own size
+        let (o, x) = (item.points[0], item.points[1]);
+        item.points[1] = o + (x - o).try_normalize().unwrap_or(DVec2::X);
+        item.layer = d.layer.clone();
+    }
     let label = d.kind.label();
+    // a placed symbol is named after its symbol
+    let name = match d.kind {
+        DetailKind::Symbol { def } => doc
+            .model()
+            .get(def)
+            .map_or(label.to_string(), |e| e.name.clone()),
+        _ => label.to_string(),
+    };
     // a rectangle or a polygon is kept as the closed outline it draws
-    let e = Element::new(label, ElementKind::Detail(item.baked()));
+    let e = Element::new(name, ElementKind::Detail(item.baked()));
     selection.only(e.id);
     state.status = Some(if d.kind.as_draft().is_some() {
         format!("{label} drawn. Its pen is in Properties; it shows in this view only.")
@@ -637,8 +670,16 @@ pub fn preview(
             item.linetype = d.linetype;
             let look = creabim_core::styles::active_pack(model).membranes;
             // drawn even while its layer is hidden, so it can be seen going down
-            let layers = creabim_core::DraftLayers::default();
-            for it in creabim_geom::detail::detail_items(ElementId::new(), &item, mm, look, &layers)
+            let mut drafting = creabim_core::Drafting::of(model);
+            drafting.layers = Default::default();
+            if let DetailKind::Symbol { .. } = d.kind {
+                // one point down: level under the pointer; then turned to it
+                let o = item.points[0];
+                let x = item.points.get(1).copied().unwrap_or(o + DVec2::X);
+                item.points = vec![o, o + (x - o).try_normalize().unwrap_or(DVec2::X)];
+            }
+            for it in
+                creabim_geom::detail::detail_items(ElementId::new(), &item, mm, look, &drafting)
             {
                 crate::planview::draw_item(painter, xf, &it, true, mm);
             }
@@ -659,6 +700,48 @@ pub fn detail_fields(
     use creabim_core::{DraftLayer, DraftShape, LinePen, LineType};
     let mut label = "";
     let fillable = d.fillable();
+    if let DetailKind::Symbol { .. } = d.kind {
+        let (o, x) = (d.points[0], d.points[1]);
+        let mut scale = o.distance(x);
+        crate::props::row(ui, "Scale", |ui| {
+            if ui
+                .add(
+                    egui::DragValue::new(&mut scale)
+                        .speed(0.01)
+                        .range(0.001..=1000.0),
+                )
+                .on_hover_text("1 is the size the symbol was drawn at.")
+                .changed()
+            {
+                d.points[1] = o + (x - o).normalize_or(DVec2::X) * scale.max(0.001);
+                label = "Symbol scale";
+            }
+        });
+        let mut angle = (x - o).to_angle().to_degrees();
+        crate::props::row(ui, "Angle", |ui| {
+            if ui
+                .add(egui::DragValue::new(&mut angle).speed(1.0).suffix("°"))
+                .changed()
+            {
+                d.points[1] = o + DVec2::from_angle(angle.to_radians()) * scale;
+                label = "Symbol angle";
+            }
+        });
+        if ui
+            .button("Explode")
+            .on_hover_text("Turn this one back into linework of its own, where it is. The symbol and its other placings stay.")
+            .clicked()
+        {
+            *layer_edit = Some(LayerEdit::Explode);
+        }
+        ui.label(
+            egui::RichText::new(
+                "A placed symbol: change the symbol's linework by exploding one, editing it and making a symbol of it again.",
+            )
+            .weak(),
+        );
+        return label;
+    }
     if let DetailKind::Draft { shape, pen } = &mut d.kind {
         // plain linework: its shape is what its points mean
         let name = shape.label();
@@ -771,6 +854,13 @@ pub fn detail_fields(
             ))
             .weak(),
         );
+        if ui
+            .button("Make symbol")
+            .on_hover_text("Make a symbol of the linework selected, to place again and again with the Detail tool. One of it takes their place.")
+            .clicked()
+        {
+            *layer_edit = Some(LayerEdit::MakeSymbol);
+        }
         // the project's layers, edited here: they are every view's
         if crate::props::subsection(ui, "draft.layers", "Drafting layers", false) {
             let mut table = layers.clone();
@@ -1177,6 +1267,43 @@ mod tests {
         let at = p(3.5, 1.0);
         detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
         assert_eq!(lines(&doc).len(), before + 5);
+    }
+
+    #[test]
+    fn a_symbol_is_placed_by_two_clicks_at_its_own_size() {
+        use creabim_core::DraftShape as S;
+        let (mut doc, section) = doc_with_section();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        let mut sel = Selection::default();
+        let p = DVec2::new;
+        state.details.pick(DetailKind::draft(S::Line));
+        for q in [p(0.0, 0.0), p(1.0, 0.0), p(1.0, 0.0)] {
+            detail_click(&mut doc, section, q, q, &mut state, &mut sel).unwrap();
+        }
+        let (tx, _) = creabim_core::detail::make_symbol(doc.model(), &sel.all(), "Mark").unwrap();
+        doc.commit(tx).unwrap();
+        let def = creabim_core::detail::symbols(doc.model())[0].0;
+        let placed = |doc: &Document, id: ElementId| match &doc.model().get(id).unwrap().kind {
+            ElementKind::Detail(d) => d.clone(),
+            _ => panic!(),
+        };
+        // a click, then a point far away to turn it towards: still one unit
+        state.details.pick(DetailKind::Symbol { def });
+        for q in [p(3.0, 1.0), p(3.0, 9.0)] {
+            detail_click(&mut doc, section, q, q, &mut state, &mut sel).unwrap();
+        }
+        let d = placed(&doc, sel.all()[0]);
+        assert_eq!(d.points, vec![p(3.0, 1.0), p(3.0, 2.0)]);
+        assert_eq!(doc.model().get(sel.all()[0]).unwrap().name, "Mark");
+        // the same spot twice places it level
+        for q in [p(5.0, 1.0), p(5.0, 1.0)] {
+            detail_click(&mut doc, section, q, q, &mut state, &mut sel).unwrap();
+        }
+        assert_eq!(
+            placed(&doc, sel.all()[0]).points,
+            vec![p(5.0, 1.0), p(6.0, 1.0)]
+        );
     }
 
     #[test]

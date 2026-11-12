@@ -3,7 +3,7 @@
 //! its parent.
 
 use crate::plan::{Pen, PlanItem};
-use creabim_core::{DetailItem, DetailKind, DraftLayers, ElementId, Hatch, MembraneLook};
+use creabim_core::{DetailItem, DetailKind, Drafting, ElementId, Hatch, MembraneLook};
 use glam::DVec2;
 
 /// How far off the line it follows a membrane's heavy line lies, in paper
@@ -18,16 +18,17 @@ pub fn offset_path(pts: &[DVec2], by: f64) -> Vec<DVec2> {
 
 /// The linework of a detail component, in its view's drawing coordinates;
 /// `mm` is drawing units per paper millimetre (a membrane stands off its
-/// line by paper millimetres), `look` how membranes are drawn, `layers`
+/// line by paper millimetres), `look` how membranes are drawn, `drafting`
 /// the project's drafting layers, which colour, break and hide plain
-/// linework.
+/// linework, and its symbols.
 pub fn detail_items(
     id: ElementId,
     d: &DetailItem,
     mm: f64,
     look: MembraneLook,
-    layers: &DraftLayers,
+    drafting: &Drafting,
 ) -> Vec<PlanItem> {
+    let layers = &drafting.layers;
     let mut out = Vec::new();
     let line = |out: &mut Vec<PlanItem>, pen: Pen, a: DVec2, b: DVec2| {
         out.push(PlanItem::Line { id, pen, a, b });
@@ -218,6 +219,32 @@ pub fn detail_items(
                 }
             }
         }
+        DetailKind::Symbol { def } => {
+            // hidden with its layer; else each piece where the symbol puts it
+            if d.layer
+                .as_deref()
+                .and_then(|n| layers.get(n))
+                .is_some_and(|l| l.hidden)
+            {
+                return out;
+            }
+            match drafting.symbols.get(&def) {
+                Some(symbol) => {
+                    for piece in d.symbol_pieces(symbol) {
+                        out.extend(detail_items(id, &piece, mm, look, drafting));
+                    }
+                }
+                // its symbol is gone: a cross where it was
+                None => {
+                    let (Some(o), Some(x)) = (d.points.first(), d.points.get(1)) else {
+                        return out;
+                    };
+                    let u = (*x - *o) * 0.5;
+                    line(&mut out, Pen::Symbol, *o - u, *o + u);
+                    line(&mut out, Pen::Symbol, *o - u.perp(), *o + u.perp());
+                }
+            }
+        }
         DetailKind::BreakLine => {
             for &(a, b) in &segs {
                 let len = a.distance(b);
@@ -310,7 +337,7 @@ mod tests {
                 &d,
                 0.01,
                 MembraneLook::default(),
-                &DraftLayers::default(),
+                &Drafting::default(),
             );
             assert!(!items.is_empty(), "{kind:?} draws something");
             let (lo, hi) = crate::plan::PlanView { items }.bounds().unwrap();
@@ -325,7 +352,7 @@ mod tests {
         let mut d = item(DetailKind::Membrane, &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]);
         // 1:10, a paper millimetre is 10 mm
         for look in MembraneLook::ALL {
-            let items = detail_items(ElementId::new(), &d, 0.01, look, &DraftLayers::default());
+            let items = detail_items(ElementId::new(), &d, 0.01, look, &Drafting::default());
             let lines: Vec<(Pen, DVec2, DVec2)> = items
                 .iter()
                 .filter_map(|i| match i {
@@ -354,7 +381,7 @@ mod tests {
             &d,
             0.01,
             MembraneLook::Dashed,
-            &DraftLayers::default(),
+            &Drafting::default(),
         );
         assert!(items.iter().any(|i| matches!(i,
             PlanItem::Line { pen: Pen::Cut, a, .. } if a.distance(DVec2::new(0.0, -0.02)) < 1e-9)));
@@ -370,7 +397,7 @@ mod tests {
                 &d,
                 0.01,
                 MembraneLook::default(),
-                &DraftLayers::default(),
+                &Drafting::default(),
             )
             .into_iter()
             .map(|i| match i {
@@ -448,7 +475,7 @@ mod tests {
     #[test]
     fn linework_takes_its_colour_dashes_fill_and_hiding_from_itself_and_its_layer() {
         use creabim_core::{DraftLayer, DraftShape as S, LineType};
-        let layers = DraftLayers {
+        let layers = creabim_core::DraftLayers {
             layers: vec![
                 DraftLayer {
                     name: "Axes".into(),
@@ -464,8 +491,12 @@ mod tests {
                 },
             ],
         };
+        let drafting = Drafting {
+            layers,
+            ..Default::default()
+        };
         let draw = |d: &DetailItem| {
-            detail_items(ElementId::new(), d, 0.1, MembraneLook::default(), &layers)
+            detail_items(ElementId::new(), d, 0.1, MembraneLook::default(), &drafting)
         };
         let pens = |items: &[PlanItem]| -> Vec<Pen> {
             items
@@ -548,6 +579,43 @@ mod tests {
     }
 
     #[test]
+    fn a_placed_symbol_draws_its_pieces_turned_and_sized() {
+        use creabim_core::{DraftShape as S, DraftSymbol};
+        // a symbol of one line along its x axis, two units long
+        let def = ElementId::new();
+        let mut drafting = Drafting::default();
+        drafting.symbols.insert(
+            def,
+            DraftSymbol {
+                pieces: vec![item(DetailKind::draft(S::Line), &[(0.0, 0.0), (2.0, 0.0)])],
+            },
+        );
+        // placed at (5, 5), its x axis pointing up and half size
+        let placed = item(DetailKind::Symbol { def }, &[(5.0, 5.0), (5.0, 5.5)]);
+        let items = detail_items(
+            ElementId::new(),
+            &placed,
+            0.01,
+            MembraneLook::default(),
+            &drafting,
+        );
+        assert_eq!(items.len(), 1);
+        let PlanItem::Line { a, b, .. } = &items[0] else {
+            panic!()
+        };
+        assert!(a.distance(DVec2::new(5.0, 5.0)) < 1e-9 && b.distance(DVec2::new(5.0, 6.0)) < 1e-9);
+        // without its symbol it is a cross, not nothing
+        let lost = detail_items(
+            ElementId::new(),
+            &placed,
+            0.01,
+            MembraneLook::default(),
+            &Drafting::default(),
+        );
+        assert_eq!(lost.len(), 2);
+    }
+
+    #[test]
     fn bricks_repeat_along_the_path() {
         let d = item(
             DetailKind::Repeat {
@@ -561,7 +629,7 @@ mod tests {
             &d,
             0.01,
             MembraneLook::default(),
-            &DraftLayers::default(),
+            &Drafting::default(),
         )
         .iter()
         .filter(|i| matches!(i, PlanItem::Polygon { .. }))

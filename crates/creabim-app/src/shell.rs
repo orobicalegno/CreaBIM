@@ -332,6 +332,34 @@ fn command_icon(c: Command) -> &'static str {
 pub(super) static MODS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 impl CreaBimApp {
+    /// Make a symbol of the plain linework selected, and select the one
+    /// placed where it was.
+    pub(super) fn make_symbol(&mut self) {
+        let model = self.doc.model();
+        let name = (1..)
+            .map(|n| format!("Symbol {n}"))
+            .find(|n| !model.iter().any(|e| &e.name == n))
+            .expect("unbounded");
+        let Some((tx, placed)) =
+            creabim_core::detail::make_symbol(model, &self.selection.all(), &name)
+        else {
+            self.plan.status = Some(
+                "Make symbol: select the linework to make it of first (lines, circles, arcs... in one view)."
+                    .into(),
+            );
+            return;
+        };
+        match self.doc.commit(tx) {
+            Ok(()) => {
+                self.selection.only(placed);
+                self.plan.status = Some(format!(
+                    "{name} made. Rename it in Properties; place it again with the Detail tool."
+                ));
+            }
+            Err(e) => self.plan.status = Some(e.to_string()),
+        }
+    }
+
     fn cmd_item(&self, c: Command) -> Item {
         let enabled = match c {
             Command::Undo => self.doc.can_undo(),
@@ -1933,6 +1961,15 @@ impl CreaBimApp {
                     self.plan.details.path.clear();
                 }
             }
+            "detail.symbol" => {
+                let def = index
+                    .and_then(|i| creabim_core::detail::symbols(self.doc.model()).get(i).map(|s| s.0));
+                if let Some(def) = def {
+                    self.plan.details.pick(creabim_core::DetailKind::Symbol { def });
+                    self.plan.details.path.clear();
+                }
+            }
+            "detail.makesymbol" => self.make_symbol(),
             "detail.layer" => {
                 let table = creabim_core::detail::layers(self.doc.model());
                 self.plan.details.layer = index
@@ -2845,6 +2882,28 @@ impl CreaBimApp {
                 DetailKind::COMPONENTS..DetailKind::ALL.len(),
                 "Plain linework: what the next clicks draw",
             ));
+            // the project's symbols, to place; and one made of the selection
+            let symbols = creabim_core::detail::symbols(self.doc.model());
+            if !symbols.is_empty() {
+                options.push(seg(symbols
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (id, name))| {
+                        opt(
+                            format!("detail.symbol:{i}"),
+                            name,
+                            self.plan.details.edit.is_none()
+                                && self.plan.details.kind
+                                    == (DetailKind::Symbol { def: *id }),
+                            "Place this symbol: click where it goes, then a point to turn it towards",
+                        )
+                    })
+                    .collect()));
+            }
+            options.push(json!({
+                "kind": "button", "id": "detail.makesymbol", "icon": "copy", "label": "Make symbol",
+                "hint": "Make a symbol of the linework selected, to place again and again",
+            }));
             // editing what is drawn, in place of drawing
             let d = &self.plan.details;
             options.push(seg(crate::detailtool::DraftEdit::ALL
