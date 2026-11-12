@@ -9,7 +9,7 @@
 //! (metres along and up a section, or across a plan) with a width across
 //! it; how each kind is drawn lives in `creabim-geom`'s `detail` module.
 
-use crate::{ElementId, Hatch};
+use crate::{Element, ElementId, ElementKind, Hatch, Model, Transaction};
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
@@ -124,7 +124,7 @@ impl DraftShape {
 }
 
 /// The pen plain linework is drawn in: the drawing's own line weights.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LinePen {
     /// As heavy as cut material.
     Heavy,
@@ -299,6 +299,170 @@ pub struct DetailItem {
     /// the side of the line it was clicked on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip: bool,
+    /// Plain linework's own colour; none takes its layer's, or black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+    /// Plain linework's own line type; none takes its layer's, or its pen's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linetype: Option<LineType>,
+    /// The drafting layer plain linework is on, by name ([`DraftLayers`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
+    /// A closed piece of linework filled with a hatch, over what is under
+    /// it (unlike a filled region, it hides nothing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<Hatch>,
+}
+
+/// How a line is broken along its length.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LineType {
+    #[default]
+    Continuous,
+    Dashed,
+    Dotted,
+    /// A long dash and a dot: centre lines and axes.
+    DashDot,
+}
+
+impl LineType {
+    pub const ALL: [LineType; 4] = [
+        LineType::Continuous,
+        LineType::Dashed,
+        LineType::Dotted,
+        LineType::DashDot,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LineType::Continuous => "Continuous",
+            LineType::Dashed => "Dashed",
+            LineType::Dotted => "Dotted",
+            LineType::DashDot => "Dash-dot",
+        }
+    }
+
+    /// Its dashes and gaps in turn, in paper millimetres; none when it
+    /// isn't broken.
+    pub fn pattern(self) -> Option<&'static [f64]> {
+        match self {
+            LineType::Continuous => None,
+            LineType::Dashed => Some(&[3.0, 1.5]),
+            LineType::Dotted => Some(&[0.3, 1.2]),
+            LineType::DashDot => Some(&[6.0, 1.5, 0.3, 1.5]),
+        }
+    }
+}
+
+/// How a piece of plain linework is drawn, all told: its weight, its
+/// colour and how it is broken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LineLook {
+    /// One of the solid pens: heavy, medium, light or fine.
+    pub weight: LinePen,
+    /// None is the drawing's own ink.
+    pub rgb: Option<[u8; 3]>,
+    pub linetype: LineType,
+}
+
+/// A drafting layer: a name linework is put on, to colour, break and
+/// hide it together.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DraftLayer {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+    #[serde(default)]
+    pub linetype: LineType,
+    /// Its linework is not drawn, in any view or on any sheet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+}
+
+/// The project's drafting layers: at most one such element per project,
+/// read through [`layers`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DraftLayers {
+    #[serde(default)]
+    pub layers: Vec<DraftLayer>,
+}
+
+impl DraftLayers {
+    pub fn get(&self, name: &str) -> Option<&DraftLayer> {
+        self.layers.iter().find(|l| l.name == name)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        for (i, l) in self.layers.iter().enumerate() {
+            if l.name.trim().is_empty() {
+                return Err("a drafting layer needs a name".into());
+            }
+            if self.layers[..i].iter().any(|o| o.name == l.name) {
+                return Err(format!("two drafting layers are named {:?}", l.name));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The project's drafting layers; none when it has no such element.
+pub fn layers(model: &Model) -> DraftLayers {
+    model
+        .iter()
+        .find_map(|e| match &e.kind {
+            ElementKind::DraftLayers(l) => Some(l.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The edit that renames drafting layer `old` to `new`, in the table and
+/// on every piece of linework on it; nothing when `new` is blank or taken.
+pub fn rename_layer(model: &Model, old: &str, new: &str) -> Transaction {
+    let mut table = layers(model);
+    let new = new.trim();
+    if new.is_empty() || new == old || table.get(new).is_some() {
+        return Transaction::new("Rename drafting layer");
+    }
+    for l in &mut table.layers {
+        if l.name == old {
+            l.name = new.to_string();
+        }
+    }
+    let mut tx = set_layers(model, table);
+    tx.label = "Rename drafting layer".into();
+    for e in model.iter() {
+        if let ElementKind::Detail(d) = &e.kind {
+            if d.layer.as_deref() == Some(old) {
+                let mut after = e.clone();
+                if let ElementKind::Detail(d) = &mut after.kind {
+                    d.layer = Some(new.to_string());
+                }
+                tx = tx.replace(e.clone(), after);
+            }
+        }
+    }
+    tx
+}
+
+/// The edit that gives `model` these drafting layers, as one undo step.
+pub fn set_layers(model: &Model, layers: DraftLayers) -> Transaction {
+    let tx = Transaction::new("Drafting layers");
+    let current = model
+        .iter()
+        .find(|e| matches!(e.kind, ElementKind::DraftLayers(_)));
+    match current {
+        Some(e) if e.kind == ElementKind::DraftLayers(layers.clone()) => tx,
+        Some(e) => {
+            let mut after = e.clone();
+            after.kind = ElementKind::DraftLayers(layers);
+            tx.replace(e.clone(), after)
+        }
+        None => tx.insert(Element::new(
+            "Drafting layers",
+            ElementKind::DraftLayers(layers),
+        )),
+    }
 }
 
 /// How a membrane is drawn beside the line it follows (style pack,
@@ -343,7 +507,42 @@ impl DetailItem {
             points,
             width: kind.default_width(),
             flip: false,
+            color: None,
+            linetype: None,
+            layer: None,
+            fill: None,
         }
+    }
+
+    /// How plain linework is drawn with the project's `layers`: its own
+    /// colour and line type, else its layer's, else its pen's. `None` for
+    /// a component, and for linework on a hidden layer, which isn't drawn.
+    pub fn look(&self, layers: &DraftLayers) -> Option<LineLook> {
+        let (_, pen) = self.kind.as_draft()?;
+        let layer = self.layer.as_deref().and_then(|n| layers.get(n));
+        if layer.is_some_and(|l| l.hidden) {
+            return None;
+        }
+        // the dashed pen is a light line, dashed
+        let (weight, by_pen) = match pen {
+            LinePen::Dashed => (LinePen::Light, LineType::Dashed),
+            p => (p, LineType::Continuous),
+        };
+        Some(LineLook {
+            weight,
+            rgb: self.color.or(layer.and_then(|l| l.color)),
+            linetype: self
+                .linetype
+                .or(layer
+                    .map(|l| l.linetype)
+                    .filter(|t| *t != LineType::Continuous))
+                .unwrap_or(by_pen),
+        })
+    }
+
+    /// Can it be filled: plain linework that closes on itself?
+    pub fn fillable(&self) -> bool {
+        self.draft_path().is_some_and(|(_, closed)| closed)
     }
 
     /// The side a membrane is drawn on: +1 left of the way it was drawn,

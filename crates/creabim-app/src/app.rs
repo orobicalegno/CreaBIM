@@ -9669,6 +9669,8 @@ impl CreaBimApp {
                         self.marks.open = true;
                     }
                 }
+                // edited from any piece of linework's Properties
+                ElementKind::DraftLayers(_) => {}
                 ElementKind::StylePack(p) => {
                     ui.label(egui::RichText::new(p.description.clone()).weak());
                     if ui.button("Graphic styles…").clicked() {
@@ -9876,7 +9878,33 @@ impl CreaBimApp {
                     label = crate::detailtool::join_fields(ui, self.doc.model(), j);
                 }
                 ElementKind::Detail(d) => {
-                    label = crate::detailtool::detail_fields(ui, d);
+                    let table = creabim_core::detail::layers(self.doc.model());
+                    let mut layer_edit = None;
+                    label = crate::detailtool::detail_fields(ui, d, &table, &mut layer_edit);
+                    // the layers are the project's, not this line's: their
+                    // own undo step
+                    let tx = match layer_edit {
+                        Some(crate::detailtool::LayerEdit::Set(t)) => {
+                            Some(creabim_core::detail::set_layers(self.doc.model(), t))
+                        }
+                        Some(crate::detailtool::LayerEdit::Rename { old, new }) => {
+                            // this line follows its layer's new name
+                            if d.layer.as_deref() == Some(old.as_str()) {
+                                d.layer = Some(new.trim().to_string());
+                            }
+                            Some(creabim_core::detail::rename_layer(
+                                self.doc.model(),
+                                &old,
+                                &new,
+                            ))
+                        }
+                        None => None,
+                    };
+                    if let Some(tx) = tx.filter(|t| !t.ops.is_empty()) {
+                        if let Err(err) = self.doc.commit(tx) {
+                            self.plan.status = Some(err.to_string());
+                        }
+                    }
                 }
                 ElementKind::RoomSeparator(sep) => {
                     ui.label(format!(
@@ -11670,6 +11698,7 @@ pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
         ElementKind::Reference(_) => "reference",
         ElementKind::PaperMark(_) => "paper mark",
         ElementKind::MarkRules(_) => "mark numbering",
+        ElementKind::DraftLayers(_) => "drafting layers",
         ElementKind::StylePack(_) => "style pack",
         ElementKind::View(_) => "view",
         ElementKind::Sheet(_) => "sheet",

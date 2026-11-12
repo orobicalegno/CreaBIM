@@ -3,7 +3,7 @@
 //! its parent.
 
 use crate::plan::{Pen, PlanItem};
-use creabim_core::{DetailItem, DetailKind, ElementId, Hatch, LinePen, MembraneLook};
+use creabim_core::{DetailItem, DetailKind, DraftLayers, ElementId, Hatch, MembraneLook};
 use glam::DVec2;
 
 /// How far off the line it follows a membrane's heavy line lies, in paper
@@ -18,8 +18,16 @@ pub fn offset_path(pts: &[DVec2], by: f64) -> Vec<DVec2> {
 
 /// The linework of a detail component, in its view's drawing coordinates;
 /// `mm` is drawing units per paper millimetre (a membrane stands off its
-/// line by paper millimetres), `look` how membranes are drawn.
-pub fn detail_items(id: ElementId, d: &DetailItem, mm: f64, look: MembraneLook) -> Vec<PlanItem> {
+/// line by paper millimetres), `look` how membranes are drawn, `layers`
+/// the project's drafting layers, which colour, break and hide plain
+/// linework.
+pub fn detail_items(
+    id: ElementId,
+    d: &DetailItem,
+    mm: f64,
+    look: MembraneLook,
+    layers: &DraftLayers,
+) -> Vec<PlanItem> {
     let mut out = Vec::new();
     let line = |out: &mut Vec<PlanItem>, pen: Pen, a: DVec2, b: DVec2| {
         out.push(PlanItem::Line { id, pen, a, b });
@@ -170,20 +178,43 @@ pub fn detail_items(id: ElementId, d: &DetailItem, mm: f64, look: MembraneLook) 
                 }
             }
         }
-        DetailKind::Draft { pen, .. } => {
-            let pen = match pen {
-                LinePen::Heavy => Pen::Cut,
-                LinePen::Medium => Pen::Projection,
-                LinePen::Light => Pen::Symbol,
-                LinePen::Fine => Pen::Fine,
-                LinePen::Dashed => Pen::Hidden,
+        DetailKind::Draft { .. } => {
+            // on a hidden layer it isn't drawn
+            let (Some(l), Some((mut path, closed))) = (d.look(layers), d.draft_path()) else {
+                return out;
             };
-            if let Some((path, closed)) = d.draft_path() {
-                for w in path.windows(2) {
-                    line(&mut out, pen, w[0], w[1]);
+            if let (Some(hatch), true) = (d.fill, closed) {
+                if hatch != Hatch::Empty && path.len() >= 3 {
+                    out.push(PlanItem::Fill {
+                        id,
+                        points: path.clone(),
+                        hatch,
+                        rgb: None,
+                    });
                 }
-                if let (true, Some(a), Some(b)) = (closed, path.last(), path.first()) {
-                    line(&mut out, pen, *a, *b);
+            }
+            if closed {
+                path.extend(path.first().copied());
+            }
+            let pen = Pen::Draft {
+                weight: l.weight,
+                rgb: l.rgb,
+            };
+            // a broken line is drawn dash by dash, so its pattern runs on
+            // round corners and curves and is the same on screen, on
+            // paper and in a CAD file
+            let runs = match l.linetype.pattern() {
+                Some(dashes) => {
+                    let dashes: Vec<f64> = dashes.iter().map(|x| x * mm).collect();
+                    crate::looks::dash_polyline(&path, &dashes, 0.0)
+                }
+                None => vec![path],
+            };
+            for run in runs {
+                for w in run.windows(2) {
+                    if w[0].distance(w[1]) > 1e-12 {
+                        line(&mut out, pen, w[0], w[1]);
+                    }
                 }
             }
         }
@@ -252,6 +283,7 @@ pub fn callout_items(id: ElementId, name: &str, lo: DVec2, hi: DVec2, mm: f64) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use creabim_core::LinePen;
 
     fn item(kind: DetailKind, pts: &[(f64, f64)]) -> DetailItem {
         DetailItem::new(
@@ -273,7 +305,13 @@ mod tests {
                 &[(0.0, 0.0), (1.0, 0.0)]
             };
             let d = item(kind, pts);
-            let items = detail_items(ElementId::new(), &d, 0.01, MembraneLook::default());
+            let items = detail_items(
+                ElementId::new(),
+                &d,
+                0.01,
+                MembraneLook::default(),
+                &DraftLayers::default(),
+            );
             assert!(!items.is_empty(), "{kind:?} draws something");
             let (lo, hi) = crate::plan::PlanView { items }.bounds().unwrap();
             let reach = d.width.max(0.06) + 0.6;
@@ -287,7 +325,7 @@ mod tests {
         let mut d = item(DetailKind::Membrane, &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]);
         // 1:10, a paper millimetre is 10 mm
         for look in MembraneLook::ALL {
-            let items = detail_items(ElementId::new(), &d, 0.01, look);
+            let items = detail_items(ElementId::new(), &d, 0.01, look, &DraftLayers::default());
             let lines: Vec<(Pen, DVec2, DVec2)> = items
                 .iter()
                 .filter_map(|i| match i {
@@ -311,7 +349,13 @@ mod tests {
         }
         // flipped, it goes the other way
         d.flip = true;
-        let items = detail_items(ElementId::new(), &d, 0.01, MembraneLook::Dashed);
+        let items = detail_items(
+            ElementId::new(),
+            &d,
+            0.01,
+            MembraneLook::Dashed,
+            &DraftLayers::default(),
+        );
         assert!(items.iter().any(|i| matches!(i,
             PlanItem::Line { pen: Pen::Cut, a, .. } if a.distance(DVec2::new(0.0, -0.02)) < 1e-9)));
     }
@@ -321,16 +365,22 @@ mod tests {
         use creabim_core::DraftShape as S;
         let lines = |shape: S, pen: LinePen, pts: &[(f64, f64)]| -> Vec<(DVec2, DVec2)> {
             let d = item(DetailKind::Draft { shape, pen }, pts);
-            detail_items(ElementId::new(), &d, 0.01, MembraneLook::default())
-                .into_iter()
-                .map(|i| match i {
-                    PlanItem::Line { pen: p, a, b, .. } => {
-                        assert_eq!(p == Pen::Hidden, pen == LinePen::Dashed);
-                        (a, b)
-                    }
-                    other => panic!("{other:?}"),
-                })
-                .collect()
+            detail_items(
+                ElementId::new(),
+                &d,
+                0.01,
+                MembraneLook::default(),
+                &DraftLayers::default(),
+            )
+            .into_iter()
+            .map(|i| match i {
+                PlanItem::Line { pen: p, a, b, .. } => {
+                    assert!(matches!(p, Pen::Draft { .. }));
+                    (a, b)
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect()
         };
         let p = DVec2::new;
         // a line of two stretches; closed, a third back to its start
@@ -355,7 +405,7 @@ mod tests {
         assert_eq!(hex.len(), 6);
         assert!(hex.iter().all(|(a, b)| (a.distance(*b) - 1.0).abs() < 1e-9));
         // every chord of a circle ends on it
-        let circle = lines(S::Circle, LinePen::Dashed, &[(1., 1.), (3., 1.)]);
+        let circle = lines(S::Circle, LinePen::Fine, &[(1., 1.), (3., 1.)]);
         assert!(circle
             .iter()
             .all(|(a, _)| (a.distance(p(1., 1.)) - 2.0).abs() < 1e-9));
@@ -396,6 +446,108 @@ mod tests {
     }
 
     #[test]
+    fn linework_takes_its_colour_dashes_fill_and_hiding_from_itself_and_its_layer() {
+        use creabim_core::{DraftLayer, DraftShape as S, LineType};
+        let layers = DraftLayers {
+            layers: vec![
+                DraftLayer {
+                    name: "Axes".into(),
+                    color: Some([200, 0, 0]),
+                    linetype: LineType::DashDot,
+                    hidden: false,
+                },
+                DraftLayer {
+                    name: "Notes".into(),
+                    color: None,
+                    linetype: LineType::Continuous,
+                    hidden: true,
+                },
+            ],
+        };
+        let draw = |d: &DetailItem| {
+            detail_items(ElementId::new(), d, 0.1, MembraneLook::default(), &layers)
+        };
+        let pens = |items: &[PlanItem]| -> Vec<Pen> {
+            items
+                .iter()
+                .filter_map(|i| match i {
+                    PlanItem::Line { pen, .. } => Some(*pen),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut d = item(DetailKind::draft(S::Line), &[(0.0, 0.0), (10.0, 0.0)]);
+        // on no layer: one black line of its weight
+        assert_eq!(
+            pens(&draw(&d)),
+            vec![Pen::Draft {
+                weight: LinePen::Medium,
+                rgb: None
+            }]
+        );
+        // on the axes layer: red, in dashes and dots (6 + 0.3 mm every
+        // 9.3 mm of paper, at 100 mm a paper mm: about 11 of each)
+        d.layer = Some("Axes".into());
+        let on = pens(&draw(&d));
+        assert!(on.len() > 15 && on.len() < 25, "{}", on.len());
+        assert!(on.iter().all(|p| matches!(
+            p,
+            Pen::Draft {
+                rgb: Some([200, 0, 0]),
+                ..
+            }
+        )));
+        // its own colour and line type win over the layer's
+        d.color = Some([0, 0, 255]);
+        d.linetype = Some(LineType::Continuous);
+        assert_eq!(
+            pens(&draw(&d)),
+            vec![Pen::Draft {
+                weight: LinePen::Medium,
+                rgb: Some([0, 0, 255])
+            }]
+        );
+        // on a hidden layer nothing is drawn
+        d.layer = Some("Notes".into());
+        assert!(draw(&d).is_empty());
+        // the dashed pen is a light dashed line
+        let dashed = item(
+            DetailKind::Draft {
+                shape: S::Line,
+                pen: LinePen::Dashed,
+            },
+            &[(0.0, 0.0), (10.0, 0.0)],
+        );
+        let dp = pens(&draw(&dashed));
+        assert!(
+            dp.len() > 5
+                && dp.iter().all(|p| matches!(
+                    p,
+                    Pen::Draft {
+                        weight: LinePen::Light,
+                        ..
+                    }
+                ))
+        );
+        // a closed shape can be filled; an open one can't
+        let mut c = item(DetailKind::draft(S::Circle), &[(0.0, 0.0), (1.0, 0.0)]);
+        c.fill = Some(Hatch::Diagonal);
+        assert!(matches!(
+            draw(&c)[0],
+            PlanItem::Fill {
+                hatch: Hatch::Diagonal,
+                ..
+            }
+        ));
+        let mut l = item(
+            DetailKind::draft(S::Line),
+            &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+        );
+        l.fill = Some(Hatch::Diagonal);
+        assert!(!draw(&l).iter().any(|i| matches!(i, PlanItem::Fill { .. })));
+    }
+
+    #[test]
     fn bricks_repeat_along_the_path() {
         let d = item(
             DetailKind::Repeat {
@@ -404,10 +556,16 @@ mod tests {
             },
             &[(0.0, 0.0), (0.9, 0.0)],
         );
-        let units = detail_items(ElementId::new(), &d, 0.01, MembraneLook::default())
-            .iter()
-            .filter(|i| matches!(i, PlanItem::Polygon { .. }))
-            .count();
+        let units = detail_items(
+            ElementId::new(),
+            &d,
+            0.01,
+            MembraneLook::default(),
+            &DraftLayers::default(),
+        )
+        .iter()
+        .filter(|i| matches!(i, PlanItem::Polygon { .. }))
+        .count();
         assert_eq!(units, 4);
     }
 }

@@ -51,6 +51,19 @@ Pick the **pen** beside the shapes: heavy, medium, light, fine or dashed. These 
 
 A rectangle or a polygon is kept as a closed line once drawn, so it can turn and be reshaped corner by corner. Linework moves, rotates, mirrors, copies and deletes like a detail component, and like one it shows only in the view it was drawn in.
 
+## Colours, line types and layers
+
+Select a piece of linework to style it in *Properties*:
+
+- **Line type**: continuous, dashed, dotted or dash-dot (for axes and centre lines). The pattern runs on round corners and curves, and is the same on screen, on paper and in a DXF file.
+- **Colour**: turn *Own* on to give the line a colour of its own.
+- **Fill**: a closed line, circle or ellipse can take a hatch. Unlike a filled region, it hides nothing under it.
+- **Layer**: the drafting layer it is on.
+
+A **drafting layer** is a name you put linework on, to style and hide it together: axes, hidden edges, notes to self. Open *Drafting layers* at the foot of a line's *Properties* to add, rename and remove layers, and for each one set its colour and line type and tick whether it shows. Linework takes its layer's colour and line type unless it has its own. A hidden layer's linework is not drawn in any view or on any sheet.
+
+The layers belong to the project, so they are the same in every view. While you draw, pick the layer and line type of the next line in the tool options.
+
 ## Editing linework
 
 The third group in the tool options edits what is drawn, as a CAD program does. Pick one, then click:

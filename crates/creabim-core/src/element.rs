@@ -115,6 +115,7 @@ impl Element {
             ElementKind::Units(_)
             | ElementKind::Project(_)
             | ElementKind::MarkRules(_)
+            | ElementKind::DraftLayers(_)
             | ElementKind::StylePack(_) => vec![],
             // types are soft too: an element whose type is gone keeps its values
             ElementKind::ElementType(_) => vec![],
@@ -180,6 +181,7 @@ impl Element {
             ElementKind::Reference(_) => "Reference",
             ElementKind::PaperMark(_) => "IfcAnnotation",
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::Sketch(_) => "Sketch",
@@ -368,6 +370,7 @@ impl Element {
                 }
             }
             ElementKind::MarkRules(r) => r.validate(),
+            ElementKind::DraftLayers(l) => l.validate(),
             ElementKind::StylePack(p) => p.validate(),
             ElementKind::CropBox(c) => c.validate(),
             ElementKind::Assembly(a) => a.validate(),
@@ -484,6 +487,9 @@ pub enum ElementKind {
     Join(crate::joins::JoinRule),
     /// A detail component drawn in one view: a flashing, a membrane...
     Detail(crate::detail::DetailItem),
+    /// The project's drafting layers, for plain linework: at most one per
+    /// project, read through [`crate::detail::layers`].
+    DraftLayers(crate::detail::DraftLayers),
 }
 
 impl ElementKind {
@@ -527,6 +533,7 @@ impl ElementKind {
                 crate::papermark::PaperMarkKind::Vector { .. } => "Vector picture",
             },
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::ElementType(_) => "ElementType",

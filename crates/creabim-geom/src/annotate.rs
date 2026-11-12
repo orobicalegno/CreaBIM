@@ -827,6 +827,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     d,
                     view.scale / 1000.0,
                     look,
+                    &creabim_core::detail::layers(model),
                 ));
             }
             ElementKind::View(v) => {

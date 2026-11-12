@@ -5711,6 +5711,22 @@ pub fn draw_item_with(
                         4.0,
                     ));
                 }
+                Pen::Draft { weight, rgb } => {
+                    // linework drawn by hand: its weight, its own colour
+                    use creabim_core::LinePen;
+                    let w = match weight {
+                        LinePen::Heavy => 1.8 * o.cut,
+                        LinePen::Medium => 1.2 * o.proj,
+                        LinePen::Light | LinePen::Dashed => 1.0,
+                        LinePen::Fine => 0.6,
+                    };
+                    let (w, c) = if selected {
+                        (w.max(2.0), highlight)
+                    } else {
+                        (w, rgb.map_or(ink, |c| Color32::from_rgb(c[0], c[1], c[2])))
+                    };
+                    painter.line_segment([a, b], Stroke::new(w, c));
+                }
                 _ => {
                     painter.line_segment([a, b], Stroke::new(1.0, ink));
                 }

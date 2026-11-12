@@ -1933,6 +1933,19 @@ impl CreaBimApp {
                     self.plan.details.path.clear();
                 }
             }
+            "detail.layer" => {
+                let table = creabim_core::detail::layers(self.doc.model());
+                self.plan.details.layer = index
+                    .and_then(|i| i.checked_sub(1))
+                    .and_then(|i| table.layers.get(i))
+                    .map(|l| l.name.clone());
+            }
+            "detail.linetype" => {
+                self.plan.details.linetype = index
+                    .and_then(|i| i.checked_sub(1))
+                    .and_then(|i| creabim_core::LineType::ALL.get(i))
+                    .copied();
+            }
             "detail.edit" => {
                 if let Some(e) = index.and_then(|i| crate::detailtool::DraftEdit::ALL.get(i)) {
                     self.plan.details.pick_edit(*e);
@@ -2963,6 +2976,47 @@ impl CreaBimApp {
                         )
                     })
                     .collect()));
+                // the layer and line type new linework takes
+                let table = creabim_core::detail::layers(self.doc.model());
+                if !table.layers.is_empty() {
+                    let current = self.plan.details.layer.clone();
+                    let mut names = vec![opt(
+                        "detail.layer:0".to_string(),
+                        "No layer",
+                        current.is_none(),
+                        "The drafting layer the line goes on",
+                    )];
+                    names.extend(table.layers.iter().enumerate().map(|(i, l)| {
+                        opt(
+                            format!("detail.layer:{}", i + 1),
+                            &l.name,
+                            current.as_deref() == Some(l.name.as_str()),
+                            "The drafting layer the line goes on",
+                        )
+                    }));
+                    options.push(seg(names));
+                }
+                let linetype = self.plan.details.linetype;
+                let mut types = vec![opt(
+                    "detail.linetype:0".to_string(),
+                    "By layer",
+                    linetype.is_none(),
+                    "The line type: its layer's, or its pen's",
+                )];
+                types.extend(
+                    creabim_core::LineType::ALL
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            opt(
+                                format!("detail.linetype:{}", i + 1),
+                                t.label(),
+                                linetype == Some(*t),
+                                "How the line is broken along its length",
+                            )
+                        }),
+                );
+                options.push(seg(types));
                 if let creabim_core::DraftShape::Polygon { sides } = shape {
                     options.push(json!({
                         "kind": "number", "key": "detail.sides", "label": "Sides",

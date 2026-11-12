@@ -31,6 +31,10 @@ pub struct DetailSettings {
     pub view: Option<ElementId>,
     /// Scale of the next detail view, 1:`callout_scale`.
     pub callout_scale: f64,
+    /// The drafting layer and line type new linework is drawn with; none
+    /// is no layer, and the layer's (or the pen's) line type.
+    pub layer: Option<String>,
+    pub linetype: Option<creabim_core::LineType>,
     /// Editing linework instead of drawing: what the next clicks do.
     pub edit: Option<DraftEdit>,
     /// The piece picked first, and where, by an edit that takes two clicks.
@@ -47,6 +51,15 @@ pub struct DetailSettings {
     /// A polar array's count and the angle it is spread over, degrees.
     pub count: u32,
     pub angle: f64,
+}
+
+/// A change to the project's drafting layers made from Properties.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LayerEdit {
+    /// The table as it is to be: a layer added, removed, recoloured...
+    Set(creabim_core::DraftLayers),
+    /// A layer renamed, on its linework too.
+    Rename { old: String, new: String },
 }
 
 /// An edit of plain linework against other linework, CAD-style.
@@ -108,6 +121,8 @@ impl Default for DetailSettings {
             swap: false,
             view: None,
             callout_scale: 10.0,
+            layer: None,
+            linetype: None,
             edit: None,
             picked: None,
             radius: 0.05,
@@ -560,6 +575,10 @@ pub fn finish(
     let mut item = DetailItem::new(view, d.kind, path);
     item.width = d.width;
     item.flip = flip && matches!(d.kind, DetailKind::Membrane);
+    if d.kind.as_draft().is_some() {
+        item.layer = d.layer.clone();
+        item.linetype = d.linetype;
+    }
     let label = d.kind.label();
     // a rectangle or a polygon is kept as the closed outline it draws
     let e = Element::new(label, ElementKind::Detail(item.baked()));
@@ -615,8 +634,12 @@ pub fn preview(
             let mut item = DetailItem::new(view, kind, pts);
             item.width = d.width;
             item.flip = next.clicked_right();
+            item.linetype = d.linetype;
             let look = creabim_core::styles::active_pack(model).membranes;
-            for it in creabim_geom::detail::detail_items(ElementId::new(), &item, mm, look) {
+            // drawn even while its layer is hidden, so it can be seen going down
+            let layers = creabim_core::DraftLayers::default();
+            for it in creabim_geom::detail::detail_items(ElementId::new(), &item, mm, look, &layers)
+            {
                 crate::planview::draw_item(painter, xf, &it, true, mm);
             }
         }
@@ -625,33 +648,119 @@ pub fn preview(
 }
 
 /// A component's settings in Properties; returns the edit's name when one
-/// changed.
-pub fn detail_fields(ui: &mut egui::Ui, d: &mut DetailItem) -> &'static str {
+/// changed. Plain linework also shows the project's drafting `layers`,
+/// and puts a change to them in `layer_edit`.
+pub fn detail_fields(
+    ui: &mut egui::Ui,
+    d: &mut DetailItem,
+    layers: &creabim_core::DraftLayers,
+    layer_edit: &mut Option<LayerEdit>,
+) -> &'static str {
+    use creabim_core::{DraftLayer, DraftShape, LinePen, LineType};
     let mut label = "";
+    let fillable = d.fillable();
     if let DetailKind::Draft { shape, pen } = &mut d.kind {
-        // plain linework: its shape is what its points mean, its pen can change
+        // plain linework: its shape is what its points mean
         let name = shape.label();
         crate::props::Combo::new("Pen")
             .selected_text(pen.label())
             .show_ui(ui, |ui| {
-                for p in creabim_core::LinePen::ALL {
+                for p in LinePen::ALL {
                     if ui.selectable_value(pen, p, p.label()).changed() {
                         label = "Line pen";
                     }
                 }
             });
-        if let creabim_core::DraftShape::Line | creabim_core::DraftShape::Closed = shape {
-            let mut closed = *shape == creabim_core::DraftShape::Closed;
+        let by = |what: &str| format!("By {what}");
+        let on_layer = d.layer.as_deref().and_then(|n| layers.get(n));
+        crate::props::Combo::new("Line type")
+            .selected_text(
+                d.linetype
+                    .map_or(by(if on_layer.is_some() { "layer" } else { "pen" }), |t| {
+                        t.label().into()
+                    }),
+            )
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_value(&mut d.linetype, None, by("layer or pen"))
+                    .changed()
+                {
+                    label = "Line type";
+                }
+                for t in LineType::ALL {
+                    if ui
+                        .selectable_value(&mut d.linetype, Some(t), t.label())
+                        .changed()
+                    {
+                        label = "Line type";
+                    }
+                }
+            });
+        crate::props::row(ui, "Colour", |ui| {
+            crate::props::flow(ui, |ui| {
+                let mut own = d.color.is_some();
+                if crate::props::switch(ui, &mut own, "Own")
+                    .on_hover_text("Off, it takes its layer's colour, or black.")
+                    .changed()
+                {
+                    d.color = own.then(|| on_layer.and_then(|l| l.color).unwrap_or([0, 0, 0]));
+                    label = "Line colour";
+                }
+                if let Some(c) = &mut d.color {
+                    if ui.color_edit_button_srgb(c).changed() {
+                        label = "Line colour";
+                    }
+                }
+            })
+        });
+        crate::props::Combo::new("Layer")
+            .selected_text(d.layer.clone().unwrap_or_else(|| "None".into()))
+            .show_ui(ui, |ui| {
+                if ui.selectable_value(&mut d.layer, None, "None").changed() {
+                    label = "Line layer";
+                }
+                for l in &layers.layers {
+                    if ui
+                        .selectable_value(&mut d.layer, Some(l.name.clone()), &l.name)
+                        .changed()
+                    {
+                        label = "Line layer";
+                    }
+                }
+            });
+        if fillable {
+            crate::props::Combo::new("Fill")
+                .selected_text(d.fill.map_or("None", |h| h.label()))
+                .show_ui(ui, |ui| {
+                    if ui.selectable_value(&mut d.fill, None, "None").changed() {
+                        label = "Line fill";
+                    }
+                    for h in Hatch::ALL {
+                        if h != Hatch::Empty
+                            && ui
+                                .selectable_value(&mut d.fill, Some(h), h.label())
+                                .changed()
+                        {
+                            label = "Line fill";
+                        }
+                    }
+                });
+        }
+        if let DraftShape::Line | DraftShape::Closed = shape {
+            let mut closed = *shape == DraftShape::Closed;
             if d.points.len() >= 3
                 && crate::props::switch(ui, &mut closed, "Closed")
                     .on_hover_text("Join its end back to its start.")
                     .changed()
             {
                 *shape = if closed {
-                    creabim_core::DraftShape::Closed
+                    DraftShape::Closed
                 } else {
-                    creabim_core::DraftShape::Line
+                    DraftShape::Line
                 };
+                if !closed {
+                    d.fill = None;
+                }
                 label = "Close line";
             }
         }
@@ -662,6 +771,100 @@ pub fn detail_fields(ui: &mut egui::Ui, d: &mut DetailItem) -> &'static str {
             ))
             .weak(),
         );
+        // the project's layers, edited here: they are every view's
+        if crate::props::subsection(ui, "draft.layers", "Drafting layers", false) {
+            let mut table = layers.clone();
+            let mut changed = false;
+            let mut remove = None;
+            for (i, l) in table.layers.iter_mut().enumerate() {
+                crate::props::flow(ui, |ui| {
+                    let mut shown = !l.hidden;
+                    if ui
+                        .checkbox(&mut shown, "")
+                        .on_hover_text(
+                            "Show or hide this layer's linework, in every view and on sheets.",
+                        )
+                        .changed()
+                    {
+                        l.hidden = !shown;
+                        changed = true;
+                    }
+                    // a name is typed whole, then kept: every line on the
+                    // layer is renamed with it
+                    let id = ui.id().with(("draft.layer.name", i));
+                    let mut text = ui
+                        .data_mut(|m| m.get_temp::<String>(id))
+                        .unwrap_or_else(|| l.name.clone());
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0));
+                    if r.lost_focus() {
+                        ui.data_mut(|m| m.remove::<String>(id));
+                        if text.trim() != l.name && !text.trim().is_empty() {
+                            *layer_edit = Some(LayerEdit::Rename {
+                                old: l.name.clone(),
+                                new: text.trim().to_string(),
+                            });
+                        }
+                    } else if r.changed() || r.has_focus() {
+                        ui.data_mut(|m| m.insert_temp(id, text));
+                    }
+                    let mut own = l.color.is_some();
+                    if ui
+                        .checkbox(&mut own, "")
+                        .on_hover_text("Give the layer a colour; off, its linework is black.")
+                        .changed()
+                    {
+                        l.color = own.then_some([200, 0, 0]);
+                        changed = true;
+                    }
+                    if let Some(c) = &mut l.color {
+                        changed |= ui.color_edit_button_srgb(c).changed();
+                    }
+                    egui::ComboBox::from_id_salt(("draft.layer.type", i))
+                        .icon(crate::props::combo_icon)
+                        .width(84.0)
+                        .selected_text(l.linetype.label())
+                        .show_ui(ui, |ui| {
+                            for t in LineType::ALL {
+                                changed |=
+                                    ui.selectable_value(&mut l.linetype, t, t.label()).changed();
+                            }
+                        });
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text("Remove the layer. Its linework stays, on no layer.")
+                        .clicked()
+                    {
+                        remove = Some(i);
+                    }
+                });
+            }
+            if let Some(i) = remove {
+                table.layers.remove(i);
+                changed = true;
+            }
+            if ui
+                .button("Add layer")
+                .on_hover_text(
+                    "A new drafting layer; rename it, then put linework on it with Layer above.",
+                )
+                .clicked()
+            {
+                let name = (1..)
+                    .map(|n| format!("Layer {n}"))
+                    .find(|n| table.get(n).is_none())
+                    .expect("unbounded");
+                table.layers.push(DraftLayer {
+                    name,
+                    color: None,
+                    linetype: LineType::Continuous,
+                    hidden: false,
+                });
+                changed = true;
+            }
+            if changed && layer_edit.is_none() {
+                *layer_edit = Some(LayerEdit::Set(table));
+            }
+        }
         return label;
     }
     egui::ComboBox::from_id_salt("detail.kind")

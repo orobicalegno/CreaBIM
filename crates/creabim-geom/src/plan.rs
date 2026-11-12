@@ -25,6 +25,12 @@ pub enum Pen {
     /// Another level traced under a plan: halftone, never printed, not
     /// picked, but snapped to.
     Underlay,
+    /// Plain linework drawn by hand: one of the solid weights (heavy,
+    /// medium, light, fine), in its own colour if it has one.
+    Draft {
+        weight: creabim_core::LinePen,
+        rgb: Option<[u8; 3]>,
+    },
 }
 
 pub use creabim_core::Hatch;
