@@ -142,6 +142,7 @@ fn opening(host: ElementId, kind: OpeningKind, offset: f64, width: f64) -> Openi
         flip_hand: false,
         flip_facing: false,
         wrap: None,
+        frame_at: None,
     }
 }
 

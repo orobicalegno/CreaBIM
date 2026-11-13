@@ -139,6 +139,7 @@ pub fn sample_house() -> Model {
                         flip_hand: false,
                         flip_facing: false,
                         wrap: None,
+                        frame_at: None,
                     }),
                 );
                 tagged.push((window.id, level, outside * 0.9));
@@ -160,6 +161,7 @@ pub fn sample_house() -> Model {
             flip_hand: false,
             flip_facing: false,
             wrap: None,
+            frame_at: None,
         }),
     );
     let front_door_id = front_door.id;
@@ -202,6 +204,7 @@ pub fn sample_house() -> Model {
             flip_hand: false,
             flip_facing: false,
             wrap: None,
+            frame_at: None,
         }),
     );
     tagged.push((inner_door.id, g, DVec2::new(0.8, 0.0)));
@@ -636,6 +639,7 @@ pub fn typed_house() -> Model {
             flip_hand: false,
             flip_facing: false,
             wrap: None,
+            frame_at: None,
         }),
     );
     types::stamp(doc.model(), &mut door, starter("Single door 900 × 2100"));
@@ -654,6 +658,7 @@ pub fn typed_house() -> Model {
             flip_hand: false,
             flip_facing: false,
             wrap: None,
+            frame_at: None,
         }),
     );
     let (g, f) = (named("Ground Floor"), named("First Floor"));

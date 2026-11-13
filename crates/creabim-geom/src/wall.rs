@@ -366,6 +366,7 @@ mod tests {
             flip_hand: false,
             flip_facing: false,
             wrap: None,
+            frame_at: None,
         }
     }
 
@@ -386,7 +387,7 @@ mod tests {
         let layers = |a: &Assembly, o: &Opening| -> Vec<f64> {
             let cuts = [WrappedCut {
                 cut: Cut::of(o, &w).unwrap(),
-                wrap: opening_wrap(a, &w, o, 0.06),
+                wrap: opening_wrap(a, &w, o, 0.06, creabim_core::frame_shift_in(&w, Some(a), o)),
             }];
             creabim_core::assembly::wall_bands(a, &w)
                 .iter()

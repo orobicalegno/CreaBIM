@@ -906,6 +906,7 @@ fn opening(c: &mut Ctx, o: &f::Opening, at: &Path) {
         flip_hand: o.flip_hand,
         flip_facing: o.flip_facing,
         wrap: None,
+        frame_at: None,
     };
     let mut e = Element::new(name_of(&o.name, &o.id), ElementKind::Opening(opening));
     let typed = match o.kind {

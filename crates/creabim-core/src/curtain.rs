@@ -379,6 +379,7 @@ fn arc_void(model: &Model, host_id: ElementId, host: &Wall, cw: &Wall) -> Option
         flip_hand: false,
         flip_facing: false,
         wrap: None,
+        frame_at: None,
     })
 }
 
@@ -424,6 +425,7 @@ pub fn void_of(model: &Model, host_id: ElementId, host: &Wall, cw: &Wall) -> Opt
         flip_hand: false,
         flip_facing: false,
         wrap: None,
+        frame_at: None,
     })
 }
 

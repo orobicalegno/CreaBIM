@@ -1506,6 +1506,34 @@ pub struct Opening {
     /// as the wall's assembly says ([`crate::assembly::WrapSides`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrap: Option<crate::assembly::WrapSides>,
+    /// Where its frame stands across the wall: against a face of one of
+    /// the wall's layers. None is the middle of the wall.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_at: Option<FrameAt>,
+}
+
+/// A face of a layer: the one towards the wall's exterior, or its interior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LayerFace {
+    #[default]
+    Exterior,
+    Interior,
+}
+
+/// Where a door's or window's frame stands across its wall: against a
+/// face of layer `layer` (counted from the exterior; a wall without
+/// layers is one layer), on that layer's side of the face. So on a
+/// layer's exterior face the frame's outer face is flush with it and the
+/// frame runs inwards; on its interior face the frame's inner face is
+/// flush with it and the frame runs outwards. `offset` then moves it
+/// towards the interior (the exterior when negative).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrameAt {
+    pub layer: usize,
+    #[serde(default)]
+    pub face: LayerFace,
+    #[serde(default, skip_serializing_if = "is_zero_f")]
+    pub offset: f64,
 }
 
 impl Opening {

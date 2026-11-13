@@ -1080,7 +1080,7 @@ pub fn plan_view_with(
                     for (oid, o) in hosted {
                         if let Some(c) = Cut::of(o, w) {
                             if cut_v > c.v0 && cut_v < c.v1 {
-                                items.extend(opening_symbol(oid, o, w, &c, cut_v, &plain));
+                                items.extend(opening_symbol(oid, o, w, &c, cut_v, &plain, 0.0));
                             }
                         }
                     }
@@ -1099,11 +1099,18 @@ pub fn plan_view_with(
                         let wrap = layered
                             .zip(crate::opening::Fitted::of(o, w))
                             .map(|((_, asm), f)| {
-                                creabim_core::opening_wrap(asm, w, o, f.frame.depth)
+                                creabim_core::opening_wrap(
+                                    asm,
+                                    w,
+                                    o,
+                                    f.frame.depth,
+                                    creabim_core::frame_shift_in(w, Some(asm), o),
+                                )
                             })
                             .unwrap_or_default();
                         gaps.push((c.u0, c.u1, wrap));
-                        items.extend(opening_symbol(oid, o, w, &c, cut_v, &at));
+                        let shift = creabim_core::frame_shift_in(w, layered.map(|x| x.1), o);
+                        items.extend(opening_symbol(oid, o, w, &c, cut_v, &at, shift));
                     } else if c.v0 >= cut_v {
                         // wholly above the cut (a duct hole, a high
                         // window): its outline in the wall, dashed
@@ -2157,6 +2164,7 @@ fn opening_symbol(
     c: &Cut,
     cut_v: f64,
     at: &dyn Fn(f64, f64) -> DVec2,
+    shift: f64,
 ) -> Vec<PlanItem> {
     use crate::opening::{opening_boxes, Fitted, Part};
     let mut out = Vec::new();
@@ -2179,7 +2187,7 @@ fn opening_symbol(
             points: vec![at(u0, s0), at(u1, s0), at(u1, s1), at(u0, s1)],
         })
     };
-    let boxes = opening_boxes(o, w);
+    let boxes = opening_boxes(o, w, shift);
     for b in &boxes {
         let (u0, u1) = (c.u0 + b.lo.x, c.u0 + b.hi.x);
         let cut = b.lo.z < z && z < b.hi.z;
@@ -2780,6 +2788,7 @@ mod tests {
                 flip_hand: false,
                 flip_facing: false,
                 wrap: None,
+                frame_at: None,
             }),
         );
         let hole = duct.id;

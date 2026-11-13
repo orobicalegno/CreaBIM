@@ -325,14 +325,66 @@ impl OpeningWrap {
     }
 }
 
+/// How far across `wall` from its centre line the middle of the frame of
+/// opening `o` stands (left of start → end positive, as [`Band`]), with
+/// the wall's layers `a` if it has them: 0 unless the opening says where
+/// its frame goes ([`Opening::frame_at`]). The frame is kept inside the
+/// wall where it fits.
+pub fn frame_shift_in(wall: &Wall, a: Option<&Assembly>, o: &Opening) -> f64 {
+    let Some(at) = o.frame_at else {
+        return 0.0;
+    };
+    let t = wall.thickness / 2.0;
+    let hd = o.frame.depth.clamp(0.02, wall.thickness.max(0.02)) / 2.0;
+    // from the exterior to the interior across the wall
+    let inwards = if wall.flip { -1.0 } else { 1.0 };
+    let (ext, int) = match a.filter(|a| a.usage == AssemblyUse::Wall) {
+        Some(a) => {
+            let bands = wall_bands(a, wall);
+            let b = bands[at.layer.min(bands.len() - 1)];
+            if wall.flip {
+                (b.s1, b.s0)
+            } else {
+                (b.s0, b.s1)
+            }
+        }
+        // a wall of one material is one layer
+        None => (-t * inwards, t * inwards),
+    };
+    let c = match at.face {
+        crate::LayerFace::Exterior => ext + inwards * hd,
+        crate::LayerFace::Interior => int - inwards * hd,
+    } + inwards * at.offset;
+    let room = (t - hd).max(0.0);
+    c.clamp(-room, room)
+}
+
+/// [`frame_shift_in`] for opening `o` in its host wall in `model`.
+pub fn frame_shift(model: &Model, o: &Opening) -> f64 {
+    let Some(e) = model.get(o.host) else {
+        return 0.0;
+    };
+    let ElementKind::Wall(w) = &e.kind else {
+        return 0.0;
+    };
+    frame_shift_in(w, assembly_of(model, e).map(|x| x.1), o)
+}
+
 /// How the layers of `wall` wrap at opening `o`, whose frame is
-/// `frame_depth` deep through the wall and centred in it: on each face
+/// `frame_depth` deep through the wall and stands `shift` off its centre
+/// line ([`frame_shift_in`]): on each face
 /// the assembly (or the opening itself, [`Opening::wrap`]) wraps, the
 /// layers that wrap turn in and run to the frame, the outermost against
 /// the opening and each next one behind it; what they cover stops short
 /// by their thickness, so the opening keeps its size. A bare hole has no
 /// frame: its returns stop at the core.
-pub fn opening_wrap(a: &Assembly, wall: &Wall, o: &Opening, frame_depth: f64) -> OpeningWrap {
+pub fn opening_wrap(
+    a: &Assembly,
+    wall: &Wall,
+    o: &Opening,
+    frame_depth: f64,
+    shift: f64,
+) -> OpeningWrap {
     let sides = o.wrap.unwrap_or(a.wrap_openings);
     if sides.is_none() || a.usage != AssemblyUse::Wall {
         return OpeningWrap::default();
@@ -351,8 +403,8 @@ pub fn opening_wrap(a: &Assembly, wall: &Wall, o: &Opening, frame_depth: f64) ->
         let stop = match (o.kind, face < 0.0) {
             (OpeningKind::Hole, true) => core_lo,
             (OpeningKind::Hole, false) => core_hi,
-            (_, true) => -hd,
-            (_, false) => hd,
+            (_, true) => shift - hd,
+            (_, false) => shift + hd,
         };
         let reach = (stop - face).abs();
         // from the face inwards
@@ -873,6 +925,93 @@ pub fn replace_material(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_frame_stands_against_the_face_of_the_layer_it_is_set_to() {
+        use crate::{FrameAt, LayerFace, OpeningFrame};
+        use glam::DVec2;
+        // 20 render, 100 insulation, 160 block, 20 plaster: 300 in all,
+        // exterior on the wall's right (negative across it)
+        let a = Assembly::new(
+            AssemblyUse::Wall,
+            vec![
+                Layer::new(LayerFunction::Finish, None, 0.02),
+                Layer::new(LayerFunction::Insulation, None, 0.10),
+                Layer::new(LayerFunction::Structure, None, 0.16),
+                Layer::new(LayerFunction::Finish, None, 0.02),
+            ],
+        );
+        let mut w = Wall::new(
+            ElementId::new(),
+            DVec2::ZERO,
+            DVec2::new(5.0, 0.0),
+            0.3,
+            3.0,
+        );
+        let mut o = Opening {
+            host: ElementId::new(),
+            kind: OpeningKind::Window,
+            offset: 1.0,
+            sill: 0.9,
+            width: 1.2,
+            height: 1.2,
+            material: None,
+            frame: OpeningFrame {
+                depth: 0.08,
+                ..Default::default()
+            },
+            flip_hand: false,
+            flip_facing: false,
+            wrap: None,
+            frame_at: None,
+        };
+        let near = |x: f64, y: f64| assert!((x - y).abs() < 1e-9, "{x} {y}");
+        let at = |layer, face, offset| {
+            Some(FrameAt {
+                layer,
+                face,
+                offset,
+            })
+        };
+        // unset: the middle of the wall
+        near(frame_shift_in(&w, Some(&a), &o), 0.0);
+        // the block's exterior face is 120 in from the outside (-0.03):
+        // the frame's outer face on it, the frame inwards of it
+        o.frame_at = at(2, LayerFace::Exterior, 0.0);
+        near(frame_shift_in(&w, Some(&a), &o), -0.03 + 0.04);
+        // the insulation's interior face is the same plane: the frame's
+        // inner face on it, the frame in the insulation
+        o.frame_at = at(1, LayerFace::Interior, 0.0);
+        near(frame_shift_in(&w, Some(&a), &o), -0.03 - 0.04);
+        // flush with the outside of the wall, and with the inside
+        o.frame_at = at(0, LayerFace::Exterior, 0.0);
+        near(frame_shift_in(&w, Some(&a), &o), -0.15 + 0.04);
+        o.frame_at = at(3, LayerFace::Interior, 0.0);
+        near(frame_shift_in(&w, Some(&a), &o), 0.15 - 0.04);
+        // an offset moves it towards the interior; it never leaves the wall
+        o.frame_at = at(0, LayerFace::Exterior, 0.05);
+        near(frame_shift_in(&w, Some(&a), &o), -0.15 + 0.04 + 0.05);
+        o.frame_at = at(0, LayerFace::Exterior, -1.0);
+        near(frame_shift_in(&w, Some(&a), &o), -0.11);
+        // a flipped wall has its exterior on the other side
+        w.flip = true;
+        o.frame_at = at(0, LayerFace::Exterior, 0.0);
+        near(frame_shift_in(&w, Some(&a), &o), 0.15 - 0.04);
+        w.flip = false;
+        // a wall of one material is one layer
+        o.frame_at = at(0, LayerFace::Interior, 0.0);
+        near(frame_shift_in(&w, None, &o), 0.11);
+        // the wrapping layers run to the frame's faces, wherever it stands
+        let mut wrapping = a.clone();
+        wrapping.wrap_openings = WrapSides::Both;
+        o.frame_at = at(2, LayerFace::Exterior, 0.0);
+        let shift = frame_shift_in(&w, Some(&wrapping), &o);
+        let wrap = opening_wrap(&wrapping, &w, &o, 0.08, shift);
+        let mut stops: Vec<f64> = wrap.stops().collect();
+        stops.sort_by(|x, y| x.total_cmp(y));
+        near(stops[0], -0.03);
+        near(stops[1], 0.05);
+    }
+
     use super::*;
     use crate::Document;
 

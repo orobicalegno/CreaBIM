@@ -312,6 +312,71 @@ pub(super) fn opening_fields(ui: &mut egui::Ui, model: &Model, o: &mut Opening) 
             ui.label("A bare opening: a hole through the wall with no door or window in it");
         }
     }
+    // where the frame stands across the wall: against a face of one of
+    // its layers, on that layer's side
+    if o.kind != OpeningKind::Hole {
+        use creabim_core::{FrameAt, LayerFace};
+        let layers: Vec<String> = match model
+            .get(o.host)
+            .and_then(|e| creabim_core::assembly_of(model, e))
+        {
+            Some((_, a)) => a
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let name = l
+                        .material
+                        .and_then(|m| model.get(m))
+                        .map_or(l.function.label(), |e| e.name.as_str());
+                    format!("{}. {name} {}", i + 1, crate::units::len(l.thickness))
+                })
+                .collect(),
+            // a wall of one material is one layer
+            None => vec!["Wall".to_string()],
+        };
+        let name = |at: Option<FrameAt>| match at {
+            None => "Middle of the wall".to_string(),
+            Some(at) => format!(
+                "{}: {} face",
+                layers
+                    .get(at.layer.min(layers.len() - 1))
+                    .map_or("Wall", |s| s.as_str()),
+                match at.face {
+                    LayerFace::Exterior => "exterior",
+                    LayerFace::Interior => "interior",
+                }
+            ),
+        };
+        let mut at = o.frame_at;
+        let offset = at.map_or(0.0, |a| a.offset);
+        crate::props::Combo::new("Frame at")
+            .selected_text(name(at))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut at, None, name(None));
+                for layer in 0..layers.len() {
+                    for face in [LayerFace::Exterior, LayerFace::Interior] {
+                        let choice = Some(FrameAt {
+                            layer,
+                            face,
+                            offset,
+                        });
+                        ui.selectable_value(&mut at, choice, name(choice));
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Where the frame stands across the wall. On a layer's exterior face the frame's outer face is flush with it and the frame runs inwards; on its interior face the frame's inner face is flush with it and the frame runs outwards. Layers are counted from the exterior.");
+        if at != o.frame_at {
+            o.frame_at = at;
+            label = "Frame position"
+        }
+        if let Some(at) = &mut o.frame_at {
+            if num(ui, "Frame offset", &mut at.offset, -2.0, 2.0) {
+                label = "Frame offset"
+            }
+        }
+    }
     // how the wall's layers line its reveals, where the wall is layered
     let layered = model
         .get(o.host)

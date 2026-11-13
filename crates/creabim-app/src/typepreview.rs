@@ -127,6 +127,7 @@ pub(super) fn sample_model(
                     flip_hand: false,
                     flip_facing: false,
                     wrap: None,
+                    frame_at: None,
                 }),
             ));
             // the section through its middle, whatever its width

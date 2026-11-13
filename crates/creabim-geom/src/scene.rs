@@ -110,7 +110,13 @@ fn layer_items(
                 .filter_map(|(i, o)| {
                     let f = crate::opening::Fitted::of(o, w)?;
                     let wrap = if i < own {
-                        creabim_core::opening_wrap(a, w, o, f.frame.depth)
+                        creabim_core::opening_wrap(
+                            a,
+                            w,
+                            o,
+                            f.frame.depth,
+                            creabim_core::frame_shift_in(w, Some(a), o),
+                        )
                     } else {
                         Default::default()
                     };
@@ -900,7 +906,7 @@ fn opening_items(
     use crate::opening::Part;
     use creabim_core::OpeningKind;
     let material = creabim_core::material_of(model, e).map(|(_, m)| (m.color, m.surface()));
-    crate::opening::opening_meshes(o, w, level_z)
+    crate::opening::opening_meshes(o, w, level_z, creabim_core::frame_shift(model, o))
         .into_iter()
         .map(|(part, mesh)| {
             let (color, surface) = match (part, o.kind, material) {
