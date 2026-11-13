@@ -705,6 +705,8 @@ impl<'a> Importer<'a> {
                         frame: Default::default(),
                         flip_hand: false,
                         flip_facing: false,
+                        wrap: None,
+                        frame_at: None,
                     }),
                 });
             } else if let Some(&i) = self.slabs.get(&host) {
@@ -1734,6 +1736,8 @@ impl<'a> Importer<'a> {
                         frame: Default::default(),
                         flip_hand: false,
                         flip_facing: false,
+                        wrap: None,
+                        frame_at: None,
                     }),
                 ));
             }
@@ -1866,6 +1870,8 @@ impl<'a> Importer<'a> {
                 frame: Default::default(),
                 flip_hand: false,
                 flip_facing: false,
+                wrap: None,
+                frame_at: None,
             }),
         });
     }

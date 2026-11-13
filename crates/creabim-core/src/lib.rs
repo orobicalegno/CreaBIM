@@ -15,6 +15,7 @@ pub mod curtain;
 pub mod detail;
 pub mod divide;
 pub mod document;
+pub mod draftedit;
 pub mod editmesh;
 pub mod element;
 pub mod footing;
@@ -63,15 +64,24 @@ pub use annotation::{
     text_style, DimAxis, DimensionKind, Font, Note, StyleUse, TagShape, Terminator, TextAlign,
     TextStyle,
 };
-pub use assembly::{assembly_of, Assembly, AssemblyUse, Layer, LayerFunction};
+pub use assembly::{
+    assembly_of, frame_shift, frame_shift_in, opening_wrap, Assembly, AssemblyUse, Layer,
+    LayerFunction, OpeningWrap, WrapReturn, WrapSides,
+};
 pub use constraint::{Constraint, SolveError};
 pub use cropbox::{CropBox, CropScope};
 pub use csg::BoolOp;
 pub use curtain::{CurtainGrid, GridRule, PanelKind};
-pub use detail::{DetailItem, DetailKind, DrawingFrame, MembraneLook};
+pub use detail::{
+    DetailItem, DetailKind, DraftLayer, DraftLayers, DraftShape, DraftSymbol, Drafting,
+    DrawingFrame, LineLook, LinePen, LineType, MembraneLook,
+};
 pub use document::{Document, Step, StepId};
 pub use editmesh::EditMesh;
-pub use element::{layer_edge_offsets, set_layer_edge, LayerEdge, LayerEnd, LocationLine, WallTop};
+pub use element::{
+    layer_edge_offsets, set_layer_edge, FrameAt, LayerEdge, LayerEnd, LayerFace, LocationLine,
+    WallTop,
+};
 pub use element::{
     Cut, Dimension, Element, ElementKind, FreeMesh, Grid, GridGroup, Guide, Hatch, HostPoint,
     Level, LevelHead, Material, Opening, OpeningFrame, OpeningKind, ScheduleCategory, Sheet,

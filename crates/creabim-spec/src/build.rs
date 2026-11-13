@@ -575,6 +575,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
                 }
                 None => None,
             },
+            wraps: None,
         });
     }
     if !ok {
@@ -588,6 +589,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
         },
         layers,
         description: a.description.clone().unwrap_or_default(),
+        wrap_openings: Default::default(),
     };
     c.insert(
         &a.id,
@@ -903,6 +905,8 @@ fn opening(c: &mut Ctx, o: &f::Opening, at: &Path) {
         frame: Default::default(),
         flip_hand: o.flip_hand,
         flip_facing: o.flip_facing,
+        wrap: None,
+        frame_at: None,
     };
     let mut e = Element::new(name_of(&o.name, &o.id), ElementKind::Opening(opening));
     let typed = match o.kind {

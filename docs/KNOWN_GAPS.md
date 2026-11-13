@@ -297,7 +297,7 @@ From the open JSON import (#44). [`docs/json-format.md`](json-format.md) keeps t
 
 | Gap | Size | Found in | Checked |
 | --- | --- | --- | --- |
-| No DXF or DWG export, including dimensions and annotations. | L | annotation | |
+| No DWG export. DXF export writes dimensions and hatches as lines and text, not as dimension or hatch objects, and leaves images out. | L | annotation | |
 | DXF import skips blocks (INSERT), hatches, dimensions and splines. | M | drafting-tools | |
 | FreeCAD export gives plain solids with a BIM type, not native Arch walls, and curved faces are faceted. Only rendering colours are read from FreeCAD materials. | M | exchange, materials | |
 | SVG import turns curves into chords and reads only plain text and `tspan`. | S | drafting-tools | |

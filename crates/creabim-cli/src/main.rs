@@ -47,6 +47,8 @@ usage: (<model> is a .creabim project or a legacy .creabim.json file)
   creabim import-ifcx <in.ifcx> <out>  import an IFC5 IFCX file (experimental)
   creabim plan <model> <level-name> <out.svg>
                                        draw a level's plan at 1:100
+                                       (plan, view and sheet write DXF for CAD
+                                       programs when <out> ends in .dxf)
   creabim view <model> <view-name> <out.svg>
                                        draw any view (plan, section, elevation)
   creabim views <model>                list the model's views
@@ -248,8 +250,13 @@ fn main() -> ExitCode {
                 .levels()
                 .find(|(e, _)| e.name == *level)
                 .ok_or_else(|| format!("no level named {level:?}"))?;
-            let svg = creabim_geom::plan_view(&m, le.id, 1.2).to_svg(100.0);
-            std::fs::write(out, svg).map_err(|e| e.to_string())
+            let plan = creabim_geom::plan_view(&m, le.id, 1.2);
+            let drawn = if is_dxf(out) {
+                plan.to_dxf(100.0)
+            } else {
+                plan.to_svg(100.0)
+            };
+            std::fs::write(out, drawn).map_err(|e| e.to_string())
         }),
         ["view", input, name, out] => load(input).and_then(|m| {
             let e = m
@@ -261,7 +268,12 @@ fn main() -> ExitCode {
                 _ => 100.0,
             };
             let d = creabim_geom::section::view_drawing(&m, e.id).expect("is a view");
-            std::fs::write(out, d.to_svg(scale)).map_err(|e| e.to_string())
+            let drawn = if is_dxf(out) {
+                d.to_dxf(scale)
+            } else {
+                d.to_svg(scale)
+            };
+            std::fs::write(out, drawn).map_err(|e| e.to_string())
         }),
         ["views", input] => load(input).map(|m| {
             for e in m.iter() {
@@ -309,7 +321,12 @@ fn main() -> ExitCode {
                 .into_iter()
                 .find(|(_, s)| s.number == *number)
                 .ok_or_else(|| format!("no sheet numbered {number:?}"))?;
-            let svg = sheet_svg(&m, id, &info(input)).expect("is a sheet");
+            let svg = if is_dxf(out) {
+                creabim_geom::sheet::sheet_dxf(&m, id, &info(input))
+            } else {
+                sheet_svg(&m, id, &info(input))
+            }
+            .expect("is a sheet");
             std::fs::write(out, svg).map_err(|e| e.to_string())
         }),
         ["pdf", input, out] => load(input).and_then(|m| {
@@ -575,6 +592,10 @@ fn is_json(path: &str) -> bool {
 }
 
 /// Read a project in either format; the history is not needed here.
+fn is_dxf(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".dxf")
+}
+
 fn load(path: &str) -> Result<Model, String> {
     creabim_store::load(path)
         .map(|doc| doc.into_parts().0)
