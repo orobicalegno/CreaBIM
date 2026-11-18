@@ -651,9 +651,10 @@ pub const PAPER: PaperMap = PaperMap {
 
 /// The notes written on the sheet itself, outside any view.
 pub fn draw_sheet_notes(c: &mut dyn Canvas, model: &Model, sheet: ElementId) {
-    let notes = crate::PlanView {
-        items: crate::annotate::sheet_notes(model, sheet),
-    };
+    // linework drawn on the paper, then the notes over it
+    let mut items = crate::annotate::sheet_linework(model, sheet);
+    items.extend(crate::annotate::sheet_notes(model, sheet));
+    let notes = crate::PlanView { items };
     paper::draw(c, &notes, &PAPER);
     draw_paper_marks(c, model, sheet);
 }
@@ -952,6 +953,15 @@ pub fn sheet_svg(model: &Model, sheet: ElementId, info: &SheetInfo) -> Option<St
     let mut svg = SvgCanvas::new(DVec2::new(s.width, s.height));
     draw_sheet(&mut svg, model, sheet, &views, info);
     Some(svg.finish())
+}
+
+/// A sheet as DXF for CAD programs, in paper millimetres.
+pub fn sheet_dxf(model: &Model, sheet: ElementId, info: &SheetInfo) -> Option<String> {
+    sheet_of(model, sheet)?;
+    let views = placed_views(model, sheet, &mut |v| view_drawing(model, v));
+    let mut dxf = crate::dxf::DxfCanvas::new(1.0);
+    draw_sheet(&mut dxf, model, sheet, &views, info);
+    Some(dxf.finish())
 }
 
 /// All sheets as one PDF, a page per sheet in sheet-number order.

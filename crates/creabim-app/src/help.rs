@@ -258,6 +258,7 @@ pub fn tool_page(t: Tool) -> &'static str {
         Tool::Room | Tool::RoomSeparator => "rooms",
         Tool::Ceiling => "ceilings",
         Tool::Callout => "details#callouts",
+        Tool::Camera => "views#cameras",
         Tool::Detail => "details#detail-components",
     }
 }
@@ -292,6 +293,8 @@ pub fn element_page(kind: &ElementKind) -> &'static str {
         ElementKind::Ceiling(_) => "ceilings",
         ElementKind::Join(_) => "joins",
         ElementKind::Detail(_) => "details#detail-components",
+        ElementKind::DraftLayers(_) => "details#colours-line-types-and-layers",
+        ElementKind::Symbol(_) => "details#symbols",
         ElementKind::Dimension(_) => "dimensions",
         ElementKind::Tag(_) => "tags",
         ElementKind::Note(_) => "notes",
@@ -498,6 +501,7 @@ pub const KEYS: &[Binding] = &[
     key(VIEWS, "Ctrl+PgDn", "The next workspace"),
     key(VIEWS, "/", "Show the selection alone, and back"),
     key(VIEWS, "F3", "Snapping on or off"),
+    key(VIEWS, "F5", "Explore the 3D view on foot, and back"),
     key(VIEWS, "Alt (hold)", "Suspend snapping while you click"),
     key(VIEWS, "Shift+G", "Show or hide the guides in every view"),
     key(VIEWS, "Alt+Z", "X-ray: see through walls, slabs and roofs"),

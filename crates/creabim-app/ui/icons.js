@@ -78,6 +78,7 @@ window.ICONS = {
 "panel-left": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /> <path d=\"M9 3v18\" />",
 "grid-lines": "<path d=\"M8 3v18\"></path><path d=\"M16 3v18\"></path><path d=\"M3 8h18\"></path><path d=\"M3 16h18\"></path>",
 "hash": "<line x1=\"4\" x2=\"20\" y1=\"9\" y2=\"9\" /> <line x1=\"4\" x2=\"20\" y1=\"15\" y2=\"15\" /> <line x1=\"10\" x2=\"8\" y1=\"3\" y2=\"21\" /> <line x1=\"16\" x2=\"14\" y1=\"3\" y2=\"21\" />",
+"camera": "<path d=\"M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z\" /> <circle cx=\"12\" cy=\"13\" r=\"3\" />",
 "axis-3d": "<path d=\"M4 4v16h16\" /> <path d=\"m4 20 7-7\" />",
 "circle-dot": "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <circle cx=\"12\" cy=\"12\" r=\"1\" />",
 "move-3d": "<path d=\"M5 3v16h16\" /> <path d=\"m5 19 6-6\" /> <path d=\"m2 6 3-3 3 3\" /> <path d=\"m18 16 3 3-3 3\" />",

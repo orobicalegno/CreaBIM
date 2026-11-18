@@ -238,6 +238,11 @@ pub(super) fn type_fields(ui: &mut egui::Ui, model: &Model, t: &mut ElementType)
     } else {
         AssemblyUse::Floor
     };
+    let opening_kind = if matches!(t.params, TypeParams::Door(_)) {
+        creabim_core::OpeningKind::Door
+    } else {
+        creabim_core::OpeningKind::Window
+    };
     match &mut t.params {
         TypeParams::Wall(w) => {
             if let Some(c) = &mut w.curtain {
@@ -324,6 +329,9 @@ pub(super) fn type_fields(ui: &mut egui::Ui, model: &Model, t: &mut ElementType)
             }
             if panes(ui, "Panes up", &mut o.frame.panes_up) {
                 label = "Type panes";
+            }
+            if !super::wallsui::frame_drawing_fields(ui, opening_kind, &mut o.frame).is_empty() {
+                label = "Type frame";
             }
             if material_pick(ui, model, "opening", &mut o.material) {
                 label = "Type material";

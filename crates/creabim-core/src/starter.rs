@@ -141,6 +141,8 @@ fn opening(host: ElementId, kind: OpeningKind, offset: f64, width: f64) -> Openi
         frame: Default::default(),
         flip_hand: false,
         flip_facing: false,
+        wrap: None,
+        frame_at: None,
     }
 }
 
@@ -372,6 +374,7 @@ fn materials_and_types(b: &mut Builder) {
                 depth: 0.09,
                 panes_across: across,
                 panes_up: up,
+                ..Default::default()
             },
             material: frames,
         })

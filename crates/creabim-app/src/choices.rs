@@ -57,6 +57,7 @@ fn marker_items(parts: Option<&MarkerParts>, which: Marks) -> Vec<PlanItem> {
                 mm,
                 rgb: None,
                 bold: false,
+                angle: 0.0,
             });
         }
         out.push(PlanItem::Line {

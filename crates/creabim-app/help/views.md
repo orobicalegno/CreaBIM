@@ -57,3 +57,16 @@ A plan's *Properties* has a *Graphics* group:
 ## Ordering the browser
 
 Drag a view up or down in its group. The group then keeps your order (it says *Your order*); its sort button puts it back in automatic order (plans by level).
+
+## Cameras
+
+A **camera** is a perspective view, as an Archicad camera: where you stand, what you look at, and how wide you see. It is kept under *3D views* in the project browser, drawn with hidden lines like any 3D view, and goes on sheets, into PDF and DXF.
+
+- **Place one in a plan**: pick the **Camera** tool (in the Views group), set the *Eye height* above the plan's level and the *Angle* in the top bar, then click where the camera stands and click what it looks at.
+- **Save the 3D window as one**: *View › Camera › Save as a camera* keeps what the 3D window sees now, from where it is, as a camera. Walk to the spot with [Explore on foot](navigate#exploring-on-foot) (`F5`), then save it.
+- **In plans** a camera shows on the floor it stands on: its body, the edges of what it sees out to its target, and a cross on the target. Select it to drag the camera or its target with their grips, or move and rotate it like anything else.
+- **In Properties**: the eye's and the target's place and height (above ±0), the *Angle* (60° is a usual lens, 90° a wide one) and the picture's *Proportion* (1.5 is 3:2, 1.78 is 16:9), its style and its scale. **Look through it in the 3D window** puts the 3D window's camera there.
+- **A selected camera and the 3D window follow each other.** Select a camera and the 3D window looks through it, with *Looking through* shown at its foot. Whatever you change in its *Properties*, drag with its grips or undo shows in the 3D window at once. Move in the 3D window (orbit, pan, zoom, or walk with `F5`) and the camera is moved with you, saved each time a move ends; each move is one undo step. Select something else, or nothing, and the 3D window is your own again.
+
+The camera's picture is framed: what is outside its angle is left out, and so is anything closer than 10 cm.
+

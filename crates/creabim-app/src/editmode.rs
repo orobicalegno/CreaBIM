@@ -186,7 +186,8 @@ pub fn rings(model: &Model, e: &Element) -> Vec<RingInfo> {
                 corners: d.model_points(frame),
                 closed: d.kind.is_area(),
                 normal: frame.normal(),
-                reshapes: !matches!(d.kind, creabim_core::DetailKind::BreakLine),
+                // a circle, an arc or an ellipse is its set points
+                reshapes: d.kind.fixed_points().is_none(),
             }]
         }
         ElementKind::Sketch(sk) if sk.circle.is_none() => {

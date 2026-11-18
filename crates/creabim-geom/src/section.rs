@@ -414,6 +414,194 @@ impl AxoFrame {
     }
 }
 
+/// A camera's view of the model in perspective, as [`ViewKind::Perspective`]:
+/// the eye, which way it looks and how wide.
+///
+/// It draws through the parallel machinery: the scene is cut to what the
+/// camera sees, then moved into a space where the camera's rays are all
+/// parallel (x and y divided by the depth, the depth kept in order). Flat
+/// faces stay flat and straight edges straight there, so hidden lines,
+/// shading and every export work as they do for a 3D view.
+///
+/// [`ViewKind::Perspective`]: creabim_core::ViewKind::Perspective
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraFrame {
+    pub eye: DVec3,
+    pub right: DVec3,
+    pub up: DVec3,
+    pub forward: DVec3,
+    /// The depth drawn at its true size at the view's scale: the target's.
+    pub focus: f64,
+    /// Half the picture's width and height over the depth (tan of half
+    /// the angle).
+    pub half_w: f64,
+    pub half_h: f64,
+}
+
+/// What a camera sees from no closer than this.
+const NEAR: f64 = 0.1;
+
+/// The depth range of a perspective, in its parallel space.
+pub const PERSPECTIVE_DEPTH: f64 = 1000.0;
+
+impl CameraFrame {
+    /// A camera at `eye` looking at `target`, `fov` degrees wide across,
+    /// its picture `aspect` times as wide as high.
+    pub fn new(eye: DVec3, target: DVec3, fov: f64, aspect: f64) -> Self {
+        let forward = (target - eye).normalize_or(DVec3::Y);
+        // looking straight up or down: north is up the picture
+        let right = forward.cross(DVec3::Z).try_normalize().unwrap_or(DVec3::X);
+        let up = right.cross(forward);
+        let half_w = (fov.clamp(5.0, 150.0).to_radians() / 2.0).tan();
+        Self {
+            eye,
+            right,
+            up,
+            forward,
+            focus: eye.distance(target).max(1.0),
+            half_w,
+            half_h: half_w / aspect.clamp(0.2, 5.0),
+        }
+    }
+
+    /// A world point in the camera's terms: across, up, and how far ahead.
+    fn in_eye(&self, p: DVec3) -> DVec3 {
+        let d = p - self.eye;
+        DVec3::new(d.dot(self.right), d.dot(self.up), d.dot(self.forward))
+    }
+
+    /// A point in the camera's terms into its parallel space.
+    fn eye_to_space(&self, e: DVec3) -> DVec3 {
+        let z = e.z.max(NEAR * 0.5);
+        DVec3::new(
+            self.focus * e.x / z,
+            self.focus * e.y / z,
+            PERSPECTIVE_DEPTH * (1.0 - NEAR / z),
+        )
+    }
+
+    /// World point → (picture x, picture y, depth), for a point in front of
+    /// the camera.
+    pub fn project(&self, p: DVec3) -> DVec3 {
+        self.eye_to_space(self.in_eye(p))
+    }
+
+    /// The ray from the eye through the drawing point `p`.
+    pub fn ray(&self, p: DVec2) -> (DVec3, DVec3) {
+        let d = self.right * (p.x / self.focus) + self.up * (p.y / self.focus) + self.forward;
+        (self.eye, d.normalize())
+    }
+
+    /// The picture's corners, in drawing units.
+    pub fn picture(&self) -> (DVec2, DVec2) {
+        let (w, h) = (self.focus * self.half_w, self.focus * self.half_h);
+        (DVec2::new(-w, -h), DVec2::new(w, h))
+    }
+
+    /// The scene cut to what the camera sees and moved into its parallel
+    /// space, ready for the parallel drawing with no projection.
+    pub fn scene(&self, scene: &[SceneItem]) -> Vec<SceneItem> {
+        // the sides of what it sees, in the camera's terms: inside where
+        // each is not negative; a hair wider so edges on them are kept
+        let (w, h) = (self.half_w * 1.0005, self.half_h * 1.0005);
+        let near = NEAR * 1.01;
+        let planes: [&dyn Fn(DVec3) -> f64; 5] = [
+            &|e| e.z - near,
+            &|e| e.z * w - e.x,
+            &|e| e.z * w + e.x,
+            &|e| e.z * h - e.y,
+            &|e| e.z * h + e.y,
+        ];
+        scene
+            .iter()
+            .filter_map(|item| {
+                let p = &item.mesh.positions;
+                let mut mesh = crate::TriMesh::default();
+                for t in item.mesh.indices.chunks_exact(3) {
+                    let mut poly: Vec<DVec3> = t
+                        .iter()
+                        .map(|&i| self.in_eye(DVec3::from(p[i as usize].map(f64::from))))
+                        .collect();
+                    for plane in &planes {
+                        poly = clip_polygon(&poly, plane);
+                        if poly.len() < 3 {
+                            break;
+                        }
+                    }
+                    if poly.len() < 3 {
+                        continue;
+                    }
+                    let pts: Vec<DVec3> = poly.iter().map(|e| self.eye_to_space(*e)).collect();
+                    let n = (pts[1] - pts[0])
+                        .cross(pts[2] - pts[0])
+                        .normalize_or(DVec3::Z);
+                    let fan: Vec<[usize; 3]> = (1..pts.len() - 1).map(|i| [0, i, i + 1]).collect();
+                    mesh.add_polygon(&pts, &fan, n);
+                }
+                (!mesh.is_empty()).then(|| SceneItem {
+                    mesh,
+                    ..item.clone()
+                })
+            })
+            .collect()
+    }
+}
+
+/// `poly` cut to where `inside` is not negative (Sutherland–Hodgman).
+fn clip_polygon(poly: &[DVec3], inside: &dyn Fn(DVec3) -> f64) -> Vec<DVec3> {
+    let mut out = Vec::with_capacity(poly.len() + 2);
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        let (da, db) = (inside(a), inside(b));
+        if da >= 0.0 {
+            out.push(a);
+        }
+        if (da >= 0.0) != (db >= 0.0) {
+            out.push(a + (b - a) * (da / (da - db)));
+        }
+    }
+    out
+}
+
+/// A camera's perspective of the model, hidden lines removed, drawn in
+/// `style`, cropped by `crop`, inside its picture's frame (drawn for
+/// element `id`, the view).
+#[allow(clippy::too_many_arguments)]
+pub fn perspective_view_in(
+    model: &Model,
+    mut scene: Vec<SceneItem>,
+    frame: &CameraFrame,
+    style: ViewStyle,
+    reveal: bool,
+    crop: &[creabim_core::CropBox],
+    id: ElementId,
+) -> Drawing {
+    crate::cropbox::crop_scene(model, &mut scene, crop);
+    let seen = frame.scene(&scene);
+    let flat = |p: DVec3| p;
+    let revealed = reveal.then(|| revealable(model));
+    let (lines, image) = hidden_lines(
+        &seen,
+        &flat,
+        PERSPECTIVE_DEPTH,
+        None,
+        style,
+        revealed.as_ref(),
+    );
+    // the picture's frame, which also keeps the drawing its size
+    let (lo, hi) = frame.picture();
+    let c = [lo, DVec2::new(hi.x, lo.y), hi, DVec2::new(lo.x, hi.y)];
+    let border = (0..4).map(move |i| PlanItem::Line {
+        id,
+        pen: Pen::Fine,
+        a: c[i],
+        b: c[(i + 1) % 4],
+    });
+    PlanView {
+        items: image.into_iter().chain(lines).chain(border).collect(),
+    }
+}
+
 /// A parallel 3D view of the whole model, hidden lines removed, optionally shaded.
 pub fn axonometric_view(model: &Model, azimuth: f64, altitude: f64, shaded: bool) -> Drawing {
     axonometric_view_with(model, azimuth, altitude, style_of(shaded), false, &[])
@@ -760,6 +948,16 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
             let crop = crate::cropbox::active(model, Some(view));
             axonometric_view_in(model, scene(), *azimuth, *altitude, style, reveal, &crop)
         }
+        creabim_core::ViewKind::Perspective {
+            eye,
+            target,
+            fov,
+            aspect,
+        } => {
+            let crop = crate::cropbox::active(model, Some(view));
+            let frame = CameraFrame::new(*eye, *target, *fov, *aspect);
+            perspective_view_in(model, scene(), &frame, style, reveal, &crop, view)
+        }
         creabim_core::ViewKind::Schedule { category, by_type } => {
             let table = crate::schedule::schedule_by(model, *category, *by_type);
             return Some(crate::schedule::schedule_drawing(view, &e.name, &table));
@@ -994,6 +1192,18 @@ fn tint_hidden(
             let frame = AxoFrame::new(model, *azimuth, *altitude);
             let project = |p: DVec3| frame.project(p);
             outlines(&scene, &project, frame.radius * 2.0, None)
+        }
+        creabim_core::ViewKind::Perspective {
+            eye,
+            target,
+            fov,
+            aspect,
+        } => {
+            let crop = crate::cropbox::active(model, Some(view));
+            crate::cropbox::crop_scene(model, &mut scene, &crop);
+            let frame = CameraFrame::new(*eye, *target, *fov, *aspect);
+            let seen = frame.scene(&scene);
+            outlines(&seen, &|p: DVec3| p, PERSPECTIVE_DEPTH, None)
         }
         creabim_core::ViewKind::Schedule { .. } => vec![],
     };

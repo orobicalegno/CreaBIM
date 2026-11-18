@@ -71,7 +71,7 @@ impl Icon {
                 ViewKind::Plan { .. } => Icon::Plan,
                 ViewKind::Section { cut: true, .. } => Icon::Section,
                 ViewKind::Section { cut: false, .. } => Icon::Elevation,
-                ViewKind::Axonometric { .. } => Icon::View3d,
+                ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => Icon::View3d,
                 ViewKind::Schedule { .. } => Icon::Schedule,
             },
             ElementKind::Opening(o) => match o.kind {

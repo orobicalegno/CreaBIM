@@ -126,6 +126,7 @@ pub fn entries(tab: usize) -> Vec<Entry> {
             T(Tool::Section),
             T(Tool::Elevation),
             T(Tool::Callout),
+            T(Tool::Camera),
             Sep,
             act(
                 "crop.add",

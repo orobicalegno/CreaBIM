@@ -888,6 +888,7 @@ pub fn schedule_drawing(view: ElementId, title: &str, s: &Schedule) -> PlanView 
             mm: 1.0,
             rgb: None,
             bold: false,
+            angle: 0.0,
         })
     };
     text(
