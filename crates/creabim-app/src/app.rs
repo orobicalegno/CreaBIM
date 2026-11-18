@@ -297,6 +297,11 @@ pub struct CreaBimApp {
     /// Exploring the model on foot in the 3D view (F5): W A S D walk, a
     /// drag looks round.
     walking: bool,
+    /// The camera the 3D window looks through while it is selected, and
+    /// its eye, target and angle as last put in step with the 3D window.
+    linked_camera: Option<(ElementId, [f64; 7])>,
+    /// The 3D window was moved since its camera was last saved.
+    nav_moved: bool,
     /// Where the 3D view was drawn last frame, for its navigation buttons.
     rect_3d: Option<Rect>,
     /// Where the 2D pane was drawn last frame, and whether the pointer was
@@ -502,6 +507,8 @@ impl CreaBimApp {
             nav_anchor: None,
             nav_orbiting: false,
             walking: false,
+            linked_camera: None,
+            nav_moved: false,
             rect_3d: None,
             rect_2d: None,
             last_in_2d: false,
@@ -1037,6 +1044,13 @@ impl CreaBimApp {
     /// The 3D window seen from a camera at `eye` looking at `target`,
     /// `fov` degrees wide across.
     pub(super) fn look_through(&mut self, eye: DVec3, target: DVec3, fov: f64) {
+        self.aim_3d(eye, target, fov);
+        self.status = "The 3D window looks through the camera.".into();
+    }
+
+    /// The 3D window's camera put at `eye`, looking at `target`, `fov`
+    /// degrees wide across.
+    fn aim_3d(&mut self, eye: DVec3, target: DVec3, fov: f64) {
         let (eye, target) = (eye.as_vec3(), target.as_vec3());
         let d = target - eye;
         let flat = GVec2::new(d.x, d.y).length();
@@ -1050,7 +1064,105 @@ impl CreaBimApp {
         let aspect = self.aspect.max(0.1);
         let half = (fov.to_radians() as f32 / 2.0).tan() / aspect;
         self.camera.fov_y = (2.0 * half.atan()).clamp(0.1, 2.6);
-        self.status = "The 3D window looks through the camera.".into();
+    }
+
+    /// The selected camera, with its eye, target and angle.
+    fn selected_camera(&self) -> Option<(ElementId, DVec3, DVec3, f64)> {
+        let all = self.selection.all();
+        let [id] = all[..] else {
+            return None;
+        };
+        match &self.doc.model().get(id)?.kind {
+            ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye, target, fov, ..
+                    },
+                ..
+            }) => Some((id, *eye, *target, *fov)),
+            _ => None,
+        }
+    }
+
+    /// The selected camera and the 3D window kept in step, before the 3D
+    /// window takes its input: a camera just selected, or changed from
+    /// Properties, its grips or an undo, is what the 3D window shows.
+    fn follow_camera(&mut self) {
+        let pack = |e: DVec3, t: DVec3, f: f64| [e.x, e.y, e.z, t.x, t.y, t.z, f];
+        let Some((id, eye, target, fov)) = self.selected_camera() else {
+            self.linked_camera = None;
+            return;
+        };
+        let now = pack(eye, target, fov);
+        let same = |a: [f64; 7], b: [f64; 7]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        match self.linked_camera {
+            Some((lid, last)) if lid == id && same(last, now) => {}
+            was => {
+                if self.walking {
+                    // walking keeps going from where the camera now is
+                    self.camera.stand();
+                }
+                self.aim_3d(eye, target, fov);
+                self.nav_moved = false;
+                if was.is_none_or(|(lid, _)| lid != id) {
+                    let name = self
+                        .doc
+                        .model()
+                        .get(id)
+                        .map(|e| e.name.clone())
+                        .unwrap_or_default();
+                    self.status = format!(
+                        "The 3D window looks through {name}: moving in it moves the camera, and what you change in Properties shows at once. Select something else to stop."
+                    );
+                }
+                self.linked_camera = Some((id, now));
+            }
+        }
+    }
+
+    /// Where the 3D window was moved to, saved in the camera it looks
+    /// through, once a move is over: one undo step for each.
+    fn save_followed_camera(&mut self, moving: bool) {
+        let Some((id, last)) = self.linked_camera else {
+            return;
+        };
+        if moving || !self.nav_moved {
+            return;
+        }
+        self.nav_moved = false;
+        let eye = self.camera.eye().as_dvec3();
+        // the target keeps its distance, only the way it looks changes
+        let ahead = DVec3::new(last[3] - last[0], last[4] - last[1], last[5] - last[2])
+            .length()
+            .max(1.0);
+        let dir = (self.camera.target.as_dvec3() - eye).normalize_or(DVec3::Y);
+        let target = eye + dir * ahead;
+        let aspect = f64::from(self.aspect.max(0.1));
+        let fov = (2.0 * ((f64::from(self.camera.fov_y) / 2.0).tan() * aspect).atan())
+            .to_degrees()
+            .clamp(5.0, 150.0);
+        let r = self.doc.edit_merged(id, "Move camera", |e| {
+            if let ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye: e0,
+                        target: t0,
+                        fov: f0,
+                        ..
+                    },
+                ..
+            }) = &mut e.kind
+            {
+                (*e0, *t0, *f0) = (eye, target, fov);
+            }
+        });
+        match r {
+            Ok(_) => {
+                self.linked_camera =
+                    Some((id, [eye.x, eye.y, eye.z, target.x, target.y, target.z, fov]))
+            }
+            Err(e) => self.status = e.to_string(),
+        }
     }
 
     /// A camera where the 3D window's is: what it sees, as a view.
@@ -3081,6 +3193,15 @@ impl CreaBimApp {
         // drag pans, Shift + middle orbits, a middle double-click frames
         // all. Every way orbits about the model under the pointer and
         // pans holding it there.
+        // the selected camera is what the 3D window shows
+        self.follow_camera();
+        let before = (
+            self.camera.target,
+            self.camera.yaw,
+            self.camera.pitch,
+            self.camera.distance,
+            self.camera.fov_y,
+        );
         let scheme = self.shell.settings.navigation.clone();
         let classic = scheme == "classic";
         let archicad = scheme == "archicad";
@@ -3189,6 +3310,36 @@ impl CreaBimApp {
                 ui.ctx().request_repaint();
             }
         }
+        // moved here: the camera it looks through goes too, once the move ends
+        let after = (
+            self.camera.target,
+            self.camera.yaw,
+            self.camera.pitch,
+            self.camera.distance,
+            self.camera.fov_y,
+        );
+        if after != before {
+            self.nav_moved = true;
+        }
+        let keys_held = self.walking
+            && ui.input(|i| {
+                use egui::Key as K;
+                [
+                    K::W,
+                    K::A,
+                    K::S,
+                    K::D,
+                    K::Q,
+                    K::E,
+                    K::ArrowUp,
+                    K::ArrowDown,
+                    K::ArrowLeft,
+                    K::ArrowRight,
+                ]
+                .iter()
+                .any(|k| i.key_down(*k))
+            });
+        self.save_followed_camera(response.dragged() || keys_held);
         let aspect = rect.width() / rect.height().max(1.0);
         self.aspect = aspect;
 
@@ -3245,6 +3396,22 @@ impl CreaBimApp {
                 rect.top() + (1.0 - n.y) / 2.0 * rect.height(),
             ))
         };
+        // looking through a camera: say so, as moving here moves it
+        if let Some((id, _)) = self.linked_camera {
+            let name = self
+                .doc
+                .model()
+                .get(id)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let text = format!("Looking through {name}: moving here moves the camera");
+            let at = egui::pos2(rect.center().x, rect.bottom() - 18.0);
+            let galley =
+                painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
+            let r = egui::Rect::from_center_size(at, galley.size() + Vec2::new(16.0, 8.0));
+            painter.rect_filled(r, 4.0, crate::theme::interaction());
+            painter.galley(r.min + Vec2::new(8.0, 4.0), galley, Color32::WHITE);
+        }
         // the point orbiting turns about, while it does
         if let (true, Some(at)) = (self.nav_orbiting, self.nav_anchor) {
             if let Some(p) = project(at.as_dvec3()) {
@@ -12729,6 +12896,74 @@ mod box_select_tests {
         );
         frame(&mut app, vec![egui::Event::PointerMoved(b)]);
         assert!(!app.selection.is_empty(), "status: {}", app.status);
+    }
+}
+
+#[cfg(test)]
+mod camera_link_tests {
+    use super::*;
+
+    #[test]
+    fn a_selected_camera_and_the_3d_window_follow_each_other() {
+        let mut app = crate::app::test_app();
+        app.aspect = 1.5;
+        let v = View::perspective(DVec3::new(18.0, -12.0, 1.6), DVec3::new(5.0, 4.0, 1.6));
+        let e = Element::new("Camera 1", ElementKind::View(v));
+        let id = e.id;
+        app.doc
+            .commit(Transaction::new("camera").insert(e))
+            .unwrap();
+        let eye_of = |app: &CreaBimApp| match &app.doc.model().get(id).unwrap().kind {
+            ElementKind::View(View {
+                kind: ViewKind::Perspective { eye, .. },
+                ..
+            }) => *eye,
+            _ => unreachable!(),
+        };
+        // nothing selected: the 3D window is its own
+        app.follow_camera();
+        assert!(app.linked_camera.is_none());
+        // selected, the 3D window looks through it
+        app.selection.only(id);
+        app.follow_camera();
+        assert!(app.linked_camera.is_some());
+        assert!(app.camera.eye().as_dvec3().distance(eye_of(&app)) < 1e-3);
+        // changed in Properties (or by a grip): the 3D window goes with it
+        app.doc
+            .edit_merged(id, "Camera height", |e| {
+                if let ElementKind::View(View {
+                    kind: ViewKind::Perspective { eye, .. },
+                    ..
+                }) = &mut e.kind
+                {
+                    eye.z = 4.0;
+                }
+            })
+            .unwrap();
+        app.follow_camera();
+        assert!((app.camera.eye().z - 4.0).abs() < 1e-3);
+        // moved in the 3D window: saved in the camera once the move ends
+        app.camera.walk(2.0, 0.0, 0.0);
+        app.nav_moved = true;
+        app.save_followed_camera(true);
+        assert!((eye_of(&app).z - 4.0).abs() < 1e-9, "not while moving");
+        app.save_followed_camera(false);
+        assert!(app.camera.eye().as_dvec3().distance(eye_of(&app)) < 1e-3);
+        // and the next frame doesn't pull the 3D window back
+        let eye = app.camera.eye();
+        app.follow_camera();
+        assert!(app.camera.eye().distance(eye) < 1e-4);
+        // one undo puts the camera back where it was, and the 3D window too
+        assert!(app.doc.undo());
+        app.follow_camera();
+        assert!((app.camera.eye().z - 4.0).abs() < 1e-3);
+        // something else selected: moving no longer moves the camera
+        app.selection.clear();
+        app.follow_camera();
+        app.camera.walk(5.0, 0.0, 0.0);
+        app.nav_moved = true;
+        app.save_followed_camera(false);
+        assert!((eye_of(&app).z - 4.0).abs() < 1e-9);
     }
 }
 
