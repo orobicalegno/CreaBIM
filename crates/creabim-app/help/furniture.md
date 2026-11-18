@@ -9,7 +9,7 @@ To try it out, open the [starter house](starter-house), or *File › New furnish
 Open it with *Create › Catalogue…*, with the sofa tool on the toolbar, or with **+** on the browser's *Furniture and fixtures* group.
 
 - Pick a category along the top (Bathroom, Kitchen, Living, Dining, Bedroom, Office, Electrical, Lighting, Plumbing, Heating and ventilation, Other), or search by name.
-- **Starters** are the objects CreaBIM comes with.
+- **Starters** are the objects Volumen comes with.
 - **Yours** are the objects you imported or saved. They are kept for every project.
 - **In this project** are the project's own object types, including any read from an IFC file.
 - Click a picture to place that object. Right-click one of yours to delete it from your catalogue. Objects already placed from it stay.
@@ -50,7 +50,7 @@ Object types are listed in the [Types](types) window under *Objects*. Deleting a
 - **From Blender, FreeCAD or glTF:** in the Catalogue window, *Import from Blender, FreeCAD or glTF…* reads a `.blend`, `.FCStd`, `.gltf` or `.glb` file as one object. Each mesh becomes a part in its own material. The object is set on the floor with the middle of its back edge at the origin, so model it facing −Y (Blender's front view). Its category, IFC class and placement are guessed from the file's and the meshes' names, such as "sink", "toilet", "sofa", "bed" or "desk". An `ifc_class` custom property in Blender, or an IFC type in FreeCAD, takes precedence. Check the guess in Properties after placing it.
 - **From the model:** select an object, some masses or any elements, type a name and click *Save selection to catalogue*. An object saves its type; anything else is saved as its 3D shape in its colours.
 
-Your catalogue is a folder of `.json` files, one per object, in `CreaBIM/catalogue` in your settings folder (`%APPDATA%` on Windows, `~/.config` elsewhere). Copy them to share objects. A project file carries the types of the objects placed in it, so it opens the same on any computer.
+Your catalogue is a folder of `.json` files, one per object, in `Volumen/catalogue` in your settings folder (`%APPDATA%` on Windows, `~/.config` elsewhere). Copy them to share objects. A project file carries the types of the objects placed in it, so it opens the same on any computer.
 
 From a terminal, `creabim catalogue-import chair.blend <folder>` does the same import, and `creabim catalogue` lists the starters.
 

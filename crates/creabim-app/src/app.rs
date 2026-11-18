@@ -59,6 +59,8 @@ mod mastersui;
 mod materials;
 #[path = "objectsui.rs"]
 mod objectsui;
+#[path = "osnapui.rs"]
+mod osnapui;
 #[path = "profilesui.rs"]
 mod profilesui;
 #[path = "reportui.rs"]
@@ -151,8 +153,15 @@ pub struct CreaBimApp {
     report_ask: Option<bool>,
     /// Closing with unsaved changes: Save, Don't save or Cancel is asked.
     close_ask: bool,
+    /// Where the Save the changes window is: asking, saving, saved, failed.
+    close_state: appmenu::CloseState,
     /// The close was settled (saved, or the changes let go): let it through.
     close_ok: bool,
+    /// The pointer left the drawing area (onto a web pane, or out of the
+    /// window) and hasn't come back yet.
+    pointer_away: bool,
+    /// When the pointer last moved over the drawing area, in seconds.
+    pub(crate) pointer_seen: f64,
     /// What the area in front showed last frame: a Masters or Profile view
     /// coming forward brings its own Properties tab (MU40).
     prop_front: Option<crate::areas::Shows>,
@@ -236,6 +245,9 @@ pub struct CreaBimApp {
     /// The model's revision when it was last opened or saved: anything
     /// else is unsaved (A7-8).
     saved_revision: Option<u64>,
+    /// The undo history when it was last opened or saved: how many steps
+    /// and the last one's id, to count the changes since (Save the changes).
+    saved_mark: (usize, Option<creabim_core::document::StepId>),
     /// The window title last set, so it is only sent when it changes.
     title: String,
     /// The status and tool last written to the activity log.
@@ -279,6 +291,19 @@ pub struct CreaBimApp {
     drafting: drafting::DraftingUi,
     /// Orbit about the selection rather than the middle of the view.
     orbit_selection: bool,
+    /// Where a 3D drag started on the model: what orbiting turns about and
+    /// panning holds under the pointer, as Archicad does.
+    nav_anchor: Option<GVec3>,
+    /// The 3D view is orbiting about `nav_anchor` this frame (its mark shows).
+    nav_orbiting: bool,
+    /// Exploring the model on foot in the 3D view (F5): W A S D walk, a
+    /// drag looks round.
+    walking: bool,
+    /// The camera the 3D window looks through while it is selected, and
+    /// its eye, target and angle as last put in step with the 3D window.
+    linked_camera: Option<(ElementId, [f64; 7])>,
+    /// The 3D window was moved since its camera was last saved.
+    nav_moved: bool,
     /// Where the 3D view was drawn last frame, for its navigation buttons.
     rect_3d: Option<Rect>,
     /// Where the 2D pane was drawn last frame, and whether the pointer was
@@ -324,6 +349,10 @@ pub struct CreaBimApp {
     new_project_classic: bool,
 }
 
+/// A pointer moving over the drawing area this recently (seconds) can't be
+/// over a bar: a tooltip a bar asks for then is a stale one.
+pub(crate) const TIP_PAUSE: f64 = 0.3;
+
 /// How much of the accent a selected element takes in 3D (A7-2).
 const SELECTION_TINT: f32 = 0.35;
 
@@ -359,6 +388,12 @@ impl CreaBimApp {
         // are kept
         app.plan.snap.increment = false;
         app.plan.temp_dims_off = settings.temp_dims_off;
+        if let Some(s) = settings.osnap {
+            app.plan.snap = s;
+        }
+        if settings.polar_angle > 0.0 {
+            app.plan.guide_step = settings.polar_angle;
+        }
         app.plan.snap.marks = settings.distance_marks;
         if settings.snap_spacing_um > 0 {
             app.plan.snap.step_um = settings.snap_spacing_um;
@@ -399,7 +434,10 @@ impl CreaBimApp {
             log_ui: Default::default(),
             report_ask: None,
             close_ask: false,
+            close_state: Default::default(),
             close_ok: false,
+            pointer_away: true,
+            pointer_seen: 0.0,
             prop_front: None,
             camera: OrbitCamera::default(),
             cube: Default::default(),
@@ -442,6 +480,7 @@ impl CreaBimApp {
             extrude_distance: 1.0,
             path: "project.creabim".into(),
             saved_revision: None,
+            saved_mark: (0, None),
             title: String::new(),
             logged: (String::new(), None),
             watch: Default::default(),
@@ -473,6 +512,11 @@ impl CreaBimApp {
             import_report: None,
             drafting: Default::default(),
             orbit_selection: false,
+            nav_anchor: None,
+            nav_orbiting: false,
+            walking: false,
+            linked_camera: None,
+            nav_moved: false,
             rect_3d: None,
             rect_2d: None,
             last_in_2d: false,
@@ -532,9 +576,11 @@ impl CreaBimApp {
                     let report = importui::ImportReport::new(&file_label(path), &imported);
                     for w in &imported.warnings {
                         eprintln!("IFC import: {w}");
+                        crate::actlog::line(format!("IFC import: {w}"));
                     }
                     for d in &imported.details {
                         eprintln!("IFC import:   {d}");
+                        crate::actlog::line(format!("IFC import:   {d}"));
                     }
                     self.import_report = Some(report);
                     self.load_model(imported.model);
@@ -572,7 +618,7 @@ impl CreaBimApp {
                 self.watch = Default::default();
                 self.recent.add(path);
                 self.path = path.to_string();
-                self.saved_revision = Some(self.doc.model().revision());
+                self.mark_saved();
                 self.status = format!("Opened {path}");
                 // copies a Duplicate left on their originals (MU24)
                 let stacked = creabim_core::checks::stacked_copies(self.doc.model()).len();
@@ -592,25 +638,53 @@ impl CreaBimApp {
         self.saved_revision != Some(self.doc.model().revision())
     }
 
+    /// The model as it is now counts as saved.
+    fn mark_saved(&mut self) {
+        self.saved_revision = Some(self.doc.model().revision());
+        let steps = self.doc.undo_steps();
+        self.saved_mark = (steps.len(), steps.last().map(|s| s.id));
+    }
+
+    /// How many undo steps were made since it was last opened or saved
+    /// (at least one while it is unsaved).
+    pub(crate) fn changes_since_saved(&self) -> usize {
+        let steps = self.doc.undo_steps();
+        let (len, last) = self.saved_mark;
+        let n = match last {
+            // the step saved last is still in the history: what follows it
+            Some(id) => match steps.iter().rposition(|s| s.id == id) {
+                Some(at) => steps.len() - at - 1,
+                None => steps.len().abs_diff(len),
+            },
+            None => steps.len().abs_diff(len),
+        };
+        if self.unsaved() {
+            n.max(1)
+        } else {
+            n
+        }
+    }
+
     fn save(&mut self) {
+        let r = self.save_file();
+        self.report(r, format!("Saved {}", self.path));
+    }
+
+    /// Write the project to its file, saying why when it can't.
+    pub(crate) fn save_file(&mut self) -> Result<(), String> {
         if self.path.to_ascii_lowercase().ends_with(".json") {
-            let r = std::fs::write(&self.path, self.doc.model().to_json());
-            if r.is_ok() {
-                self.saved_revision = Some(self.doc.model().revision());
-            }
-            self.report(r, format!("Saved {}", self.path));
-            return;
+            std::fs::write(&self.path, self.doc.model().to_json()).map_err(|e| e.to_string())?;
+            self.mark_saved();
+            return Ok(());
         }
         if !self.path.to_ascii_lowercase().ends_with(".creabim") {
             self.path = with_extension(&self.path, "creabim");
         }
-        let r = creabim_store::save(&self.path, &self.doc);
-        if r.is_ok() {
-            let path = self.path.clone();
-            self.recent.add(&path);
-            self.saved_revision = Some(self.doc.model().revision());
-        }
-        self.report(r, format!("Saved {}", self.path));
+        creabim_store::save(&self.path, &self.doc).map_err(|e| e.to_string())?;
+        let path = self.path.clone();
+        self.recent.add(&path);
+        self.mark_saved();
+        Ok(())
     }
 
     fn open_dialog(&mut self) {
@@ -929,9 +1003,219 @@ impl CreaBimApp {
             return;
         }
         let d = GVec2::new(d.x, d.y);
+        // on foot, a drag turns the head
+        if self.walking {
+            self.camera.look_round(d);
+            return;
+        }
         match self.selection_bounds().filter(|_| self.orbit_selection) {
             Some((lo, hi)) => self.camera.orbit_around((lo + hi) / 2.0, d),
-            None => self.camera.orbit(d),
+            // about the point of the model the drag started on
+            None => match self.nav_anchor {
+                Some(at) => {
+                    self.nav_orbiting = true;
+                    self.camera.orbit_around(at, d);
+                }
+                None => self.camera.orbit(d),
+            },
+        }
+    }
+
+    /// Where the pointer at `p` meets the model in the 3D view drawn in
+    /// `rect`, if it does.
+    fn hit_3d(&self, p: egui::Pos2, rect: Rect) -> Option<GVec3> {
+        let (o, d) = self.ray_3d(p, rect);
+        pick::pick(&self.scene, o, d).map(|h| o + d * h.t)
+    }
+
+    /// The pointer's ray in the 3D view drawn in `rect`.
+    fn ray_3d(&self, p: egui::Pos2, rect: Rect) -> (GVec3, GVec3) {
+        let ndc = GVec2::new(
+            (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+            1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
+        );
+        self.camera.ray(ndc, rect.width() / rect.height().max(1.0))
+    }
+
+    /// What a drag starting at `p` turns about and holds: the model under
+    /// it, or where its ray reaches the depth of the view's target.
+    fn anchor_3d(&self, p: egui::Pos2, rect: Rect) -> GVec3 {
+        self.hit_3d(p, rect).unwrap_or_else(|| {
+            let (o, d) = self.ray_3d(p, rect);
+            let eye = self.camera.eye();
+            let fwd = (self.camera.target - eye).normalize_or_zero();
+            let depth = self.camera.depth_of(self.camera.target).max(1.0);
+            o + d * (depth / d.dot(fwd).max(0.05))
+        })
+    }
+
+    /// The 3D window seen from a camera at `eye` looking at `target`,
+    /// `fov` degrees wide across.
+    pub(super) fn look_through(&mut self, eye: DVec3, target: DVec3, fov: f64) {
+        self.aim_3d(eye, target, fov);
+        self.status = "The 3D window looks through the camera.".into();
+    }
+
+    /// The 3D window's camera put at `eye`, looking at `target`, `fov`
+    /// degrees wide across.
+    fn aim_3d(&mut self, eye: DVec3, target: DVec3, fov: f64) {
+        let (eye, target) = (eye.as_vec3(), target.as_vec3());
+        let d = target - eye;
+        let flat = GVec2::new(d.x, d.y).length();
+        self.camera.ortho = false;
+        self.camera.target = target;
+        self.camera.distance = d.length().max(0.1);
+        // the camera's yaw and pitch point from the target back to the eye
+        self.camera.yaw = (-d.y).atan2(-d.x);
+        self.camera.pitch = (-d.z).atan2(flat);
+        // its angle is across; the 3D window's is up and down
+        let aspect = self.aspect.max(0.1);
+        let half = (fov.to_radians() as f32 / 2.0).tan() / aspect;
+        self.camera.fov_y = (2.0 * half.atan()).clamp(0.1, 2.6);
+    }
+
+    /// The selected camera, with its eye, target and angle.
+    fn selected_camera(&self) -> Option<(ElementId, DVec3, DVec3, f64)> {
+        let all = self.selection.all();
+        let [id] = all[..] else {
+            return None;
+        };
+        match &self.doc.model().get(id)?.kind {
+            ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye, target, fov, ..
+                    },
+                ..
+            }) => Some((id, *eye, *target, *fov)),
+            _ => None,
+        }
+    }
+
+    /// The selected camera and the 3D window kept in step, before the 3D
+    /// window takes its input: a camera just selected, or changed from
+    /// Properties, its grips or an undo, is what the 3D window shows.
+    fn follow_camera(&mut self) {
+        let pack = |e: DVec3, t: DVec3, f: f64| [e.x, e.y, e.z, t.x, t.y, t.z, f];
+        let Some((id, eye, target, fov)) = self.selected_camera() else {
+            self.linked_camera = None;
+            return;
+        };
+        let now = pack(eye, target, fov);
+        let same = |a: [f64; 7], b: [f64; 7]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        match self.linked_camera {
+            Some((lid, last)) if lid == id && same(last, now) => {}
+            was => {
+                if self.walking {
+                    // walking keeps going from where the camera now is
+                    self.camera.stand();
+                }
+                self.aim_3d(eye, target, fov);
+                self.nav_moved = false;
+                if was.is_none_or(|(lid, _)| lid != id) {
+                    let name = self
+                        .doc
+                        .model()
+                        .get(id)
+                        .map(|e| e.name.clone())
+                        .unwrap_or_default();
+                    self.status = format!(
+                        "The 3D window looks through {name}: moving in it moves the camera, and what you change in Properties shows at once. Select something else to stop."
+                    );
+                }
+                self.linked_camera = Some((id, now));
+            }
+        }
+    }
+
+    /// Where the 3D window was moved to, saved in the camera it looks
+    /// through, once a move is over: one undo step for each.
+    fn save_followed_camera(&mut self, moving: bool) {
+        let Some((id, last)) = self.linked_camera else {
+            return;
+        };
+        if moving || !self.nav_moved {
+            return;
+        }
+        self.nav_moved = false;
+        let eye = self.camera.eye().as_dvec3();
+        // the target keeps its distance, only the way it looks changes
+        let ahead = DVec3::new(last[3] - last[0], last[4] - last[1], last[5] - last[2])
+            .length()
+            .max(1.0);
+        let dir = (self.camera.target.as_dvec3() - eye).normalize_or(DVec3::Y);
+        let target = eye + dir * ahead;
+        let aspect = f64::from(self.aspect.max(0.1));
+        let fov = (2.0 * ((f64::from(self.camera.fov_y) / 2.0).tan() * aspect).atan())
+            .to_degrees()
+            .clamp(5.0, 150.0);
+        let r = self.doc.edit_merged(id, "Move camera", |e| {
+            if let ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye: e0,
+                        target: t0,
+                        fov: f0,
+                        ..
+                    },
+                ..
+            }) = &mut e.kind
+            {
+                (*e0, *t0, *f0) = (eye, target, fov);
+            }
+        });
+        match r {
+            Ok(_) => {
+                self.linked_camera =
+                    Some((id, [eye.x, eye.y, eye.z, target.x, target.y, target.z, fov]))
+            }
+            Err(e) => self.status = e.to_string(),
+        }
+    }
+
+    /// A camera where the 3D window's is: what it sees, as a view.
+    pub(super) fn camera_from_3d(&mut self) {
+        let eye = self.camera.eye().as_dvec3();
+        let target = self.camera.target.as_dvec3();
+        let aspect = f64::from(self.aspect.max(0.2)).min(5.0);
+        let fov = (2.0 * ((f64::from(self.camera.fov_y) / 2.0).tan() * aspect).atan())
+            .to_degrees()
+            .clamp(5.0, 150.0);
+        let mut v = View::perspective(eye, target);
+        if let ViewKind::Perspective {
+            fov: f, aspect: a, ..
+        } = &mut v.kind
+        {
+            (*f, *a) = (fov, aspect);
+        }
+        let name = (1..)
+            .map(|n| format!("Camera {n}"))
+            .find(|n| !self.doc.model().iter().any(|e| &e.name == n))
+            .expect("unbounded");
+        let e = Element::new(name.clone(), ElementKind::View(v));
+        let id = e.id;
+        match self
+            .doc
+            .commit(Transaction::new(format!("Add {name}")).insert(e))
+        {
+            Ok(()) => {
+                self.selection.only(id);
+                self.status = format!("{name} saved from the 3D window: it is under 3D views, and its camera shows in plans.");
+            }
+            Err(err) => self.status = err.to_string(),
+        }
+    }
+
+    /// Walking toggled (F5): stand at the eye in perspective, or step back
+    /// out to orbiting.
+    pub(super) fn toggle_walk(&mut self) {
+        self.walking = !self.walking;
+        if self.walking {
+            self.camera.ortho = false;
+            self.camera.stand();
+            self.status = "Exploring: W A S D or the arrows walk, Q and E go down and up, Shift is faster, a middle or right drag looks round, the wheel steps ahead. F5 or Esc stops.".into();
+        } else {
+            self.status = "Back to orbiting.".into();
         }
     }
 
@@ -1483,6 +1767,19 @@ impl CreaBimApp {
         if self.masters_command(c) {
             return;
         }
+        if c == Command::Duplicate {
+            let ids = self.selection.all();
+            if let Some(r) = crate::modal::duplicate_views(&mut self.doc, &ids) {
+                match r {
+                    Ok(copies) => {
+                        self.status = crate::modal::views_duplicated(&self.doc, &copies);
+                        self.selection.extend(copies, false);
+                    }
+                    Err(e) => self.status = e,
+                }
+                return;
+            }
+        }
         if let Some(m) = c.modal() {
             self.arm(c, m);
             return;
@@ -1659,17 +1956,54 @@ impl CreaBimApp {
                 !cmd && i.key_pressed(egui::Key::E),
             )
         });
+        // F5 explores on foot; while exploring the walking keys are its own
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F5)) {
+            self.toggle_walk();
+        }
+        if self.walking {
+            let stop = ctx.input_mut(|i| {
+                use egui::Key as K;
+                for k in [
+                    K::W,
+                    K::A,
+                    K::S,
+                    K::D,
+                    K::Q,
+                    K::E,
+                    K::ArrowUp,
+                    K::ArrowDown,
+                    K::ArrowLeft,
+                    K::ArrowRight,
+                ] {
+                    for m in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+                        i.consume_key(m, k);
+                    }
+                }
+                i.consume_key(egui::Modifiers::NONE, K::Escape)
+            });
+            if stop {
+                self.toggle_walk();
+            }
+        }
         // F1: the guide's page about what you are doing
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             self.run_action(ctx, "help");
         }
         if ctx.input(|i| i.key_pressed(egui::Key::F3)) {
-            self.plan.snap.on = !self.plan.snap.on;
-            self.status = format!(
-                "Snaps {}. F3 turns them {}.",
-                if self.plan.snap.on { "on" } else { "off" },
-                if self.plan.snap.on { "off" } else { "on" },
-            );
+            self.run_action(ctx, "snap.on");
+        }
+        // AutoCAD's drafting keys: F7 grid, F8 Ortho, F9 snap, F10 Polar,
+        // F11 object snap tracking
+        for (key, act) in [
+            (egui::Key::F7, "view.grid"),
+            (egui::Key::F8, "snap.ortho"),
+            (egui::Key::F9, "snap.grid"),
+            (egui::Key::F10, "snap.polar"),
+            (egui::Key::F11, "snap.otrack"),
+        ] {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                self.run_action(ctx, act);
+            }
         }
         // Shift+G: guides on and off everywhere; Alt+Z: X-ray in 3D
         let (guides_key, xray_key) = ctx.input(|i| {
@@ -2595,7 +2929,9 @@ impl CreaBimApp {
                         }))
                     }
                     // 3D views and schedules have no place of their own in the model
-                    ViewKind::Axonometric { .. } | ViewKind::Schedule { .. } => None,
+                    ViewKind::Axonometric { .. }
+                    | ViewKind::Perspective { .. }
+                    | ViewKind::Schedule { .. } => None,
                 };
                 let to_world = to_world.unwrap_or_else(|| Box::new(|_| [0.0; 3]));
                 let plan = if matches!(
@@ -2869,24 +3205,73 @@ impl CreaBimApp {
             ui.ctx().request_repaint();
         }
         // the mouse (MU19): right drag pans, and so does Shift + middle;
-        // middle drag orbits (Classic: middle pans too)
-        let classic = self.shell.settings.navigation == "classic";
+        // middle drag orbits (Classic: middle pans too). Archicad: middle
+        // drag pans, Shift + middle orbits, a middle double-click frames
+        // all. Every way orbits about the model under the pointer and
+        // pans holding it there.
+        // the selected camera is what the 3D window shows
+        self.follow_camera();
+        let before = (
+            self.camera.target,
+            self.camera.yaw,
+            self.camera.pitch,
+            self.camera.distance,
+            self.camera.fov_y,
+        );
+        let scheme = self.shell.settings.navigation.clone();
+        let classic = scheme == "classic";
+        let archicad = scheme == "archicad";
         let shift_now = ui.input(|i| i.modifiers.shift);
         // Ctrl + middle drag zooms, up in and down out, as Blender (MU39)
         let ctrl_now = ui.input(|i| i.modifiers.command);
+        self.nav_orbiting = false;
+        if response.drag_started() {
+            if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
+                self.nav_anchor = Some(self.anchor_3d(p, rect));
+            }
+        } else if !response.dragged() {
+            self.nav_anchor = None;
+        }
         let mid = response.dragged_by(egui::PointerButton::Middle);
         if mid && ctrl_now {
             self.camera.zoom(-response.drag_delta().y / 60.0);
         } else {
-            if response.dragged_by(egui::PointerButton::Secondary)
-                || (mid && (classic || shift_now))
-            {
+            let pan = response.dragged_by(egui::PointerButton::Secondary)
+                || (mid
+                    && if archicad {
+                        !shift_now
+                    } else {
+                        classic || shift_now
+                    });
+            let orbit = mid
+                && if archicad {
+                    shift_now
+                } else {
+                    !classic && !shift_now
+                };
+            // on foot a middle or right drag turns the head
+            let (pan, orbit) = if self.walking {
+                (
+                    false,
+                    mid || response.dragged_by(egui::PointerButton::Secondary),
+                )
+            } else {
+                (pan, orbit)
+            };
+            if pan {
                 let d = response.drag_delta();
-                self.camera.pan(GVec2::new(d.x, d.y), rect.height());
+                let depth = self
+                    .nav_anchor
+                    .map_or(self.camera.distance, |a| self.camera.depth_of(a));
+                self.camera
+                    .pan_at(GVec2::new(d.x, d.y), rect.height(), depth);
             }
-            if !classic && mid && !shift_now {
+            if orbit {
                 self.orbit_3d(response.drag_delta());
             }
+        }
+        if archicad && response.double_clicked_by(egui::PointerButton::Middle) {
+            self.frame_pane(false);
         }
         if response.hovered() {
             // two fingers on a touchpad pan; a wheel and a pinch zoom (MU24)
@@ -2896,18 +3281,81 @@ impl CreaBimApp {
             }
             if scroll != 0.0 {
                 let aspect = rect.width() / rect.height().max(1.0);
-                match response.hover_pos() {
-                    Some(p) => {
-                        let ndc = GVec2::new(
-                            (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
-                            1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
-                        );
-                        self.camera.zoom_at(scroll / 50.0, ndc, aspect);
+                if self.walking {
+                    // on foot the wheel steps ahead
+                    self.camera.walk(scroll / 50.0 * 0.3, 0.0, 0.0);
+                } else {
+                    match response.hover_pos() {
+                        // toward the model under the pointer: it stays put, and
+                        // zooming never stops short of it
+                        Some(p) => match self.hit_3d(p, rect) {
+                            Some(at) => self.camera.zoom_toward(at, scroll / 50.0),
+                            None => {
+                                let ndc = GVec2::new(
+                                    (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+                                    1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
+                                );
+                                self.camera.zoom_at(scroll / 50.0, ndc, aspect);
+                            }
+                        },
+                        None => self.camera.zoom(scroll / 50.0),
                     }
-                    None => self.camera.zoom(scroll / 50.0),
                 }
             }
         }
+        // on foot: walk while the keys are held
+        if self.walking {
+            let (dt, keys) = ui.input(|i| {
+                use egui::Key as K;
+                let down = |a: K, b: K| (i.key_down(a) || i.key_down(b)) as i32 as f32;
+                (
+                    i.stable_dt.min(0.1),
+                    (
+                        down(K::W, K::ArrowUp) - down(K::S, K::ArrowDown),
+                        down(K::D, K::ArrowRight) - down(K::A, K::ArrowLeft),
+                        (i.key_down(K::E) as i32 - i.key_down(K::Q) as i32) as f32,
+                        i.modifiers.shift,
+                    ),
+                )
+            });
+            let (ahead, side, rise, fast) = keys;
+            if ahead != 0.0 || side != 0.0 || rise != 0.0 {
+                // a brisk walk, a run with Shift
+                let speed = if fast { 4.5 } else { 1.5 } * dt;
+                self.camera.walk(ahead * speed, side * speed, rise * speed);
+                ui.ctx().request_repaint();
+            }
+        }
+        // moved here: the camera it looks through goes too, once the move ends
+        let after = (
+            self.camera.target,
+            self.camera.yaw,
+            self.camera.pitch,
+            self.camera.distance,
+            self.camera.fov_y,
+        );
+        if after != before {
+            self.nav_moved = true;
+        }
+        let keys_held = self.walking
+            && ui.input(|i| {
+                use egui::Key as K;
+                [
+                    K::W,
+                    K::A,
+                    K::S,
+                    K::D,
+                    K::Q,
+                    K::E,
+                    K::ArrowUp,
+                    K::ArrowDown,
+                    K::ArrowLeft,
+                    K::ArrowRight,
+                ]
+                .iter()
+                .any(|k| i.key_down(*k))
+            });
+        self.save_followed_camera(response.dragged() || keys_held);
         let aspect = rect.width() / rect.height().max(1.0);
         self.aspect = aspect;
 
@@ -2964,6 +3412,32 @@ impl CreaBimApp {
                 rect.top() + (1.0 - n.y) / 2.0 * rect.height(),
             ))
         };
+        // looking through a camera: say so, as moving here moves it
+        if let Some((id, _)) = self.linked_camera {
+            let name = self
+                .doc
+                .model()
+                .get(id)
+                .map(|e| e.name.clone())
+                .unwrap_or_default();
+            let text = format!("Looking through {name}: moving here moves the camera");
+            let at = egui::pos2(rect.center().x, rect.bottom() - 18.0);
+            let galley =
+                painter.layout_no_wrap(text, egui::FontId::proportional(12.5), Color32::WHITE);
+            let r = egui::Rect::from_center_size(at, galley.size() + Vec2::new(16.0, 8.0));
+            painter.rect_filled(r, 4.0, crate::theme::interaction());
+            painter.galley(r.min + Vec2::new(8.0, 4.0), galley, Color32::WHITE);
+        }
+        // the point orbiting turns about, while it does
+        if let (true, Some(at)) = (self.nav_orbiting, self.nav_anchor) {
+            if let Some(p) = project(at.as_dvec3()) {
+                let ink = crate::theme::interaction();
+                painter.circle_stroke(p, 7.0, egui::Stroke::new(1.5, ink));
+                for d in [Vec2::X, Vec2::Y] {
+                    painter.line_segment([p - d * 11.0, p + d * 11.0], egui::Stroke::new(1.0, ink));
+                }
+            }
+        }
         let ray = |p: egui::Pos2| {
             let ndc = GVec2::new(
                 (p.x - rect.left()) / rect.width() * 2.0 - 1.0,
@@ -4772,7 +5246,7 @@ fn guides_3d(
             kind: SnapKind::Endpoint,
         })
         .collect();
-    let mut g = snaps::temp_guides(&refs, from, step);
+    let mut g = snaps::temp_guides(&refs, from, step, cfg);
     snaps::lift(&mut g, z);
     g
 }
@@ -5704,11 +6178,7 @@ impl CreaBimApp {
                 }
                 "clean" => info.pad.retain(|i| !(i.todo && i.done)),
                 ext => {
-                    let stem = std::path::Path::new(&self.path)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("project")
-                        .to_string();
+                    let stem = stem(&self.path);
                     if let Some(path) = self.export_to(format!("{stem} notes.{ext}")) {
                         self.status = match std::fs::write(&path, &md) {
                             Ok(()) => format!("Saved the notes to {path}."),
@@ -6556,6 +7026,16 @@ impl CreaBimApp {
                 let _pd = Perf::new("show_plan: dark paper");
                 darken_shapes(ui.ctx(), layer, from);
             }
+            if self.shell.settings.crosshair
+                && matches!(
+                    kind,
+                    planview::PaneKind::Plan { .. } | planview::PaneKind::Section { .. }
+                )
+            {
+                // the pickbox while selecting; a point is asked for otherwise
+                let pickbox = self.plan.tool == planview::Tool::Select && !self.plan.point_pick;
+                planview::draw_crosshair(ui, rect, dark, self.shell.settings.cursor_size, pickbox);
+            }
             r
         };
         let _pt = Perf::new("show_plan: after");
@@ -6678,7 +7158,7 @@ impl CreaBimApp {
             }
             ui.separator();
             ui.label("Pivot:").on_hover_text(
-                "What R and S turn and scale about. Shift+right-click places the pivot cursor.",
+                "What R and S turn and scale about. Shift+right-click (in plans Ctrl+Shift+right-click) places the pivot cursor.",
             );
             egui::ComboBox::from_id_salt("pivot")
                 .icon(crate::props::combo_icon)
@@ -6732,19 +7212,23 @@ impl CreaBimApp {
                 if let Some(mut v) = self.view(id).cloned() {
                     let shadable = matches!(
                         v.kind,
-                        ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                        ViewKind::Section { .. }
+                            | ViewKind::Axonometric { .. }
+                            | ViewKind::Perspective { .. }
                     );
+                    let camera = matches!(v.kind, ViewKind::Perspective { .. });
                     let (text, value, unit) = match &mut v.kind {
                         ViewKind::Plan { cut_height, .. } => ("Cut height:", cut_height, " m"),
                         ViewKind::Section { depth, .. } => ("Depth:", depth, " m"),
                         ViewKind::Axonometric { altitude, .. } => ("Altitude:", altitude, "°"),
+                        ViewKind::Perspective { fov, .. } => ("Angle:", fov, "°"),
                         ViewKind::Schedule { .. } => return,
                     };
                     ui.label(text);
                     let field = if unit == "°" {
                         egui::DragValue::new(value)
                             .speed(0.05)
-                            .range(-89.0..=89.0)
+                            .range(if camera { 5.0..=150.0 } else { -89.0..=89.0 })
                             .suffix(unit)
                     } else {
                         crate::units::drag(value).range(0.1..=200.0)
@@ -7212,7 +7696,7 @@ impl CreaBimApp {
             Some(ElementKind::View(v)) => Some(match v.kind {
                 ViewKind::Plan { .. } => 1,
                 ViewKind::Section { .. } => 2,
-                ViewKind::Axonometric { .. } => 3,
+                ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => 3,
                 ViewKind::Schedule { .. } => 4,
             }),
             _ => None,
@@ -7683,6 +8167,7 @@ impl CreaBimApp {
             self.status = why.clone();
             return;
         }
+        let r_source_dxf = matches!(source, creabim_core::RefSource::Dxf { .. });
         let mut r = creabim_core::Reference::new(source, vec![v]);
         if let Some(b) = crate::trace::bounds_of(&r.source, &shown) {
             r.in_place(b);
@@ -7704,6 +8189,12 @@ impl CreaBimApp {
             self.selection.only(id);
             self.prop_tab = PropTab::Element;
             self.status = "Reference added. Drag its middle to move it, a corner to scale it, the round grip to turn it; Calibrate sets an exact size. Alt+F2 hides it.".into();
+            if r_source_dxf && crate::trace::DXF_CAPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                self.status = format!(
+                    "Reference added, but only in part: the file makes more than {} items (blocks in arrays inside arrays), so reading stopped there.",
+                    creabim_exchange::titleblock::MAX_ITEMS
+                );
+            }
         }
     }
 
@@ -8461,6 +8952,15 @@ impl CreaBimApp {
             self.crop_pick_banner(ui);
         }
         let tab = self.prop_tab;
+        // a master, a profile or the log: not the element picked before
+        if tab.of_its_view() {
+            match tab {
+                PropTab::Profile => self.profile_props(ui),
+                PropTab::Master => self.master_props(ui),
+                _ => self.log_props(ui),
+            }
+            return;
+        }
         let Some(id) = self.selection.active else {
             if tab == PropTab::Next {
                 self.next_element_panel(ui);
@@ -8472,18 +8972,6 @@ impl CreaBimApp {
             }
             if tab == PropTab::Notes {
                 self.notes_pad(ui);
-                return;
-            }
-            if tab == PropTab::Profile {
-                self.profile_props(ui);
-                return;
-            }
-            if tab == PropTab::Master {
-                self.master_props(ui);
-                return;
-            }
-            if tab == PropTab::Log {
-                self.log_props(ui);
                 return;
             }
             if tab == PropTab::Model3d {
@@ -8694,6 +9182,8 @@ impl CreaBimApp {
         let mut object_type = false;
         // a placed view's new scale: (its view, the scale)
         let mut rescale: Option<(ElementId, f64)> = None;
+        // a camera's Look through it: where the 3D window's camera goes
+        let mut look_through: Option<(DVec3, DVec3, f64)> = None;
         // who it is comes first (above), then its sizes and build here,
         // then how views show it; each section folds and stays folded
         let section = if creabim_core::types::TypeCategory::of(&e.kind).is_some() {
@@ -8947,6 +9437,13 @@ impl CreaBimApp {
                             label = "Window panes"
                         }
                     }
+                    let kind = o.kind;
+                    if kind != creabim_core::OpeningKind::Hole {
+                        let l = wallsui::frame_drawing_fields(ui, kind, &mut o.frame);
+                        if !l.is_empty() {
+                            label = l;
+                        }
+                    }
                 }
                 ElementKind::View(v) if matches!(v.kind, ViewKind::Schedule { .. }) => {
                     if let ViewKind::Schedule { category, by_type } = &mut v.kind {
@@ -9062,6 +9559,23 @@ impl CreaBimApp {
                                 egui::RichText::new("Or drag in the view to orbit it.").weak(),
                             );
                         }
+                        ViewKind::Perspective {
+                            eye,
+                            target,
+                            fov,
+                            aspect,
+                        } => {
+                            if let Some(l) = camera_fields(ui, eye, target, fov, aspect) {
+                                label = l;
+                            }
+                            if ui
+                                .button("Look through it in the 3D window")
+                                .on_hover_text("Put the 3D window's camera where this one is, to walk on from there or check it")
+                                .clicked()
+                            {
+                                look_through = Some((*eye, *target, *fov));
+                            }
+                        }
                         ViewKind::Schedule { .. } => {}
                     }
                     if matches!(
@@ -9084,7 +9598,9 @@ impl CreaBimApp {
                     }
                     if matches!(
                         v.kind,
-                        ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                        ViewKind::Section { .. }
+                            | ViewKind::Axonometric { .. }
+                            | ViewKind::Perspective { .. }
                     ) && view_style_combo(ui, "view_style", &mut v.style)
                     {
                         label = "View style"
@@ -9669,6 +10185,14 @@ impl CreaBimApp {
                         self.marks.open = true;
                     }
                 }
+                // edited from any piece of linework's Properties
+                ElementKind::DraftLayers(_) => {}
+                ElementKind::Symbol(sym) => {
+                    ui.label(format!(
+                        "A symbol of {} pieces of linework. Place it with the Detail tool.",
+                        sym.pieces.len()
+                    ));
+                }
                 ElementKind::StylePack(p) => {
                     ui.label(egui::RichText::new(p.description.clone()).weak());
                     if ui.button("Graphic styles…").clicked() {
@@ -9876,7 +10400,44 @@ impl CreaBimApp {
                     label = crate::detailtool::join_fields(ui, self.doc.model(), j);
                 }
                 ElementKind::Detail(d) => {
-                    label = crate::detailtool::detail_fields(ui, d);
+                    let table = creabim_core::detail::layers(self.doc.model());
+                    let mut layer_edit = None;
+                    label = crate::detailtool::detail_fields(ui, d, &table, &mut layer_edit);
+                    // the layers are the project's, not this line's: their
+                    // own undo step
+                    let tx = match layer_edit {
+                        Some(crate::detailtool::LayerEdit::Set(t)) => {
+                            Some(creabim_core::detail::set_layers(self.doc.model(), t))
+                        }
+                        Some(crate::detailtool::LayerEdit::Rename { old, new }) => {
+                            // this line follows its layer's new name
+                            if d.layer.as_deref() == Some(old.as_str()) {
+                                d.layer = Some(new.trim().to_string());
+                            }
+                            Some(creabim_core::detail::rename_layer(
+                                self.doc.model(),
+                                &old,
+                                &new,
+                            ))
+                        }
+                        Some(crate::detailtool::LayerEdit::MakeSymbol) => {
+                            self.make_symbol();
+                            None
+                        }
+                        Some(crate::detailtool::LayerEdit::Explode) => {
+                            let tx = creabim_core::detail::explode(self.doc.model(), e.id);
+                            if tx.is_some() {
+                                self.selection.clear();
+                            }
+                            tx
+                        }
+                        None => None,
+                    };
+                    if let Some(tx) = tx.filter(|t| !t.ops.is_empty()) {
+                        if let Err(err) = self.doc.commit(tx) {
+                            self.plan.status = Some(err.to_string());
+                        }
+                    }
                 }
                 ElementKind::RoomSeparator(sep) => {
                     ui.label(format!(
@@ -10046,6 +10607,9 @@ impl CreaBimApp {
         if object_type {
             self.object_type_section(ui, id);
         }
+        if let Some((eye, target, fov)) = look_through {
+            self.look_through(eye, target, fov);
+        }
         if let Some((view, scale)) = rescale {
             self.set_view_scale(view, scale);
         }
@@ -10114,7 +10678,11 @@ impl CreaBimApp {
     /// The top of Properties, pinned while its tabs scroll (MU19/MU20):
     /// what the selected element is, its name and mark, and its actions.
     fn properties_header(&mut self, ui: &mut egui::Ui) {
-        let Some(id) = self.selection.active else {
+        let picked = self
+            .selection
+            .active
+            .filter(|_| !self.prop_tab.of_its_view());
+        let Some(id) = picked else {
             // the open tab's name, as Blender's context line
             crate::props::flow(ui, |ui| {
                 let p = crate::theme::Palette::of(ui.ctx());
@@ -10813,6 +11381,12 @@ pub(crate) enum PropTab {
 }
 
 impl PropTab {
+    /// A tab of the view in front (a master, a profile, the log): it shows
+    /// what that view edits, whatever is picked in the model.
+    pub(crate) fn of_its_view(self) -> bool {
+        matches!(self, PropTab::Master | PropTab::Profile | PropTab::Log)
+    }
+
     /// The strip's groups, a hairline apart: what is selected, the view,
     /// the whole project.
     fn group(self) -> u8 {
@@ -10983,6 +11557,27 @@ impl eframe::App for CreaBimApp {
             self.close_ask = true;
         }
         let ctx = ui.ctx().clone();
+        // on the drawing area a bar's tooltip goes: the bar never hears the
+        // pointer leave it. Back from a bar (or after a pause in the moves
+        // here, in case leaving went unreported) the bars forget the
+        // button they last showed, so it shows again on the next hover
+        let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
+        for e in events {
+            match e {
+                egui::Event::PointerGone => self.pointer_away = true,
+                egui::Event::PointerMoved(_) => {
+                    self.shell.drop_web_tip();
+                    if self.pointer_away || now - self.pointer_seen > TIP_PAUSE {
+                        if let Some(web) = &self.shell.web {
+                            web.run_all("window.CB && CB.away && CB.away()");
+                        }
+                    }
+                    self.pointer_away = false;
+                    self.pointer_seen = now;
+                }
+                _ => {}
+            }
+        }
         crate::trace::hold(ctx.input(|i| i.pointer.any_down()));
         let m = ctx.input(|i| i.modifiers);
         shell::MODS.store(
@@ -11000,6 +11595,24 @@ impl eframe::App for CreaBimApp {
             self.shell.settings.plan_grid,
             self.shell.settings.axis_lines,
         );
+        crate::snaps::begin_marks();
+        crate::snaps::set_autosnap(
+            self.shell.settings.marker_size,
+            self.shell.settings.snap_tooltip,
+            self.shell.settings.aperture,
+        );
+        // the object snaps and tracking as set, kept for the next session
+        let kept = crate::snaps::SnapSettings {
+            increment: false,
+            ..self.plan.snap
+        };
+        if self.shell.settings.osnap != Some(kept)
+            || self.shell.settings.polar_angle != self.plan.guide_step
+        {
+            self.shell.settings.osnap = Some(kept);
+            self.shell.settings.polar_angle = self.plan.guide_step;
+            self.shell.settings.store();
+        }
         if ink != crate::theme::interaction() {
             crate::theme::set_interaction(ink);
             self.geometry_key = None;
@@ -11380,6 +11993,7 @@ impl eframe::App for CreaBimApp {
         self.import_report_window(&ctx);
         self.help_window(&ctx);
         self.report_window(&ctx);
+        self.drafting_settings_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus
         self.plan.web_menus = false;
@@ -11389,7 +12003,7 @@ impl eframe::App for CreaBimApp {
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("creabim_plan"),
                 egui::ViewportBuilder::default()
-                    .with_title("CreaBIM · Plan")
+                    .with_title("Volumen · Plan")
                     .with_inner_size([760.0, 560.0]),
                 |ui, _class| {
                     egui::CentralPanel::default().show(ui, |ui| {
@@ -11594,12 +12208,167 @@ fn face_triangles(mesh: &creabim_core::EditMesh, face: usize) -> std::ops::Range
     start..start + len
 }
 
+/// The project's name without its ending, to name what is exported from
+/// it. Only the ending goes (and `.creabim` before `.json`): a name with
+/// dots of its own, as `House-1.1.1-test.creabim`, keeps them, where
+/// cutting at the first dot suggested `House-1.ifc` (discussion 17).
 fn stem(path: &str) -> String {
     let name = std::path::Path::new(path)
-        .file_name()
+        .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    name.split('.').next().unwrap_or("project").to_string()
+    let name = match name.len().checked_sub(".creabim".len()) {
+        Some(at)
+            if at > 0
+                && name.is_char_boundary(at)
+                && name[at..].eq_ignore_ascii_case(".creabim") =>
+        {
+            name[..at].to_string()
+        }
+        _ => name,
+    };
+    if name.is_empty() {
+        "project".to_string()
+    } else {
+        name
+    }
+}
+
+#[cfg(test)]
+mod face_plane_tests {
+    /// An element drawn as several items (a terrain is) crashed the app
+    /// when a face of a later item was picked: the triangle was looked up
+    /// in the element's first item (issue 22).
+    #[test]
+    fn a_face_of_an_elements_second_item_gives_its_plane() {
+        let model = creabim_core::sample::sample_house();
+        let scene = creabim_geom::build_scene(&model);
+        let slab = scene
+            .iter()
+            .find(|i| model.get(i.id).is_some_and(|e| e.name == "FF Slab"))
+            .unwrap();
+        let mut small = slab.clone();
+        small.mesh.indices.truncate(3);
+        for p in &mut small.mesh.positions {
+            p[0] += 500.0;
+        }
+        let scene = vec![small, slab.clone()];
+        let o = glam::DVec3::new(5.0, 3.0, 50.0);
+        let plane = super::face_plane(&scene, o, -glam::DVec3::Z).expect("the slab's top");
+        assert!((plane.origin.z - 3.0).abs() < 1e-3, "{}", plane.origin);
+    }
+
+    /// The report itself: a terrain added to the starter house, then the
+    /// pointer anywhere over it in 3D.
+    #[test]
+    fn the_starter_house_on_a_terrain_gives_a_plane_under_any_ray() {
+        use creabim_core::{Element, ElementKind};
+        let house = creabim_core::starter::starter_house();
+        let level = house
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Level(_)))
+            .unwrap()
+            .id;
+        let mut site = creabim_core::site::Site::terrain(
+            level,
+            creabim_core::polygon::rectangle(
+                glam::DVec2::new(-20.0, -20.0),
+                glam::DVec2::new(40.0, 40.0),
+            ),
+            0.0,
+            0.5,
+        );
+        if let creabim_core::site::SiteForm::Terrain { points, .. } = &mut site.form {
+            points.push(glam::DVec3::new(-10.0, -10.0, 2.0));
+        }
+        let ground = Element::new("Ground", ElementKind::Site(site));
+        let model =
+            creabim_core::Model::from_elements(house.iter().cloned().chain([ground])).unwrap();
+        let scene = creabim_geom::build_scene(&model);
+        // (this plain terrain is one item; the elements with several are
+        // the ones a triangle could be looked up wrongly in)
+        let mut several: Vec<String> = Vec::new();
+        for e in model.iter() {
+            let n = scene.iter().filter(|i| i.id == e.id).count();
+            if n > 1 {
+                several.push(format!("{} x{n}", e.name));
+            }
+        }
+        assert!(
+            !several.is_empty(),
+            "nothing here could be looked up wrongly"
+        );
+        let mut planes = 0;
+        for x in (-19..40).step_by(4) {
+            for y in (-19..40).step_by(4) {
+                let o = glam::DVec3::new(x as f64 + 0.37, y as f64 + 0.41, 80.0);
+                for d in [
+                    -glam::DVec3::Z,
+                    glam::DVec3::new(0.3, 0.2, -1.0).normalize(),
+                ] {
+                    planes += super::face_plane(&scene, o, d).is_some() as usize;
+                }
+            }
+        }
+        assert!(planes > 200, "{planes}");
+
+        // Aim at the triangles that crashed: in an item after the first of
+        // its element (furniture is one item per part), at an index past
+        // the end of that first item's mesh. Each ray starts just off the
+        // triangle, so it is what the ray meets first.
+        let mut aimed = 0;
+        for (at, item) in scene.iter().enumerate() {
+            let Some(first) = scene.iter().position(|s| s.id == item.id) else {
+                continue;
+            };
+            if first == at {
+                continue;
+            }
+            let past = scene[first].mesh.triangle_count();
+            let count = item.mesh.triangle_count();
+            // a few per item: each ray tests the whole scene
+            let step = (count.saturating_sub(past) / 3).max(1);
+            for tri in (past..count).step_by(step) {
+                let idx = &item.mesh.indices[tri * 3..tri * 3 + 3];
+                let v =
+                    |k: usize| glam::Vec3::from(item.mesh.positions[idx[k] as usize]).as_dvec3();
+                let n = (v(1) - v(0)).cross(v(2) - v(0));
+                if n.length() < 1e-6 {
+                    continue;
+                }
+                let n = n.normalize();
+                let c = (v(0) + v(1) + v(2)) / 3.0;
+                let plane = super::face_plane(&scene, c + n * 1e-3, -n);
+                assert!(plane.is_some(), "{} item {at} triangle {tri}", item.id.0);
+                aimed += 1;
+            }
+        }
+        assert!(
+            aimed > 0,
+            "no triangle past the end of its element's first item"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stem_tests {
+    use super::{stem, with_extension};
+
+    #[test]
+    fn an_export_keeps_the_dots_of_the_projects_name() {
+        assert_eq!(stem("CreaBIM-1.1.1-test.creabim"), "CreaBIM-1.1.1-test");
+        assert_eq!(stem("house.creabim"), "house");
+        assert_eq!(stem("house.creabim.json"), "house");
+        assert_eq!(stem("house v2.1.CREABIM.json"), "house v2.1");
+        assert_eq!(stem("from revit 2.4.ifc"), "from revit 2.4");
+        assert_eq!(stem("untitled"), "untitled");
+        assert_eq!(stem(""), "project");
+        let out = with_extension("C:/work/CreaBIM-1.1.1-test.creabim", "ifc");
+        assert!(out.ends_with("CreaBIM-1.1.1-test.ifc"), "{out}");
+        // a sheet's or schedule's own name still goes after the project's
+        let out = with_extension("C:/work/a.b.creabim", "A-101.svg");
+        assert!(out.ends_with("a.b.A-101.svg"), "{out}");
+    }
 }
 
 fn with_extension(path: &str, ext: &str) -> String {
@@ -11643,6 +12412,65 @@ fn with_plan_views(model: Model) -> Model {
 }
 
 /// A file's name without its folders.
+/// A camera's Properties: where it stands and looks, how wide and in what
+/// proportion. Returns the edit's name when one changed.
+fn camera_fields(
+    ui: &mut egui::Ui,
+    eye: &mut DVec3,
+    target: &mut DVec3,
+    fov: &mut f64,
+    aspect: &mut f64,
+) -> Option<&'static str> {
+    let mut label = None;
+    let len = |ui: &mut egui::Ui, text: &str, v: &mut f64| {
+        crate::props::row(ui, text, |ui| {
+            crate::props::fill(ui, crate::units::drag(v).range(-1e4..=1e4)).changed()
+        })
+    };
+    if len(ui, "Eye X", &mut eye.x) | len(ui, "Eye Y", &mut eye.y) {
+        label = Some("Move camera");
+    }
+    if len(ui, "Eye height", &mut eye.z) {
+        label = Some("Camera height");
+    }
+    if len(ui, "Target X", &mut target.x) | len(ui, "Target Y", &mut target.y) {
+        label = Some("Aim camera");
+    }
+    if len(ui, "Target height", &mut target.z) {
+        label = Some("Aim camera");
+    }
+    if crate::props::row(ui, "Angle", |ui| {
+        crate::props::fill(
+            ui,
+            egui::DragValue::new(fov)
+                .range(5.0..=150.0)
+                .speed(0.5)
+                .suffix("°"),
+        )
+        .on_hover_text("How wide the camera sees, across: 60° is a usual lens, 90° a wide one")
+        .changed()
+    }) {
+        label = Some("Camera angle");
+    }
+    if crate::props::row(ui, "Proportion", |ui| {
+        crate::props::fill(
+            ui,
+            egui::DragValue::new(aspect).range(0.2..=5.0).speed(0.01),
+        )
+        .on_hover_text("The picture's width over its height: 1.5 is 3:2, 1.78 is 16:9")
+        .changed()
+    }) {
+        label = Some("Camera picture");
+    }
+    ui.label(
+        egui::RichText::new(
+            "Heights are above ±0. Drag the camera or its target in a plan to move them.",
+        )
+        .weak(),
+    );
+    label
+}
+
 /// What to call an element in a count.
 pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
     match k {
@@ -11670,6 +12498,8 @@ pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
         ElementKind::Reference(_) => "reference",
         ElementKind::PaperMark(_) => "paper mark",
         ElementKind::MarkRules(_) => "mark numbering",
+        ElementKind::DraftLayers(_) => "drafting layers",
+        ElementKind::Symbol(_) => "symbol",
         ElementKind::StylePack(_) => "style pack",
         ElementKind::View(_) => "view",
         ElementKind::Sheet(_) => "sheet",
@@ -11718,10 +12548,10 @@ fn window_title(path: &str, unsaved: bool) -> String {
     // a build being worked on says so in full: which version it leads to
     // (MU39: 1.0 showed while 1.0.1 was out and the next one in hand)
     let app = match version.split('.').collect::<Vec<_>>().as_slice() {
-        _ if version.contains('-') => format!("CreaBIM {version}"),
-        ["0", minor, ..] => format!("CreaBIM 0.{minor} beta"),
-        [major, minor, ..] => format!("CreaBIM {major}.{minor}"),
-        _ => "CreaBIM".to_string(),
+        _ if version.contains('-') => format!("Volumen {version}"),
+        ["0", minor, ..] => format!("Volumen 0.{minor} beta"),
+        [major, minor, ..] => format!("Volumen {major}.{minor}"),
+        _ => "Volumen".to_string(),
     };
     format!("{}{name} — {app}", if unsaved { "• " } else { "" })
 }
@@ -11740,8 +12570,10 @@ const GUIDE_REACH_3D: f64 = 60.0;
 /// The plane of the face a ray hits, facing back along the ray.
 fn face_plane(scene: &[creabim_geom::SceneItem], o: DVec3, d: DVec3) -> Option<Workplane> {
     let h = pick::pick(scene, o.as_vec3(), d.as_vec3())?;
-    let item = scene.iter().find(|s| s.id == h.id)?;
-    let idx = &item.mesh.indices[h.triangle * 3..h.triangle * 3 + 3];
+    // the item hit, not the first of its element: a terrain is several
+    // items, and a triangle of one is past the end of another (issue 22)
+    let item = scene.get(h.item)?;
+    let idx = item.mesh.indices.get(h.triangle * 3..h.triangle * 3 + 3)?;
     let v = |k: usize| glam::Vec3::from(item.mesh.positions[idx[k] as usize]);
     let mut n = (v(1) - v(0))
         .cross(v(2) - v(0))
@@ -12039,7 +12871,7 @@ mod title_tests {
     fn the_title_names_the_project_marks_unsaved_and_the_test_version() {
         let v = env!("CARGO_PKG_VERSION");
         let saved = window_title("projects/Starter house.creabim", false);
-        assert!(saved.starts_with("Starter house — CreaBIM"), "{saved}");
+        assert!(saved.starts_with("Starter house — Volumen"), "{saved}");
         if v.starts_with("0.") {
             assert!(saved.ends_with(" beta"), "{saved}");
         }
@@ -12109,6 +12941,74 @@ mod box_select_tests {
         );
         frame(&mut app, vec![egui::Event::PointerMoved(b)]);
         assert!(!app.selection.is_empty(), "status: {}", app.status);
+    }
+}
+
+#[cfg(test)]
+mod camera_link_tests {
+    use super::*;
+
+    #[test]
+    fn a_selected_camera_and_the_3d_window_follow_each_other() {
+        let mut app = crate::app::test_app();
+        app.aspect = 1.5;
+        let v = View::perspective(DVec3::new(18.0, -12.0, 1.6), DVec3::new(5.0, 4.0, 1.6));
+        let e = Element::new("Camera 1", ElementKind::View(v));
+        let id = e.id;
+        app.doc
+            .commit(Transaction::new("camera").insert(e))
+            .unwrap();
+        let eye_of = |app: &CreaBimApp| match &app.doc.model().get(id).unwrap().kind {
+            ElementKind::View(View {
+                kind: ViewKind::Perspective { eye, .. },
+                ..
+            }) => *eye,
+            _ => unreachable!(),
+        };
+        // nothing selected: the 3D window is its own
+        app.follow_camera();
+        assert!(app.linked_camera.is_none());
+        // selected, the 3D window looks through it
+        app.selection.only(id);
+        app.follow_camera();
+        assert!(app.linked_camera.is_some());
+        assert!(app.camera.eye().as_dvec3().distance(eye_of(&app)) < 1e-3);
+        // changed in Properties (or by a grip): the 3D window goes with it
+        app.doc
+            .edit_merged(id, "Camera height", |e| {
+                if let ElementKind::View(View {
+                    kind: ViewKind::Perspective { eye, .. },
+                    ..
+                }) = &mut e.kind
+                {
+                    eye.z = 4.0;
+                }
+            })
+            .unwrap();
+        app.follow_camera();
+        assert!((app.camera.eye().z - 4.0).abs() < 1e-3);
+        // moved in the 3D window: saved in the camera once the move ends
+        app.camera.walk(2.0, 0.0, 0.0);
+        app.nav_moved = true;
+        app.save_followed_camera(true);
+        assert!((eye_of(&app).z - 4.0).abs() < 1e-9, "not while moving");
+        app.save_followed_camera(false);
+        assert!(app.camera.eye().as_dvec3().distance(eye_of(&app)) < 1e-3);
+        // and the next frame doesn't pull the 3D window back
+        let eye = app.camera.eye();
+        app.follow_camera();
+        assert!(app.camera.eye().distance(eye) < 1e-4);
+        // one undo puts the camera back where it was, and the 3D window too
+        assert!(app.doc.undo());
+        app.follow_camera();
+        assert!((app.camera.eye().z - 4.0).abs() < 1e-3);
+        // something else selected: moving no longer moves the camera
+        app.selection.clear();
+        app.follow_camera();
+        app.camera.walk(5.0, 0.0, 0.0);
+        app.nav_moved = true;
+        app.save_followed_camera(false);
+        assert!((eye_of(&app).z - 4.0).abs() < 1e-9);
     }
 }
 

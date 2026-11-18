@@ -1,6 +1,6 @@
 # Step 6: look at it
 
-Everything you see in CreaBIM is drawn from the model. You never draw a section by hand: you say where to cut, and CreaBIM draws it.
+Everything you see in Volumen is drawn from the model. You never draw a section by hand: you say where to cut, and Volumen draws it.
 
 ## Turn around in 3D
 

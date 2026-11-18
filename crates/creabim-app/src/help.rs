@@ -117,11 +117,6 @@ pub const CONTENTS: &str = "contents";
 
 /// The pictures the pages show, by the path they are written with.
 pub const IMAGES: &[(&str, &[u8])] = &[
-    // the logo: the weaver and its nest (assets/logo)
-    (
-        "img/creabim-lockup.png",
-        include_bytes!("../assets/logo/png/creabim-lockup-640x200.png"),
-    ),
     img!("interface"),
     img!("palette"),
     img!("levels"),
@@ -258,6 +253,7 @@ pub fn tool_page(t: Tool) -> &'static str {
         Tool::Room | Tool::RoomSeparator => "rooms",
         Tool::Ceiling => "ceilings",
         Tool::Callout => "details#callouts",
+        Tool::Camera => "views#cameras",
         Tool::Detail => "details#detail-components",
     }
 }
@@ -292,6 +288,8 @@ pub fn element_page(kind: &ElementKind) -> &'static str {
         ElementKind::Ceiling(_) => "ceilings",
         ElementKind::Join(_) => "joins",
         ElementKind::Detail(_) => "details#detail-components",
+        ElementKind::DraftLayers(_) => "details#colours-line-types-and-layers",
+        ElementKind::Symbol(_) => "details#symbols",
         ElementKind::Dimension(_) => "dimensions",
         ElementKind::Tag(_) => "tags",
         ElementKind::Note(_) => "notes",
@@ -497,7 +495,13 @@ pub const KEYS: &[Binding] = &[
     key(VIEWS, "Ctrl+PgUp", "The previous workspace"),
     key(VIEWS, "Ctrl+PgDn", "The next workspace"),
     key(VIEWS, "/", "Show the selection alone, and back"),
-    key(VIEWS, "F3", "Snapping on or off"),
+    key(VIEWS, "F3", "Object snap (OSNAP) on or off"),
+    key(VIEWS, "F7", "The grid behind drawings on or off"),
+    key(VIEWS, "F8", "Ortho on or off"),
+    key(VIEWS, "F9", "Snap mode on or off"),
+    key(VIEWS, "F10", "Polar tracking on or off"),
+    key(VIEWS, "F11", "Object snap tracking (OTRACK) on or off"),
+    key(VIEWS, "F5", "Explore the 3D view on foot, and back"),
     key(VIEWS, "Alt (hold)", "Suspend snapping while you click"),
     key(VIEWS, "Shift+G", "Show or hide the guides in every view"),
     key(VIEWS, "Alt+Z", "X-ray: see through walls, slabs and roofs"),
@@ -750,15 +754,9 @@ fn date_of_day(z: i64) -> String {
     format!("{d} {} {y}", MONTHS[(m - 1) as usize])
 }
 
-/// The white lockup, for dark themes.
-const LOCKUP_WHITE: &[u8] = include_bytes!("../assets/logo/png/creabim-lockup-white-640x200.png");
-
 /// A picture as a `data:` address, for the Help panel's page; on a dark
 /// theme the logo is the white one.
-pub fn data_url_for(path: &str, dark: bool) -> Option<String> {
-    if dark && path == "img/creabim-lockup.png" {
-        return Some(format!("data:image/png;base64,{}", base64(LOCKUP_WHITE)));
-    }
+pub fn data_url_for(path: &str, _dark: bool) -> Option<String> {
     let (_, bytes) = IMAGES.iter().find(|i| i.0 == path)?;
     let mime = if path.ends_with(".png") {
         "image/png"
@@ -1034,11 +1032,10 @@ mod tests {
     }
 
     #[test]
-    fn about_shows_the_lockup_in_the_themes_colour() {
-        assert!(text("about").unwrap().contains("img/creabim-lockup.png"));
-        let light = data_url_for("img/creabim-lockup.png", false).unwrap();
-        let dark = data_url_for("img/creabim-lockup.png", true).unwrap();
-        assert!(light.starts_with("data:image/png;base64,"));
-        assert_ne!(light, dark);
+    fn about_names_volumen_and_credits_creabim() {
+        let about = text("about").unwrap();
+        assert!(about.starts_with("# About Volumen"));
+        assert!(about.contains("modified version of CreaBIM"));
+        assert!(about.contains("github.com/chopinregis/CreaBIM"));
     }
 }

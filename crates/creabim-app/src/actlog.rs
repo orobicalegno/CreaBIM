@@ -92,7 +92,7 @@ pub fn start() {
             .map_or(0, |d| d.as_secs());
         let _ = writeln!(
             f,
-            "\n=== CreaBIM {} (build {}) started, unix time {secs} ===",
+            "\n=== Volumen {} (build {}) started, unix time {secs} ===",
             env!("CARGO_PKG_VERSION"),
             env!("CREABIM_COMMIT"),
         );

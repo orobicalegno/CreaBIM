@@ -38,6 +38,6 @@ A ceiling light, a smoke detector or an extract fan placed with the Object tool 
 
 Sections cut ceilings as thin lines at their height; 3D draws them in off-white. Use the *Ceilings* category in [Visibility](visibility) to hide them.
 
-Ceilings are exported as **IfcCovering** with predefined type *CEILING*, linked to the space under them by **IfcRelCoversSpaces**. The *CreaBIM_Ceiling* property set keeps the grid and the room, so the ceiling comes back over its room when the file is opened again. See [IFC](ifc).
+Ceilings are exported as **IfcCovering** with predefined type *CEILING*, linked to the space under them by **IfcRelCoversSpaces**. The *Volumen_Ceiling* property set keeps the grid and the room, so the ceiling comes back over its room when the file is opened again. See [IFC](ifc).
 
 **See also:** [Rooms](rooms)

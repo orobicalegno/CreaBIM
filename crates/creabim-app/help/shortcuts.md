@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Every key CreaBIM knows. This page is made from the app's own menus and key list, so it always matches the version you are running.
+Every key Volumen knows. This page is made from the app's own menus and key list, so it always matches the version you are running.
 
 Keys reach the views even after you click in a menu bar or the browser. Most keys act on the view under the pointer.
 

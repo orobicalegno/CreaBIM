@@ -39,7 +39,7 @@ impl ViewGroup {
     pub fn of(kind: &ViewKind) -> Self {
         match kind {
             ViewKind::Plan { .. } => ViewGroup::Plans,
-            ViewKind::Axonometric { .. } => ViewGroup::Views3d,
+            ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => ViewGroup::Views3d,
             ViewKind::Section { cut: true, .. } => ViewGroup::Sections,
             ViewKind::Section { cut: false, .. } => ViewGroup::Elevations,
             ViewKind::Schedule { .. } => ViewGroup::Schedules,

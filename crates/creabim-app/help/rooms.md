@@ -56,6 +56,6 @@ Tick **Colour rooms** in a plan's or a section's *Properties* (or **Room colours
 
 Rooms are exported as **IfcSpace**: the number as its *Name*, the name as its *LongName*, its outline as a prism up to its height, and its area, perimeter and height in *Qto_SpaceBaseQuantities*. Finishes and occupancy go in *Pset_SpaceCoveringRequirements* and *Pset_SpaceOccupancyRequirements*. Each wall round it is linked by an **IfcRelSpaceBoundary** (a separator by a virtual one), and the ceilings over it by **IfcRelCoversSpaces**.
 
-When an IFC file is opened, each IfcSpace becomes a room again. A room CreaBIM wrote follows its walls again; a space from another program keeps the outline of its body. See [IFC](ifc).
+When an IFC file is opened, each IfcSpace becomes a room again. A room Volumen wrote follows its walls again; a space from another program keeps the outline of its body. See [IFC](ifc).
 
 **See also:** [Ceilings](ceilings), [Furniture and fixtures](furniture)

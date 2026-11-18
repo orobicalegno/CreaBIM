@@ -20,6 +20,14 @@ The same mouse in every view (*Settings › Navigation › Mouse*; *Classic* kee
 
 The buttons at the top right of the 3D view do the same, and more: zoom in and out, orbit round the selection, perspective or orthographic, the ground grid, [X-ray](visibility#x-ray), **Show** (what the 3D view shows), the **render** menu (*Shaded*, *Shaded with edges*, *Hidden line* or *Wireframe*, also in *View › Render*; wireframe shows shafts and what is inside walls) and **View** (look from the top, the front, a side or a corner).
 
+**Orbiting turns about the model under the pointer**: press where you want to turn about and drag, and that point stays where it is while a mark shows it, in every mouse scheme. On empty sky it turns about the middle of the view. *Orbit around the selection* (in *View › Camera*) turns about the selection instead. The **wheel zooms toward the point of the model under the pointer**, which stays put, and never stops short of it; a **pan holds what you grabbed under the pointer**, near or far.
+
+**Archicad users**: pick *Archicad* in *Settings › Navigation › Mouse*: a middle drag pans, `Shift` + middle drag orbits, and a double-click with the middle button frames everything, as in Archicad's 3D window. Left click still selects, and a right click opens the menu.
+
+### Exploring on foot
+
+`F5` (or *View › Camera › Explore on foot*) puts you in the model, as Archicad's Explore mode does. `W` `A` `S` `D` or the arrow keys walk forward, left, back and right along the ground, `Q` and `E` go down and up, and `Shift` makes it a run. A middle or right drag turns your head; the wheel steps ahead. `F5` or `Esc` goes back to orbiting. While exploring, those keys walk and start no tools.
+
 ### The view cube
 
 The cube in the top right corner of the 3D view turns the view for you:

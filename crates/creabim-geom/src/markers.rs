@@ -99,6 +99,7 @@ fn text_in(
         mm,
         rgb: ink.rgb,
         bold: ink.bold,
+        angle: 0.0,
     }
 }
 

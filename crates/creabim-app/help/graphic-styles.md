@@ -1,13 +1,13 @@
 # Graphic styles
 
-How every drawing looks is data in the project, not built into CreaBIM: pen widths for each scale, how each category of element draws (its **object style**), the hatch patterns of cut faces, and **view templates**. All of it is kept together as a **style pack**, a `.json` file an office can keep its drawing standard in. Load another pack and every view and sheet is restyled.
+How every drawing looks is data in the project, not built into Volumen: pen widths for each scale, how each category of element draws (its **object style**), the hatch patterns of cut faces, and **view templates**. All of it is kept together as a **style pack**, a `.json` file an office can keep its drawing standard in. Load another pack and every view and sheet is restyled.
 
 ## Style packs
 
 Open *File › Graphic styles…*.
 
 - The *Style pack* list shows the packs in the project. The one ticked is the default: the project draws with it.
-- *Add a shipped pack*: CreaBIM comes with two, *Standard* (its usual look: black linework, grey poché, the usual hatches) and *Light linework* (fine pens, pale blue-grey poché, furniture in grey, sections fading with depth, sun shadows on plans from above).
+- *Add a shipped pack*: Volumen comes with two, *Standard* (its usual look: black linework, grey poché, the usual hatches) and *Light linework* (fine pens, pale blue-grey poché, furniture in grey, sections fading with depth, sun shadows on plans from above).
 - *Load pack…* reads a `.json` pack and makes it the default. A pack of the same name is replaced. The pack's text styles, title blocks and mark numbering replace the project's of the same names.
 - *Save pack as…* writes the pack to a file, to use in another project or to share.
 
@@ -35,7 +35,7 @@ In the colour styles, roofs seen from above under a plan's cut are washed too, t
 
 The *Object styles* page has a row for each category: walls, slabs, roofs, columns, doors, windows, furniture and so on.
 
-- *Projection*: the weight of its lines seen below the cut or in elevation. *Cut*: the weight of its outline where the view cuts it. Each is *As drawn* (CreaBIM's pen), one of the pens (so it follows the scale), or a width in millimetres.
+- *Projection*: the weight of its lines seen below the cut or in elevation. *Cut*: the weight of its outline where the view cuts it. Each is *As drawn* (Volumen's pen), one of the pens (so it follows the scale), or a width in millimetres.
 - *Colour*: a line colour of its own.
 - *Line*: *Solid*, *Dashed*, *Dotted*, *Centre* or *Dash dot*.
 - *Cut fill*: the colour behind its cut hatch. *Cut pattern*: a pattern for its cut faces; *Material's* keeps each material's own.

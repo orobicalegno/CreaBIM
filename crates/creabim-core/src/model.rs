@@ -52,7 +52,12 @@ impl Model {
     /// Written on a sheet's paper only: no view draws it.
     fn paper_only(&self, e: &Element) -> bool {
         match &e.kind {
-            ElementKind::PaperMark(_) | ElementKind::Viewport(_) => true,
+            ElementKind::Viewport(_) => true,
+            // a north arrow can be drawn in a plan view as well as on a sheet
+            ElementKind::PaperMark(m) => !matches!(
+                self.get(m.sheet).map(|v| &v.kind),
+                Some(ElementKind::View(_))
+            ),
             ElementKind::Note(n) => {
                 matches!(
                     self.get(n.view).map(|v| &v.kind),

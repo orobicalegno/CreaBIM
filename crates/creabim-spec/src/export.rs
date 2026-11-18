@@ -1036,6 +1036,14 @@ fn view(e: &Element, id: &str, v: &core::View, ids: &Ids) -> f::View {
             out.altitude = *altitude;
             default_style = core::ViewStyle::Shaded;
         }
+        // the format has no cameras: a 3D view seen the same way round
+        core::ViewKind::Perspective { eye, target, .. } => {
+            let f = (*target - *eye).normalize_or(glam::DVec3::Y);
+            out.kind = f::ViewKind::ThreeD;
+            out.azimuth = (-f.x).atan2(f.y).to_degrees();
+            out.altitude = (-f.z).clamp(-1.0, 1.0).asin().to_degrees();
+            default_style = core::ViewStyle::Shaded;
+        }
         core::ViewKind::Schedule { category, by_type } => {
             out.kind = f::ViewKind::Schedule;
             out.scale = 100.0;

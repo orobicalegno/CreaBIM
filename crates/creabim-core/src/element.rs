@@ -91,6 +91,7 @@ impl Element {
                 ViewKind::Plan { level, .. } => vec![*level],
                 ViewKind::Section { .. }
                 | ViewKind::Axonometric { .. }
+                | ViewKind::Perspective { .. }
                 | ViewKind::Schedule { .. } => vec![],
             },
             ElementKind::Sheet(_) => vec![],
@@ -115,6 +116,8 @@ impl Element {
             ElementKind::Units(_)
             | ElementKind::Project(_)
             | ElementKind::MarkRules(_)
+            | ElementKind::DraftLayers(_)
+            | ElementKind::Symbol(_)
             | ElementKind::StylePack(_) => vec![],
             // types are soft too: an element whose type is gone keeps its values
             ElementKind::ElementType(_) => vec![],
@@ -138,7 +141,11 @@ impl Element {
             ElementKind::Ceiling(c) => vec![c.level],
             ElementKind::Cut(c) => vec![c.target, c.cutter],
             ElementKind::Join(j) => vec![j.a, j.b],
-            ElementKind::Detail(d) => vec![d.view],
+            // a placed symbol goes with the symbol it shows
+            ElementKind::Detail(d) => match d.kind {
+                crate::DetailKind::Symbol { def } => vec![d.view, def],
+                _ => vec![d.view],
+            },
             ElementKind::Guide(g) => g.level.into_iter().collect(),
             ElementKind::Railing(r) => std::iter::once(r.level)
                 .chain(r.stair.map(|s| s.stair))
@@ -180,6 +187,8 @@ impl Element {
             ElementKind::Reference(_) => "Reference",
             ElementKind::PaperMark(_) => "IfcAnnotation",
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
+            ElementKind::Symbol(_) => "Symbol",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::Sketch(_) => "Sketch",
@@ -293,6 +302,28 @@ impl Element {
                             Err(format!("view altitude must be within ±90°, got {altitude}"))
                         }
                     }
+                    ViewKind::Perspective {
+                        eye,
+                        target,
+                        fov,
+                        aspect,
+                    } => {
+                        if !(eye.is_finite() && target.is_finite()) {
+                            Err("a camera needs a finite place".into())
+                        } else if eye.distance(*target) < 0.05 {
+                            Err("a camera needs to look somewhere away from itself".into())
+                        } else if !(fov.is_finite() && (5.0..=150.0).contains(fov)) {
+                            Err(format!(
+                                "a camera's angle must be from 5° to 150°, got {fov}"
+                            ))
+                        } else if !(aspect.is_finite() && (0.2..=5.0).contains(aspect)) {
+                            Err(format!(
+                                "a camera's picture proportion must be from 0.2 to 5, got {aspect}"
+                            ))
+                        } else {
+                            Ok(())
+                        }
+                    }
                     ViewKind::Schedule { .. } => Ok(()),
                 }
             }
@@ -368,6 +399,8 @@ impl Element {
                 }
             }
             ElementKind::MarkRules(r) => r.validate(),
+            ElementKind::DraftLayers(l) => l.validate(),
+            ElementKind::Symbol(s) => s.validate(),
             ElementKind::StylePack(p) => p.validate(),
             ElementKind::CropBox(c) => c.validate(),
             ElementKind::Assembly(a) => a.validate(),
@@ -484,6 +517,11 @@ pub enum ElementKind {
     Join(crate::joins::JoinRule),
     /// A detail component drawn in one view: a flashing, a membrane...
     Detail(crate::detail::DetailItem),
+    /// The project's drafting layers, for plain linework: at most one per
+    /// project, read through [`crate::detail::layers`].
+    DraftLayers(crate::detail::DraftLayers),
+    /// A symbol: linework drawn once and placed many times.
+    Symbol(crate::detail::DraftSymbol),
 }
 
 impl ElementKind {
@@ -527,6 +565,8 @@ impl ElementKind {
                 crate::papermark::PaperMarkKind::Vector { .. } => "Vector picture",
             },
             ElementKind::MarkRules(_) => "MarkRules",
+            ElementKind::DraftLayers(_) => "DraftLayers",
+            ElementKind::Symbol(_) => "Symbol",
             ElementKind::StylePack(_) => "StylePack",
             ElementKind::CropBox(_) => "CropBox",
             ElementKind::ElementType(_) => "ElementType",
@@ -1485,6 +1525,38 @@ pub struct Opening {
     /// window with its outside face (and its sill) to the wall's interior.
     #[serde(default, skip_serializing_if = "is_false")]
     pub flip_facing: bool,
+    /// How the host wall's layers wrap into its reveals, where that isn't
+    /// as the wall's assembly says ([`crate::assembly::WrapSides`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<crate::assembly::WrapSides>,
+    /// Where its frame stands across the wall: against a face of one of
+    /// the wall's layers. None is the middle of the wall.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_at: Option<FrameAt>,
+}
+
+/// A face of a layer: the one towards the wall's exterior, or its interior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LayerFace {
+    #[default]
+    Exterior,
+    Interior,
+}
+
+/// Where a door's or window's frame stands across its wall: against a
+/// face of layer `layer` (counted from the exterior; a wall without
+/// layers is one layer), on that layer's side of the face. So on a
+/// layer's exterior face the frame's outer face is flush with it and the
+/// frame runs inwards; on its interior face the frame's inner face is
+/// flush with it and the frame runs outwards. `offset` then moves it
+/// towards the interior (the exterior when negative).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct FrameAt {
+    pub layer: usize,
+    #[serde(default)]
+    pub face: LayerFace,
+    #[serde(default, skip_serializing_if = "is_zero_f")]
+    pub offset: f64,
 }
 
 impl Opening {
@@ -1515,6 +1587,61 @@ pub struct OpeningFrame {
     /// Window panes side by side and one above the other, split by bars.
     pub panes_across: u32,
     pub panes_up: u32,
+    /// How a window opens: its leaves, and the symbol plans draw for it.
+    /// None draws the glass in its frame, as before there were leaves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Operation>,
+    /// A subframe (falsotelaio) round the frame, this wide seen from the
+    /// front; 0 is none.
+    #[serde(skip_serializing_if = "is_zero_f")]
+    pub subframe: f64,
+    /// Plans write the opening's size beside it: width over height, and
+    /// the sill's height on the other side of the wall.
+    #[serde(skip_serializing_if = "is_false")]
+    pub label: bool,
+}
+
+/// How a window opens.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Operation {
+    /// Glass set in the frame: nothing opens.
+    Fixed,
+    /// One side-hung leaf (hinged at the wall's start side unless the
+    /// opening's hand is flipped).
+    Casement,
+    /// Two side-hung leaves meeting between the jambs, the first (at the
+    /// wall's start side) `first` of the width: 0.5 is two the same.
+    DoubleCasement { first: f64 },
+    /// One leaf turning on a level axis across its middle (bilico).
+    Pivot,
+    /// Two leaves sliding on two tracks; the one on the inner track slides
+    /// over the other.
+    Sliding,
+}
+
+impl Operation {
+    pub const ALL: [Operation; 5] = [
+        Operation::Fixed,
+        Operation::Casement,
+        Operation::DoubleCasement { first: 0.5 },
+        Operation::Pivot,
+        Operation::Sliding,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Operation::Fixed => "Fixed",
+            Operation::Casement => "Casement, one leaf",
+            Operation::DoubleCasement { .. } => "Casement, two leaves",
+            Operation::Pivot => "Pivot (bilico)",
+            Operation::Sliding => "Sliding",
+        }
+    }
+
+    /// Is it the same kind, whatever its settings?
+    pub fn same(self, other: Operation) -> bool {
+        std::mem::discriminant(&self) == std::mem::discriminant(&other)
+    }
 }
 
 impl Default for OpeningFrame {
@@ -1524,6 +1651,9 @@ impl Default for OpeningFrame {
             depth: 0.1,
             panes_across: 1,
             panes_up: 1,
+            operation: None,
+            subframe: 0.0,
+            label: false,
         }
     }
 }
@@ -1536,12 +1666,23 @@ impl OpeningFrame {
     /// The frame kept to what fits an opening `w` × `h` in a wall `t` thick:
     /// members no wider than a third of the opening, at least one pane.
     pub fn fitted(&self, w: f64, h: f64, t: f64) -> Self {
+        // a subframe takes no more than a sixth of the opening
+        let sub = self.subframe.clamp(0.0, w.min(h) / 6.0);
+        let (w, h) = (w - 2.0 * sub, h - 2.0 * sub);
         let fw = self.width.clamp(0.01, (w.min(h) / 3.0).max(0.01));
         Self {
             width: fw,
             depth: self.depth.clamp(0.02, t.max(0.02)),
             panes_across: self.panes_across.clamp(1, 12),
             panes_up: self.panes_up.clamp(1, 12),
+            operation: self.operation.map(|o| match o {
+                Operation::DoubleCasement { first } => Operation::DoubleCasement {
+                    first: first.clamp(0.1, 0.9),
+                },
+                o => o,
+            }),
+            subframe: sub,
+            label: self.label,
         }
     }
 }
@@ -1962,6 +2103,15 @@ pub enum ViewKind {
     /// bearing `azimuth` (degrees, 0 = from the south, counter-clockwise)
     /// and `altitude` degrees above the horizon.
     Axonometric { azimuth: f64, altitude: f64 },
+    /// A perspective of the model seen by a camera at `eye`, looking at
+    /// `target`, `fov` degrees wide across, its picture `aspect` times as
+    /// wide as it is high, as an Archicad camera.
+    Perspective {
+        eye: DVec3,
+        target: DVec3,
+        fov: f64,
+        aspect: f64,
+    },
     /// A table of every element in a category, read live from the model.
     /// It is drawn at paper size, whatever the scale.
     Schedule {
@@ -2025,6 +2175,19 @@ impl View {
 }
 
 impl View {
+    /// A camera at `eye` looking at `target`, 60° wide, its picture 3:2.
+    pub fn perspective(eye: DVec3, target: DVec3) -> Self {
+        Self {
+            kind: ViewKind::Perspective {
+                eye,
+                target,
+                fov: 60.0,
+                aspect: 1.5,
+            },
+            ..Self::axonometric(0.0, 30.0)
+        }
+    }
+
     pub fn axonometric(azimuth: f64, altitude: f64) -> Self {
         Self {
             kind: ViewKind::Axonometric { azimuth, altitude },

@@ -56,4 +56,4 @@ Footings sit below the floor, so plans show them **dashed**. A plan cut low enou
 
 ## IFC
 
-Footings are exported as **IfcFooting**, with predefined type *STRIP_FOOTING* or *PAD_FOOTING* and their types as **IfcFootingType**. The *CreaBIM_Footing* property set keeps the size, depth and host, so a footing comes back as a footing, still under its wall or column, when the file is opened again. See [IFC](ifc).
+Footings are exported as **IfcFooting**, with predefined type *STRIP_FOOTING* or *PAD_FOOTING* and their types as **IfcFootingType**. The *Volumen_Footing* property set keeps the size, depth and host, so a footing comes back as a footing, still under its wall or column, when the file is opened again. See [IFC](ifc).

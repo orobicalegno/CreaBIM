@@ -1062,7 +1062,7 @@ fn objects_page(ui: &mut egui::Ui, pack: &mut StylePack) -> bool {
         });
     ui.label(
         egui::RichText::new(
-            "As drawn keeps CreaBIM's pens. Styles for one material, surface patterns and draw order are set in the pack's file.",
+            "As drawn keeps Volumen's pens. Styles for one material, surface patterns and draw order are set in the pack's file.",
         )
         .weak(),
     );

@@ -32,7 +32,7 @@ pub fn read_incoming(path: &str) -> Result<Vec<Incoming>, String> {
     match ext(path).as_str() {
         "blend" => creabim_exchange::blend::read_file(Path::new(path)).map_err(|e| e.to_string()),
         "fcstd" => creabim_exchange::freecad::read_file(Path::new(path)).map_err(|e| e.to_string()),
-        other => Err(format!("CreaBIM can't read .{other} files yet.")),
+        other => Err(format!("Volumen can't read .{other} files yet.")),
     }
 }
 
@@ -215,6 +215,16 @@ pub struct Settings {
     /// The grid snap's and the distance marks' spacing, micrometres. Grid
     /// snap itself always starts off.
     pub snap_spacing_um: u32,
+    /// The object snaps, Ortho, Polar and OTRACK as last set (AutoCAD keeps
+    /// OSMODE between sessions); none, AutoCAD's defaults.
+    pub osnap: Option<crate::snaps::SnapSettings>,
+    /// The polar tracking increment, degrees (POLARANG).
+    pub polar_angle: f64,
+    /// AutoSnap: the marker's half size and the aperture, pixels, and
+    /// whether the snap's name shows by the marker.
+    pub marker_size: u8,
+    pub aperture: u8,
+    pub snap_tooltip: bool,
     /// Where Move, Rotate, Scale and the like show their bar: a slim pill
     /// at the top of the view, or a small palette by the pointer (MU38).
     pub edit_bar: String,
@@ -224,6 +234,11 @@ pub struct Settings {
     /// The light millimetre grid behind plans, sections and details; off,
     /// plain paper (MU40).
     pub plan_grid: bool,
+    /// AutoCAD's crosshairs in plans and sections, in place of the pointer.
+    pub crosshair: bool,
+    /// How long their lines are, per cent of the view (CURSORSIZE; 100
+    /// runs right across it).
+    pub cursor_size: f32,
     /// The colour of what is worked on (selection, grips, ghosts): "orange",
     /// the default, or "theme" for the theme's accent (MU39).
     pub interaction: String,
@@ -263,9 +278,16 @@ impl Default for Settings {
             grips: Default::default(),
             distance_marks: false,
             snap_spacing_um: 50_000,
+            osnap: None,
+            polar_angle: 90.0,
+            marker_size: 6,
+            aperture: 10,
+            snap_tooltip: true,
             edit_bar: "top".into(),
             axis_lines: true,
             plan_grid: true,
+            crosshair: true,
+            cursor_size: 100.0,
             interaction: "orange".into(),
             edit_edge_width: 1.0,
             edit_vertex_size: 4.0,
@@ -308,13 +330,13 @@ pub fn pick_open() -> Option<String> {
     rfd::FileDialog::new()
         .set_title("Open or link a file")
         .add_filter(
-            "Everything CreaBIM reads",
+            "Everything Volumen reads",
             &[
                 "creabim", "json", "ifc", "ifcx", "blend", "FCStd", "fcstd", "FCMat", "fcmat",
                 "gltf", "glb",
             ],
         )
-        .add_filter("CreaBIM project", &["creabim"])
+        .add_filter("Volumen project", &["creabim"])
         .add_filter("IFC", &["ifc", "ifcx"])
         .add_filter("Blender and FreeCAD (linked)", &["blend", "FCStd", "fcstd"])
         .add_filter(

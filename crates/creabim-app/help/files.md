@@ -2,7 +2,7 @@
 
 ## The project file
 
-A CreaBIM project is a `.creabim` file. It holds the model, its views, sheets, styles and templates, and the **undo history**: you can still undo after closing and reopening the project.
+A Volumen project is a `.creabim` file. It holds the model, its views, sheets, styles and templates, and the **undo history**: you can still undo after closing and reopening the project.
 
 - `Ctrl+S` or *File › Save* saves. *Save as…* saves under another name.
 - `Ctrl+O` or *File › Open…* opens a `.creabim`, `.ifc` or `.ifcx` file.
@@ -11,17 +11,17 @@ A CreaBIM project is a `.creabim` file. It holds the model, its views, sheets, s
 
 Exports are written next to the project file, with its name.
 
-While the project has unsaved changes, a dot shows beside its name in the top bar, and the window's title starts with a •. Closing CreaBIM then asks first: **Save**, **Don't save** or **Cancel**.
+While the project has unsaved changes, a dot shows beside its name in the top bar, and the window's title starts with a •. Closing Volumen then asks first: **Save**, **Don't save** or **Cancel**.
 
 ## The activity log
 
-CreaBIM keeps a plain text log of what you did in this session: each drag frame by frame, every edit and undo, every tool change, and what went wrong. Nothing leaves your computer.
+Volumen keeps a plain text log of what you did in this session: each drag frame by frame, every edit and undo, every tool change, and what went wrong. Nothing leaves your computer.
 
 To read it, pick **Log** in an area's view-type menu. The Log view shows the log as it is written, with problems in red. **Problems only** keeps just crashes, errors and what could not be done; **Copy** copies what is shown, to paste in a message; **Open the folder** shows where the whole log is kept.
 
 ## Report a problem
 
-When something goes wrong, *Help › Report a problem…* (or the button in the Log view) saves **one file** to attach to a bug report or an email: a summary of the version, your system and what is open, the whole activity log and your settings, and the project as it is now only if you say yes. Nothing is sent anywhere by CreaBIM: you choose where the file goes.
+When something goes wrong, *Help › Report a problem…* (or the button in the Log view) saves **one file** to attach to a bug report or an email: a summary of the version, your system and what is open, the whole activity log and your settings, and the project as it is now only if you say yes. Nothing is sent anywhere by Volumen: you choose where the file goes.
 
 ## Linked files
 

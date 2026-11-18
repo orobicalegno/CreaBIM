@@ -66,10 +66,11 @@ fn one() -> f64 {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PaperMark {
-    /// The sheet it is on.
+    /// The sheet it is on; for a north arrow, also a view it is drawn in.
     pub sheet: ElementId,
     /// Where it is, sheet millimetres from the lower left: a north arrow's
-    /// middle, a scale bar's left end.
+    /// middle, a scale bar's left end. In a view, model metres on its
+    /// drawing (its size stays in paper millimetres).
     pub at: DVec2,
     /// A north arrow's height, a scale bar's thickness, millimetres.
     pub size: f64,

@@ -250,7 +250,7 @@ impl CreaBimApp {
             ui.set_width(420.0);
             ui.heading("Report a problem");
             ui.add_space(6.0);
-            ui.label("CreaBIM saves one file to attach to a GitHub issue or an email: what it did lately, the steps that were slow, any crash, your settings, your system and graphics card. Nothing is sent anywhere.");
+            ui.label("Volumen saves one file to attach to a GitHub issue or an email: what it did lately, the steps that were slow, any crash, your settings, your system and graphics card. Nothing is sent anywhere.");
             ui.add_space(8.0);
             ui.checkbox(&mut with_project, "Include the project as it is now");
             ui.label(
@@ -278,7 +278,7 @@ impl CreaBimApp {
         let Some(to) = rfd::FileDialog::new()
             .set_title("Save the problem report")
             .add_filter("Zip", &["zip"])
-            .set_file_name(format!("CreaBIM-report-{secs}.zip"))
+            .set_file_name(format!("Volumen-report-{secs}.zip"))
             .save_file()
         else {
             return;
@@ -320,7 +320,7 @@ impl CreaBimApp {
             .collect();
         let mut summary = String::new();
         let mut put = |k: &str, v: String| summary.push_str(&format!("{k}: {v}\n"));
-        put("CreaBIM", env!("CARGO_PKG_VERSION").to_string());
+        put("Volumen", env!("CARGO_PKG_VERSION").to_string());
         put("Build", env!("CREABIM_COMMIT").to_string());
         put("System", os_version());
         put("Graphics", gpu());
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn a_report_zip_has_its_files_whole() {
         let files = vec![
-            ("summary.txt".to_string(), b"CreaBIM: 1.1.0".to_vec()),
+            ("summary.txt".to_string(), b"Volumen: 1.1.0".to_vec()),
             ("activity.log".to_string(), vec![7u8; 1000]),
         ];
         let z = zip(&files);
@@ -401,8 +401,8 @@ mod tests {
             .windows(11)
             .position(|w| w == b"summary.txt")
             .expect("its name");
-        assert_eq!(&z[i + 11..i + 11 + 14], b"CreaBIM: 1.1.0");
+        assert_eq!(&z[i + 11..i + 11 + 14], b"Volumen: 1.1.0");
         let crc = u32::from_le_bytes([z[14], z[15], z[16], z[17]]);
-        assert_eq!(crc, creabim_geom::raster::crc32(b"CreaBIM: 1.1.0"));
+        assert_eq!(crc, creabim_geom::raster::crc32(b"Volumen: 1.1.0"));
     }
 }

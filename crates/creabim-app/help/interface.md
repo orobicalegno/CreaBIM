@@ -1,10 +1,10 @@
 # The window at a glance
 
-![The CreaBIM window](img/interface.jpg)
+![The Volumen window](img/interface.jpg)
 
 ## The top bar
 
-- **The CreaBIM menu** (the logo): About, updates, settings, the activity log and Exit.
+- **The Volumen menu** (the logo): About, updates, settings, the activity log and Exit.
 - **Menus**: *File*, *Edit*, *View*, *Create*, *Materials* and *Help*. While one is open, slide to the next to switch.
 - **Quick buttons**: Undo, Redo, Move, Rotate, Scale, Duplicate, Copy, Cut, Paste, Delete, Hide, Show only selected, Show everything. They do the same as the keys, so everything can be done with the mouse alone.
 - **The file name**. A dot beside it means there are unsaved changes; the window's title shows a • too.
@@ -76,7 +76,7 @@ Drag the panel's left edge to make it as wide as you like; in a narrow panel, ro
 
 ## The status bar (bottom)
 
-It starts with what each mouse button does over the view in use, and changes while `Shift`, `Ctrl` or `Alt` is held. Then what to do next, in words; a message cut short slides to show the rest when you point at it. Then the **Snap** switch and the list of [snaps](snaps), **Grid snap** (`Alt+S`), the **Workplane**, the **Pivot** for rotating and scaling, the **Units** menu (see [Units and number formats](units)) and the number of elements in the project.
+It starts with what each mouse button does over the view in use, and changes while `Shift`, `Ctrl` or `Alt` is held. Then what to do next, in words; a message cut short slides to show the rest when you point at it. Then the drafting buttons as in AutoCAD: **GRID**, **SNAP**, **ORTHO**, **POLAR**, **OSNAP** and **OTRACK** (see [Snaps](snaps)), the **Workplane**, the **Pivot** for rotating and scaling, the **Units** menu (see [Units and number formats](units)) and the number of elements in the project.
 
 ## The Help panel
 
@@ -84,13 +84,13 @@ This panel. It opens at the right of the window, beside your work. Drag its left
 
 ## Settings
 
-*CreaBIM menu › Settings…* (`Ctrl+,`) holds what is yours alone: it never changes anyone's drawings, and goes with you, not with the project. Its categories:
+*Volumen menu › Settings…* (`Ctrl+,`) holds what is yours alone: it never changes anyone's drawings, and goes with you, not with the project. Its categories:
 
 | Category | What is in it |
 | --- | --- |
 | **Interface** | The theme, the **drawing paper** (follow the theme, always light or always dark; prints and PDFs are always on white), and where the **Move, Rotate and Scale bar** sits: over the view, or by the pointer |
 | **Viewport** | The **selection and grips colour** (*Orange*, or *Follow the theme*'s own accent), how grips look, Edit mode's edge width and vertex size, and the X and Y axes on the grid |
-| **Navigation** | The mouse: *CreaBIM* (middle orbits, left boxes) or *Classic* (left drag orbits) |
+| **Navigation** | The mouse: *Volumen* (middle orbits, left boxes) or *Classic* (left drag orbits) |
 | **Snapping** | Grid snap spacing, and distance marks while dragging |
 | **Project** | The project's units, saved with the project for everyone who opens it |
 | **Keymap** | Every key, by what it does. `Ctrl+/` opens the list any time |

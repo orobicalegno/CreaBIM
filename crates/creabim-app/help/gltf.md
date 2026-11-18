@@ -4,7 +4,7 @@
 
 ## Export
 
-*File › glTF (.glb) for Blender* writes every element as a mesh named with its CreaBIM id, with its material's colour, roughness, metallic and opacity (glass stays see-through). It opens in Blender, three.js viewers, Unreal, Unity and most 3D tools. For the way back from Blender, see [Blender](blender).
+*File › glTF (.glb) for Blender* writes every element as a mesh named with its Volumen id, with its material's colour, roughness, metallic and opacity (glass stays see-through). It opens in Blender, three.js viewers, Unreal, Unity and most 3D tools. For the way back from Blender, see [Blender](blender).
 
 ## Materials from glTF
 

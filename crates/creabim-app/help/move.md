@@ -73,7 +73,7 @@ A closed outline (slab, roof, ceiling, shaft, extrusion) grows outwards or shrin
 
 ## The pivot
 
-Rotate and scale turn about the **pivot**, chosen in the status bar or *Edit › Pivot*: the median point, the bounds' centre, each element's own origin, the active element, or the **pivot cursor**. `Shift+right-click` anywhere places the cursor and makes it the pivot.
+Rotate and scale turn about the **pivot**, chosen in the status bar or *Edit › Pivot*: the median point, the bounds' centre, each element's own origin, the active element, or the **pivot cursor**. `Shift+right-click` in the 3D view, or `Ctrl+Shift+right-click` in a plan or section (where `Shift+right-click` opens the object snap menu, as in AutoCAD), places the cursor and makes it the pivot.
 
 ## Extrude: E
 

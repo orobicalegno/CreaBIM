@@ -16,6 +16,7 @@ pub enum Projector {
     Plan,
     Section(SectionFrame),
     Axo(AxoFrame),
+    Camera(crate::section::CameraFrame),
 }
 
 impl Projector {
@@ -28,6 +29,12 @@ impl Projector {
             ViewKind::Axonometric { azimuth, altitude } => {
                 Projector::Axo(AxoFrame::new(model, azimuth, altitude))
             }
+            ViewKind::Perspective {
+                eye,
+                target,
+                fov,
+                aspect,
+            } => Projector::Camera(crate::section::CameraFrame::new(eye, target, fov, aspect)),
             ViewKind::Schedule { .. } => return None,
         })
     }
@@ -37,6 +44,7 @@ impl Projector {
             Projector::Plan => p.truncate(),
             Projector::Section(f) => f.project(p).truncate(),
             Projector::Axo(f) => f.project(p).truncate(),
+            Projector::Camera(f) => f.project(p).truncate(),
         }
     }
 }
@@ -811,6 +819,229 @@ pub fn sheet_notes(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
         .collect()
 }
 
+/// Is height `z` on the floor of `level`: at or above it, below the next?
+fn on_floor(model: &Model, level: ElementId, z: f64) -> bool {
+    let Some(this) = model.level(level).map(|l| l.elevation) else {
+        return false;
+    };
+    let next = model
+        .levels()
+        .map(|(_, l)| l.elevation)
+        .filter(|h| *h > this + 1e-6)
+        .fold(f64::INFINITY, f64::min);
+    // the lowest floor takes what stands below it too
+    let lowest = model.levels().all(|(_, l)| l.elevation >= this - 1e-6);
+    (z >= this - 1e-6 || lowest) && z < next
+}
+
+/// A camera's mark in a plan of `level` it stands on: its body and lens
+/// pointing the way it looks, the edges of what it sees out to its
+/// target, and a cross on the target. `mm` is drawing units per paper
+/// millimetre.
+pub fn camera_symbol(
+    model: &Model,
+    id: ElementId,
+    v: &View,
+    level: ElementId,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let ViewKind::Perspective {
+        eye, target, fov, ..
+    } = v.kind
+    else {
+        return vec![];
+    };
+    if !on_floor(model, level, eye.z) {
+        return vec![];
+    }
+    let (e, t) = (eye.truncate(), target.truncate());
+    let f = (t - e).try_normalize().unwrap_or(DVec2::Y);
+    let side = f.perp();
+    let mut out = Vec::new();
+    let mut line = |a: DVec2, b: DVec2| {
+        out.push(PlanItem::Line {
+            id,
+            pen: crate::plan::Pen::Symbol,
+            a,
+            b,
+        })
+    };
+    // the body, 6 by 4 mm on paper, behind the eye, and the lens before it
+    let (l, w) = (6.0 * mm, 2.0 * mm);
+    let back = e - f * l;
+    let body = [back - side * w, e - side * w, e + side * w, back + side * w];
+    for i in 0..4 {
+        line(body[i], body[(i + 1) % 4]);
+    }
+    let lens = [
+        e - side * w * 0.5,
+        e + f * 2.0 * mm - side * w,
+        e + f * 2.0 * mm + side * w,
+        e + side * w * 0.5,
+    ];
+    for i in 0..4 {
+        line(lens[i], lens[(i + 1) % 4]);
+    }
+    // what it sees, out to the target's distance
+    let reach = e.distance(t).max(10.0 * mm);
+    let half = (fov / 2.0).to_radians();
+    for turn in [half, -half] {
+        line(e, e + DVec2::from_angle(turn).rotate(f) * reach);
+    }
+    let c = 1.5 * mm;
+    line(t - DVec2::new(c, c), t + DVec2::new(c, c));
+    line(t - DVec2::new(c, -c), t + DVec2::new(c, -c));
+    out
+}
+
+/// A small, plain north arrow in a plan: a slim arrowhead, its left half
+/// filled, on a short stem, and an N beyond its tip, `m.size` paper
+/// millimetres tall, pointing to north (the project's true north unless
+/// the mark has its own angle). `mm` is drawing units per paper mm.
+pub fn north_symbol(
+    id: ElementId,
+    m: &creabim_core::PaperMark,
+    true_north: f64,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let a = m.north_angle(true_north).to_radians();
+    let turn = DVec2::from_angle(a);
+    let s = m.size * mm;
+    let at = |x: f64, y: f64| m.at + turn.rotate(DVec2::new(x * s, y * s));
+    let (tip, notch, left, right, foot) = (
+        at(0.0, 0.5),
+        at(0.0, 0.05),
+        at(-0.16, -0.05),
+        at(0.16, -0.05),
+        at(0.0, -0.5),
+    );
+    let line = |a: DVec2, b: DVec2| PlanItem::Line {
+        id,
+        pen: crate::plan::Pen::Fine,
+        a,
+        b,
+    };
+    vec![
+        PlanItem::Fill {
+            id,
+            points: vec![tip, left, notch],
+            hatch: creabim_core::Hatch::Solid,
+            rgb: Some([0.0, 0.0, 0.0]),
+        },
+        line(tip, left),
+        line(left, notch),
+        line(notch, right),
+        line(right, tip),
+        line(notch, foot),
+        PlanItem::Text {
+            id,
+            at: at(0.0, 0.5) + turn.rotate(DVec2::new(0.0, 2.2 * mm)),
+            text: "N".into(),
+            size: (m.size * 0.28).clamp(2.0, 5.0),
+            align: crate::paper::Anchor::Middle,
+            mm,
+            rgb: None,
+            bold: true,
+            angle: a,
+        },
+    ]
+}
+
+/// How a size is written beside an opening: whole centimetres, and a
+/// height of nothing as 000.
+fn centimetres(m: f64) -> String {
+    let cm = (m * 100.0).round() as i64;
+    if cm == 0 {
+        "000".into()
+    } else {
+        cm.to_string()
+    }
+}
+
+/// The size of opening `o` written beside it in a plan of `level`, as
+/// Italian drawings write it: a line square to the wall through the
+/// opening's middle, on the inside the width over the height, on the
+/// outside the sill's height, all in centimetres along the line. `mm` is
+/// drawing units per paper millimetre.
+pub fn opening_label(
+    model: &Model,
+    id: ElementId,
+    o: &creabim_core::Opening,
+    level: ElementId,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let Some(ElementKind::Wall(w)) = model.get(o.host).map(|e| &e.kind) else {
+        return vec![];
+    };
+    if w.level != level || o.kind == OpeningKind::Hole || w.curtain.is_some() {
+        return vec![];
+    }
+    let u = (o.offset + o.width / 2.0).clamp(0.0, w.length());
+    let c = w.place(u, 0.0);
+    let t = w.thickness / 2.0;
+    // a window faces out, a door opens in: the outside is the side a
+    // window faces and the other side of a door
+    let left = (w.place(u, 1.0) - c).normalize_or(DVec2::Y);
+    let faces = if o.faces_left(w) { left } else { -left };
+    let outside = if o.kind == OpeningKind::Door {
+        -faces
+    } else {
+        faces
+    };
+    let inside = -outside;
+    let size = 2.5;
+    let mut out = vec![PlanItem::Line {
+        id,
+        pen: crate::plan::Pen::Fine,
+        a: c + outside * (t + 1.5 * mm),
+        b: c + inside * (t + 12.0 * mm),
+    }];
+    // the text runs along the line, kept readable: upright, or read from
+    // the top down where the line stands up the drawing
+    let mut a = inside.to_angle();
+    if a >= std::f64::consts::FRAC_PI_2 - 1e-9 {
+        a -= std::f64::consts::PI;
+    } else if a < -std::f64::consts::FRAC_PI_2 - 1e-9 {
+        a += std::f64::consts::PI;
+    }
+    let up = DVec2::from_angle(a).perp();
+    let gap = (size / 2.0 + 0.6) * mm;
+    let text = |at: DVec2, s: String| PlanItem::Text {
+        id,
+        at,
+        text: s,
+        size,
+        align: crate::paper::Anchor::Middle,
+        mm,
+        rgb: None,
+        bold: false,
+        angle: a,
+    };
+    let m_in = c + inside * (t + 6.5 * mm);
+    out.push(text(m_in + up * gap, centimetres(o.width)));
+    out.push(text(m_in - up * gap, centimetres(o.height)));
+    let m_out = c + outside * (t * 0.5).max(3.0 * mm);
+    out.push(text(m_out - up * gap, centimetres(o.sill)));
+    out
+}
+
+/// The linework and detail components drawn on the sheet itself, in
+/// paper millimetres.
+pub fn sheet_linework(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
+    let drafting = creabim_core::Drafting::of(model);
+    let look = creabim_core::styles::active_pack(model).membranes;
+    model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            ElementKind::Detail(d) if d.view == sheet => {
+                Some(crate::detail::detail_items(e.id, d, 1.0, look, &drafting))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
 /// The dimensions, tags, notes and detail components placed in a view,
 /// and the boxes of the detail views called out from it, as drawing items.
 pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanItem> {
@@ -818,6 +1049,7 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
         return vec![];
     };
     let mut out = Vec::new();
+    let drafting = creabim_core::Drafting::of(model);
     for e in model.iter() {
         match &e.kind {
             ElementKind::Detail(d) if d.view == view_id => {
@@ -827,7 +1059,28 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     d,
                     view.scale / 1000.0,
                     look,
+                    &drafting,
                 ));
+            }
+            // a north arrow placed in this view, turned to true north
+            ElementKind::PaperMark(m)
+                if m.sheet == view_id
+                    && matches!(m.kind, creabim_core::PaperMarkKind::NorthArrow { .. }) =>
+            {
+                let north = model.project_info().map_or(0.0, |(_, p)| p.true_north);
+                out.extend(north_symbol(e.id, m, north, view.scale / 1000.0));
+            }
+            // a camera, in the plan of the floor it stands on
+            ElementKind::View(v) if matches!(v.kind, ViewKind::Perspective { .. }) => {
+                if let ViewKind::Plan { level, .. } = view.kind {
+                    out.extend(camera_symbol(model, e.id, v, level, view.scale / 1000.0));
+                }
+            }
+            // a door's or window's size, where its type or itself says so
+            ElementKind::Opening(o) if o.frame.label => {
+                if let ViewKind::Plan { level, .. } = view.kind {
+                    out.extend(opening_label(model, e.id, o, level, view.scale / 1000.0));
+                }
             }
             ElementKind::View(v) => {
                 if let Some(c) = v.callout.filter(|c| c.parent == view_id) {
@@ -1299,6 +1552,76 @@ mod tests {
 
     fn named(m: &Model, name: &str) -> ElementId {
         m.iter().find(|e| e.name == name).unwrap().id
+    }
+
+    #[test]
+    fn an_opening_writes_its_size_across_its_wall() {
+        use creabim_core::{Element, Level, Opening, OpeningFrame, Transaction};
+        let mut doc = creabim_core::Document::new();
+        let lv = Element::new(
+            "L0",
+            ElementKind::Level(Level {
+                elevation: 0.0,
+                height: 3.0,
+            }),
+        );
+        let level = lv.id;
+        // a wall along x, its outside to the south (its right)
+        let wall = Element::new(
+            "W",
+            ElementKind::Wall(Wall::new(
+                level,
+                DVec2::ZERO,
+                DVec2::new(6.0, 0.0),
+                0.3,
+                3.0,
+            )),
+        );
+        let host = wall.id;
+        let window = |sill: f64| Opening {
+            host,
+            kind: OpeningKind::Window,
+            offset: 2.0,
+            sill,
+            width: 1.4,
+            height: 1.2,
+            material: None,
+            frame: OpeningFrame {
+                label: true,
+                ..Default::default()
+            },
+            flip_hand: false,
+            flip_facing: false,
+            wrap: None,
+            frame_at: None,
+        };
+        let o = window(1.0);
+        doc.commit(Transaction::new("setup").insert(lv).insert(wall))
+            .unwrap();
+        let items = opening_label(doc.model(), ElementId::new(), &o, level, 0.1);
+        let texts: Vec<(String, DVec2, f64)> = items
+            .iter()
+            .filter_map(|i| match i {
+                PlanItem::Text {
+                    text, at, angle, ..
+                } => Some((text.clone(), *at, *angle)),
+                _ => None,
+            })
+            .collect();
+        let names: Vec<&str> = texts.iter().map(|t| t.0.as_str()).collect();
+        assert_eq!(names, ["140", "120", "100"]);
+        // the size inside (north), the sill outside (south), along the
+        // line, read from the top down
+        assert!(texts[0].1.y > 0.15 && texts[1].1.y > 0.15 && texts[2].1.y < 0.0);
+        assert!((texts[0].2 + std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        // the width "above" the line as the text reads, the height below
+        assert!(texts[0].1.x > 2.7 && texts[1].1.x < 2.7);
+        // a sill on the floor reads 000; another level has no label
+        let low = opening_label(doc.model(), ElementId::new(), &window(0.0), level, 0.1);
+        assert!(low
+            .iter()
+            .any(|i| matches!(i, PlanItem::Text { text, .. } if text == "000")));
+        assert!(opening_label(doc.model(), ElementId::new(), &o, ElementId::new(), 0.1).is_empty());
     }
 
     #[test]

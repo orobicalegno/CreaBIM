@@ -17,6 +17,35 @@ Select one, then:
 - drag its jamb handles to widen it, or its head and sill handles to change its height, in a plan or in 3D;
 - pick a material, and its frame: *Frame width* and *Frame depth*, and for windows *Panes across* and *Panes up*.
 
+## How a window opens, and what plans draw
+
+**Opens**, in a window's *Properties* or its type's, says how it opens. The window gets real leaves in 3D, each a frame round its own glass, and plans draw the symbol for it:
+
+- **Casement, one leaf**: the leaf drawn open square to the wall, on the inside, and the quarter circle its edge sweeps. It hangs on the jamb at the wall's start; *Flip › Hand* hangs it on the other one.
+- **Casement, two leaves**: both leaves drawn open, each with its arc. **First leaf** sets the share of the width of the leaf at the wall's start: 50 % is two the same.
+- **Pivot (bilico)**: a low tent over the inside, from each jamb up to the middle.
+- **Sliding**: two leaves on two tracks, lapping at the middle, and an arrow the way the inner one slides. *Flip › Hand* swaps which leaf slides.
+- **Fixed**: glass in the frame, nothing opens.
+
+*Glass in the frame (as before)* draws the window as it was, with its panes. A leaf's glass shows in plan as a double line.
+
+**Subframe** puts a subframe (falsotelaio) round the frame, this wide seen from the front: the frame is built inside it, and plans and 3D show both. 0 is none.
+
+**Size in plans** writes the opening's size beside it, as Italian drawings do: a line square to the wall through its middle, the width over the height on the inside, and the sill's height on the outside, all in centimetres (a sill on the floor reads 000). The text runs along the line, read from the top down on walls that run across the drawing.
+
+These settings are part of *Frame and panes*, so a door or window type passes them to every door or window of the type.
+
+## Where the frame stands in the wall
+
+By default a door's or window's frame stands in the middle of the wall's thickness. **Frame at** in its *Properties* puts it against a face of any of the wall's layers instead. The list has every layer from the exterior in, each with its two faces:
+
+- a layer's **exterior face**: the frame's outer face is flush with it, and the frame runs inwards from there. The block's exterior face stands the window against the masonry, behind the insulation; the first layer's exterior face puts it flush with the outside of the wall.
+- a layer's **interior face**: the frame's inner face is flush with it, and the frame runs outwards from there. The insulation's interior face stands the window in the insulation; the last layer's interior face puts it flush with the inside of the wall.
+
+**Frame offset** then moves it a set distance towards the interior, or towards the exterior with a minus sign. The frame is kept inside the wall. A wall of one material counts as one layer, so its two faces are the outside and the inside of the wall.
+
+The frame, glass, leaf and swing move together in plans, sections, 3D and IFC, and a window's outside sill still reaches the face of the wall. Where the wall's layers [wrap](assemblies#doors-and-windows-in-layered-walls) into the reveals, they run to the frame wherever it stands. The setting is each door's or window's own; a type doesn't hold it yet.
+
 ## Flip, hand and swing
 
 A door has a **hand** (which jamb the hinges are on) and a **swing** (which side it opens to). *Properties* reads, for example, *Hung right, in*.

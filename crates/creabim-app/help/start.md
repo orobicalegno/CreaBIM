@@ -11,6 +11,6 @@ This short tour builds a small one-storey house from scratch, and ends with a pr
 7. [Put it on a sheet](start-sheets): a drawing ready to print.
 8. [Save and export](start-export): the project file, PDF and IFC.
 
-> **Tip:** Want to see a finished model first? CreaBIM opens on [the starter house](starter-house), and *File › New starter house* brings it back. Everything in this tour is already in it, so you can click around and see how it is made.
+> **Tip:** Want to see a finished model first? Volumen opens on [the starter house](starter-house), and *File › New starter house* brings it back. Everything in this tour is already in it, so you can click around and see how it is made.
 
 **Next:** [Start a project](start-project)

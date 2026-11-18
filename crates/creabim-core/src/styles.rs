@@ -816,7 +816,7 @@ impl KindTemplates {
             K::Plan { .. } => self.plan.as_deref(),
             K::Section { cut: true, .. } => self.section.as_deref(),
             K::Section { cut: false, .. } => self.elevation.as_deref(),
-            K::Axonometric { .. } => self.axonometric.as_deref(),
+            K::Axonometric { .. } | K::Perspective { .. } => self.axonometric.as_deref(),
             K::Schedule { .. } => None,
         }
     }

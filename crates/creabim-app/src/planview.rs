@@ -82,12 +82,14 @@ pub enum Tool {
     Ceiling,
     /// A box on a plan or section that makes a larger-scale detail view.
     Callout,
+    /// Place a camera in a plan: a perspective view.
+    Camera,
     /// A detail component: flashing, membrane, insulation, blocking...
     Detail,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 41] = [
+    pub const ALL: [Tool; 42] = [
         Tool::Select,
         Tool::Wall,
         Tool::Door,
@@ -115,6 +117,7 @@ impl Tool {
         Tool::Section,
         Tool::Elevation,
         Tool::Callout,
+        Tool::Camera,
         Tool::Dimension,
         Tool::Tag,
         Tool::Angle,
@@ -178,6 +181,7 @@ impl Tool {
             Tool::RoomSeparator => "Room separator",
             Tool::Ceiling => "Ceiling",
             Tool::Callout => "Callout",
+            Tool::Camera => "Camera",
             Tool::Detail => "Detail component",
         }
     }
@@ -223,7 +227,8 @@ impl Tool {
             Tool::Room => "Click inside walls for a room that follows them (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch) where no walls close it off. Its name, number and finishes are in Properties.",
             Tool::RoomSeparator => "Click two points for a line that splits a room in two where there is no wall, such as between a kitchen and a dining room.",
             Tool::Callout => "On a plan or section, click two corners of a box round what to detail: it becomes a detail view at the scale in the top bar, numbered in a bubble on this view.",
-            Tool::Detail => "Pick what to draw in the top bar, then click its points; Enter, a double-click or a right-click finishes (the first point again closes a region). Esc keeps what is drawn. Detail components show in this view only.",
+            Tool::Camera => "In a plan, click where the camera stands, then what it looks at: it becomes a perspective view under 3D views. Set its eye height and angle in the top bar; drag the camera or its target to aim it again.",
+            Tool::Detail => "Pick what to draw in the top bar, a detail component or plain linework (line, rectangle, polygon, circle, arc, ellipse, spline), then click its points; Enter, a double-click or a right-click finishes (the first point again closes a region or a closed line). Esc keeps what is drawn. It shows in this view only.",
             Tool::Ceiling => "Click inside a room for a ceiling over it that follows its walls (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch). Set its height and thickness in the top bar or Properties.",
         }
     }
@@ -442,6 +447,12 @@ pub struct PlanState {
     /// this point on screen instead of opening egui's.
     pub web_menus: bool,
     pub menu_request: Option<egui::Pos2>,
+    /// Where Shift + right-click asked for AutoCAD's object snap menu.
+    pub osnap_menu_request: Option<egui::Pos2>,
+    /// The one object snap the next pick uses (AutoCAD's override).
+    pub snap_once: Option<snaps::SnapKind>,
+    /// The override was used by a click: it goes before the next frame.
+    pub snap_once_spent: bool,
     /// Which snaps are on, in every pane and the 3D view.
     pub snap: snaps::SnapSettings,
     /// The grid system the Grid tool puts new lines in.
@@ -669,10 +680,13 @@ impl Default for PlanState {
             spotlight_ghost: false,
             chain: (None, vec![]),
             rested: (None, vec![]),
+            osnap_menu_request: None,
+            snap_once: None,
+            snap_once_spent: false,
             rest: None,
             refs: HashMap::new(),
             ref_rest: None,
-            guide_step: 45.0,
+            guide_step: 90.0,
             hover_guide: None,
             dim_axis: None,
             dim_chain: false,
@@ -1333,8 +1347,20 @@ pub fn show(
     }
 
     let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+    // an object snap override lasts one pick, as AutoCAD's
+    if state.snap_once_spent {
+        state.snap_once = None;
+        state.snap_once_spent = false;
+    }
+    let base = match state.snap_once {
+        Some(k) => state.snap.only(k),
+        None => state.snap,
+    };
+    if state.snap_once.is_some() && response.clicked() {
+        state.snap_once_spent = true;
+    }
     // holding Alt picks free of snaps
-    let snap_cfg = state.snap.live(alt);
+    let snap_cfg = base.live(alt);
     // the Align tool in a 3D view works on the model's faces
     let align_under = match (kind, tool) {
         (PaneKind::Axonometric, Tool::Align) => {
@@ -1398,7 +1424,7 @@ pub fn show(
     let guides = if guided {
         let refs = state.refs.get(&view).map_or(&[][..], |r| r.as_slice());
         let _p = crate::app::Perf::new("plan snaps: guides");
-        snaps::temp_guides(refs, guide_from, state.guide_step)
+        snaps::temp_guides(refs, guide_from, state.guide_step, &snap_cfg)
     } else {
         vec![]
     };
@@ -2273,7 +2299,7 @@ pub fn show(
     }
     // a callout's box or a detail component being drawn, and Enter to
     // finish the component
-    if matches!(tool, Tool::Callout | Tool::Detail) {
+    if matches!(tool, Tool::Callout | Tool::Detail | Tool::Camera) {
         crate::detailtool::preview(
             doc.model(),
             &painter,
@@ -2560,7 +2586,17 @@ pub fn show(
         }
     }
 
-    // Shift+right-click places the pivot cursor
+    // Shift + right-click: AutoCAD's object snap menu, in plans and
+    // sections; Ctrl + Shift + right-click places the pivot cursor
+    let ctrl = ui.input(|i| i.modifiers.command);
+    if response.secondary_clicked()
+        && shift
+        && !ctrl
+        && matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
+    {
+        state.osnap_menu_request = response.interact_pointer_pos();
+        return None;
+    }
     if let (Some(space), true, true, Some(p)) = (
         space,
         response.secondary_clicked(),
@@ -2892,6 +2928,9 @@ pub fn show(
                 selection,
             ),
             (_, Tool::Tag) => tag_tool(doc, view, &view_def, picked(), raw, state, selection),
+            (PaneKind::Plan { .. }, Tool::Camera) => {
+                crate::detailtool::camera_click(doc, view, p, state, selection).map(|_| ())
+            }
             (PaneKind::Plan { .. } | PaneKind::Section { .. }, Tool::Callout) => {
                 // the new callout is selected where it was drawn; its view
                 // opens from Properties or with a double-click
@@ -3368,6 +3407,7 @@ fn plan_click(
         | Tool::SpotLevel
         | Tool::Sketch
         | Tool::Callout
+        | Tool::Camera
         | Tool::Detail => Ok(()),
         // a library profile placed at the click, pulled up (MU36)
         Tool::Extrusion if state.parts.extrusion_library.is_some() => {
@@ -3670,16 +3710,24 @@ fn ray_pick_all(
             let xy = PaneKind::section_point(start, end, p);
             (DVec3::new(xy.x, xy.y, p.y), look.extend(0.0))
         }
-        PaneKind::Axonometric => {
-            let Some(ElementKind::View(View {
+        PaneKind::Axonometric => match model.get(view).map(|e| &e.kind) {
+            Some(ElementKind::View(View {
                 kind: ViewKind::Axonometric { azimuth, altitude },
                 ..
-            })) = model.get(view).map(|e| &e.kind)
-            else {
-                return vec![];
-            };
-            creabim_geom::section::AxoFrame::new(model, *azimuth, *altitude).ray(p)
-        }
+            })) => creabim_geom::section::AxoFrame::new(model, *azimuth, *altitude).ray(p),
+            // a camera's ray, from its eye through the picture
+            Some(ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye,
+                        target,
+                        fov,
+                        aspect,
+                    },
+                ..
+            })) => creabim_geom::section::CameraFrame::new(*eye, *target, *fov, *aspect).ray(p),
+            _ => return vec![],
+        },
     };
     creabim_geom::pick::pick_all(scene, o.as_vec3(), d.as_vec3())
         .into_iter()
@@ -3910,6 +3958,8 @@ fn section_tool(
                         frame: Default::default(),
                         flip_hand: false,
                         flip_facing: false,
+                        wrap: None,
+                        frame_at: None,
                     }),
                 ),
             );
@@ -4291,6 +4341,21 @@ fn keyboard_edits(
         Flow::Tool
     };
     let mode = keys.or(state.armed)?;
+    // Shift+D on views copies them at once, as the Duplicate button does
+    if mode == (Mode::Move, true) {
+        if let Some(r) = modal::duplicate_views(doc, &selection.all()) {
+            state.armed = None;
+            state.status = Some(match r {
+                Ok(copies) => {
+                    let said = modal::views_duplicated(doc, &copies);
+                    selection.extend(copies, false);
+                    said
+                }
+                Err(e) => e,
+            });
+            return Some(None);
+        }
+    }
     if keys.is_none() && only_paper(doc, &selection.all()) {
         return None;
     }
@@ -5388,6 +5453,73 @@ fn section_letter(n: usize) -> String {
     }
 }
 
+/// AutoCAD's crosshairs: two lines through the pointer, as long as
+/// `size` per cent of the pane (100: right across it, CURSORSIZE), and
+/// the pickbox square at the centre while nothing asks for a point. They
+/// take the pointer's place, unless a grip or a pan asked for another one.
+pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox: bool) {
+    let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)) else {
+        return;
+    };
+    // AutoSnap's magnet: the crosshairs lock onto the snap marker
+    let p = crate::snaps::last_mark()
+        .filter(|m| m.distance(p) < 2.5 * crate::snaps::aperture() && rect.contains(*m))
+        .unwrap_or(p);
+    // over a menu or a window above the pane, the pointer stays as it is
+    if ui
+        .ctx()
+        .layer_id_at(p)
+        .is_some_and(|l| l.order != egui::Order::Background && l != ui.layer_id())
+    {
+        return;
+    }
+    let cur = ui.ctx().output(|o| o.cursor_icon);
+    if !matches!(cur, egui::CursorIcon::Default | egui::CursorIcon::Crosshair) {
+        return;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+    let ink = if dark {
+        Color32::from_gray(225)
+    } else {
+        Color32::from_gray(35)
+    };
+    let stroke = Stroke::new(1.0, ink);
+    // on the view's own layer: over the drawing, under windows above it
+    let top = ui.painter().with_clip_rect(rect);
+    let p = egui::pos2(p.x.round() + 0.5, p.y.round() + 0.5);
+    let half = if size >= 100.0 {
+        rect.width().max(rect.height())
+    } else {
+        rect.width().max(rect.height()) * size.max(1.0) / 200.0
+    };
+    // a gap round the pickbox, as AutoCAD leaves one
+    let gap = if pickbox { 5.0 } else { 0.0 };
+    top.line_segment(
+        [egui::pos2(p.x - half, p.y), egui::pos2(p.x - gap, p.y)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x + gap, p.y), egui::pos2(p.x + half, p.y)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x, p.y - half), egui::pos2(p.x, p.y - gap)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x, p.y + gap), egui::pos2(p.x, p.y + half)],
+        stroke,
+    );
+    if pickbox {
+        top.rect_stroke(
+            Rect::from_center_size(p, egui::vec2(9.0, 9.0)),
+            0.0,
+            stroke,
+            egui::StrokeKind::Middle,
+        );
+    }
+}
+
 static PLAN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 static PLAN_AXES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -5710,6 +5842,22 @@ pub fn draw_item_with(
                         4.0,
                     ));
                 }
+                Pen::Draft { weight, rgb } => {
+                    // linework drawn by hand: its weight, its own colour
+                    use creabim_core::LinePen;
+                    let w = match weight {
+                        LinePen::Heavy => 1.8 * o.cut,
+                        LinePen::Medium => 1.2 * o.proj,
+                        LinePen::Light | LinePen::Dashed => 1.0,
+                        LinePen::Fine => 0.6,
+                    };
+                    let (w, c) = if selected {
+                        (w.max(2.0), highlight)
+                    } else {
+                        (w, rgb.map_or(ink, |c| Color32::from_rgb(c[0], c[1], c[2])))
+                    };
+                    painter.line_segment([a, b], Stroke::new(w, c));
+                }
                 _ => {
                     painter.line_segment([a, b], Stroke::new(1.0, ink));
                 }
@@ -5752,6 +5900,39 @@ pub fn draw_item_with(
                 text,
                 egui::FontId::proportional(12.0),
                 blue,
+            );
+        }
+        PlanItem::Text {
+            at,
+            text,
+            size,
+            align,
+            rgb,
+            bold,
+            angle,
+            ..
+        } if angle.abs() > 1e-9 => {
+            // turned text: laid out along its angle
+            let px = text_px(*size);
+            let colour = match rgb {
+                Some([r, g, b]) => {
+                    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+                }
+                None => ink,
+            };
+            let look = TextLook {
+                bold: *bold,
+                ..TextLook::default()
+            };
+            crate::annotate::text(
+                painter,
+                xf.to_screen(*at),
+                text,
+                px,
+                colour,
+                *angle,
+                *align,
+                &look,
             );
         }
         PlanItem::Text {
@@ -7256,6 +7437,8 @@ fn place_opening(
                 frame: Default::default(),
                 flip_hand: false,
                 flip_facing: false,
+                wrap: None,
+                frame_at: None,
             }),
         ),
     );
@@ -7277,7 +7460,7 @@ pub fn pane_kind(v: &View) -> PaneKind {
     match v.kind {
         ViewKind::Plan { level, .. } => PaneKind::Plan { level },
         ViewKind::Section { start, end, .. } => PaneKind::Section { start, end },
-        ViewKind::Axonometric { .. } => PaneKind::Axonometric,
+        ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => PaneKind::Axonometric,
         ViewKind::Schedule { .. } => PaneKind::Schedule,
     }
 }
@@ -7736,7 +7919,13 @@ mod tests {
         )
         .unwrap();
         let ctx = egui::Context::default();
-        let mut state = PlanState::default();
+        let mut state = PlanState {
+            snap: snaps::SnapSettings {
+                apparent: false,
+                ..snaps::SnapSettings::ALL
+            },
+            ..PlanState::default()
+        };
         state.cameras.insert(view, (DVec2::new(33.0, 0.5), 100.0));
         let mut sel = crate::selection::Selection::default();
         sel.only(id);
