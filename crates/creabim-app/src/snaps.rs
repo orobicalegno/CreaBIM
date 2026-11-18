@@ -231,7 +231,8 @@ impl Default for SnapSettings {
 }
 
 impl SnapSettings {
-    /// Every snap on.
+    /// Every snap on (the tests' starting point).
+    #[allow(dead_code)]
     pub const ALL: Self = Self {
         on: true,
         endpoint: true,
@@ -688,9 +689,6 @@ pub struct Snapper {
     /// Distance between grid points; 0 turns the grid off.
     pub grid: f64,
 }
-
-/// Pixels within which a snap takes over the pointer.
-pub const TOLERANCE: f32 = 10.0;
 
 impl Snapper {
     pub fn new() -> Self {

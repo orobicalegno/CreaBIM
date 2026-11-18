@@ -756,7 +756,7 @@ fn date_of_day(z: i64) -> String {
 
 /// A picture as a `data:` address, for the Help panel's page; on a dark
 /// theme the logo is the white one.
-pub fn data_url_for(path: &str, dark: bool) -> Option<String> {
+pub fn data_url_for(path: &str, _dark: bool) -> Option<String> {
     let (_, bytes) = IMAGES.iter().find(|i| i.0 == path)?;
     let mime = if path.ends_with(".png") {
         "image/png"
