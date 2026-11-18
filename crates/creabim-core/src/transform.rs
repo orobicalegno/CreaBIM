@@ -353,6 +353,11 @@ pub fn transformed(model: &Model, e: &Element, t: &Xform) -> Option<Element> {
                 *start = t.point2(*start);
                 *end = t.point2(*end);
             }
+            // a camera moves and turns with what it looks at
+            ViewKind::Perspective { eye, target, .. } if t.is_rigid() => {
+                *eye = t.point3(*eye);
+                *target = t.point3(*target);
+            }
             _ => return None,
         },
         ElementKind::Guide(g) => {
@@ -607,6 +612,7 @@ pub fn pivot(model: &Model, id: ElementId) -> Option<DVec3> {
         }
         ElementKind::View(v) => match &v.kind {
             ViewKind::Section { start, end, .. } => ((*start + *end) / 2.0).extend(0.0),
+            ViewKind::Perspective { eye, .. } => *eye,
             _ => return None,
         },
         ElementKind::Guide(g) => (g.a + g.b) / 2.0 + DVec3::Z * elevation(g.level),

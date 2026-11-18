@@ -175,6 +175,7 @@ pub(crate) fn tool_icon(t: Tool) -> &'static str {
         Tool::RoomSeparator => "room-separator",
         Tool::Ceiling => "ceiling",
         Tool::Callout => "callout",
+        Tool::Camera => "camera",
         Tool::Detail => "detail-component",
     }
 }
@@ -203,7 +204,7 @@ fn tool_group(t: Tool) -> u8 {
         | Tool::RoomSeparator
         | Tool::Ceiling => 1,
         Tool::Terrain | Tool::Paving | Tool::Planting => 5,
-        Tool::Section | Tool::Elevation | Tool::Callout => 2,
+        Tool::Section | Tool::Elevation | Tool::Callout | Tool::Camera => 2,
         Tool::Dimension
         | Tool::Tag
         | Tool::Angle
@@ -1200,6 +1201,9 @@ impl CreaBimApp {
             Item::new("nav.ortho", "Orthographic")
                 .checked(self.camera.ortho)
                 .hint("Parallel projection, without perspective"),
+            Item::new("nav.camera", "Save as a camera")
+                .icon("camera")
+                .hint("A perspective view seen as the 3D window sees it now, kept under 3D views and shown in plans"),
             Item::new("nav.walk", "Explore on foot")
                 .key("F5")
                 .checked(self.walking)
@@ -1801,6 +1805,7 @@ impl CreaBimApp {
             "nav.orbitsel" => self.orbit_selection = !self.orbit_selection,
             "nav.ortho" => self.camera.ortho = !self.camera.ortho,
             "nav.walk" => self.toggle_walk(),
+            "nav.camera" => self.camera_from_3d(),
             "nav.zoomin" => self.camera.zoom(2.0),
             "nav.zoomout" => self.camera.zoom(-2.0),
             "nav.look" => {
@@ -2039,7 +2044,7 @@ impl CreaBimApp {
                 Some(ElementKind::Sheet(_)) => Some("sheet"),
                 Some(ElementKind::View(view)) => Some(match view.kind {
                     ViewKind::Plan { .. } | ViewKind::Section { .. } => "drawing",
-                    ViewKind::Axonometric { .. } => "3d",
+                    ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => "3d",
                     ViewKind::Schedule { .. } => "schedule",
                 }),
                 _ => None,
@@ -2342,6 +2347,7 @@ impl CreaBimApp {
             ViewKind::Plan { cut_height, .. } => Some(("Cut height", *cut_height, "m", id)),
             ViewKind::Section { depth, .. } => Some(("Depth", *depth, "m", id)),
             ViewKind::Axonometric { altitude, .. } => Some(("Altitude", *altitude, "°", id)),
+            ViewKind::Perspective { fov, .. } => Some(("Angle", *fov, "°", id)),
             ViewKind::Schedule { .. } => None,
         }
     }
@@ -2355,6 +2361,7 @@ impl CreaBimApp {
             ViewKind::Plan { cut_height, .. } => *cut_height = value.clamp(0.1, 200.0),
             ViewKind::Section { depth, .. } => *depth = value.clamp(0.1, 200.0),
             ViewKind::Axonometric { altitude, .. } => *altitude = value.clamp(-89.0, 89.0),
+            ViewKind::Perspective { fov, .. } => *fov = value.clamp(5.0, 150.0),
             ViewKind::Schedule { .. } => return,
         }
         let r = self
@@ -2680,6 +2687,8 @@ impl CreaBimApp {
             }
             "view.number" => self.set_view_number(v),
             "detail.width" => self.plan.details.width = v.clamp(0.0, 5.0),
+            "camera.height" => self.plan.details.camera_height = v.clamp(0.0, 100.0),
+            "camera.fov" => self.plan.details.camera_fov = v.clamp(5.0, 150.0),
             "detail.radius" => self.plan.details.radius = v.clamp(0.0, 100.0),
             "detail.chamfer" => self.plan.details.chamfer = v.clamp(0.0, 100.0),
             "detail.offset" => self.plan.details.offset = v.clamp(0.0, 1000.0),
@@ -3101,6 +3110,18 @@ impl CreaBimApp {
                     "hint": "How wide the component is across its path: a batt's thickness, a course's depth",
                 }));
             }
+        }
+        if tool == Tool::Camera {
+            options.push(json!({
+                "kind": "number", "key": "camera.height", "label": "Eye height",
+                "value": self.plan.details.camera_height, "unit": "m", "step": 0.05, "min": 0.0, "max": 100.0,
+                "hint": "How high above the plan's level the camera stands, and what it looks at",
+            }));
+            options.push(json!({
+                "kind": "number", "key": "camera.fov", "label": "Angle",
+                "value": self.plan.details.camera_fov, "unit": "°", "step": 5.0, "min": 5.0, "max": 150.0,
+                "hint": "How wide the camera sees, across: 60° is a usual lens, 90° a wide one",
+            }));
         }
         if tool == Tool::Callout {
             options.push(seg(crate::detailtool::CALLOUT_SCALES

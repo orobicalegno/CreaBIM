@@ -1034,6 +1034,58 @@ impl CreaBimApp {
         })
     }
 
+    /// The 3D window seen from a camera at `eye` looking at `target`,
+    /// `fov` degrees wide across.
+    pub(super) fn look_through(&mut self, eye: DVec3, target: DVec3, fov: f64) {
+        let (eye, target) = (eye.as_vec3(), target.as_vec3());
+        let d = target - eye;
+        let flat = GVec2::new(d.x, d.y).length();
+        self.camera.ortho = false;
+        self.camera.target = target;
+        self.camera.distance = d.length().max(0.1);
+        // the camera's yaw and pitch point from the target back to the eye
+        self.camera.yaw = (-d.y).atan2(-d.x);
+        self.camera.pitch = (-d.z).atan2(flat);
+        // its angle is across; the 3D window's is up and down
+        let aspect = self.aspect.max(0.1);
+        let half = (fov.to_radians() as f32 / 2.0).tan() / aspect;
+        self.camera.fov_y = (2.0 * half.atan()).clamp(0.1, 2.6);
+        self.status = "The 3D window looks through the camera.".into();
+    }
+
+    /// A camera where the 3D window's is: what it sees, as a view.
+    pub(super) fn camera_from_3d(&mut self) {
+        let eye = self.camera.eye().as_dvec3();
+        let target = self.camera.target.as_dvec3();
+        let aspect = f64::from(self.aspect.max(0.2)).min(5.0);
+        let fov = (2.0 * ((f64::from(self.camera.fov_y) / 2.0).tan() * aspect).atan())
+            .to_degrees()
+            .clamp(5.0, 150.0);
+        let mut v = View::perspective(eye, target);
+        if let ViewKind::Perspective {
+            fov: f, aspect: a, ..
+        } = &mut v.kind
+        {
+            (*f, *a) = (fov, aspect);
+        }
+        let name = (1..)
+            .map(|n| format!("Camera {n}"))
+            .find(|n| !self.doc.model().iter().any(|e| &e.name == n))
+            .expect("unbounded");
+        let e = Element::new(name.clone(), ElementKind::View(v));
+        let id = e.id;
+        match self
+            .doc
+            .commit(Transaction::new(format!("Add {name}")).insert(e))
+        {
+            Ok(()) => {
+                self.selection.only(id);
+                self.status = format!("{name} saved from the 3D window: it is under 3D views, and its camera shows in plans.");
+            }
+            Err(err) => self.status = err.to_string(),
+        }
+    }
+
     /// Walking toggled (F5): stand at the eye in perspective, or step back
     /// out to orbiting.
     pub(super) fn toggle_walk(&mut self) {
@@ -2749,7 +2801,9 @@ impl CreaBimApp {
                         }))
                     }
                     // 3D views and schedules have no place of their own in the model
-                    ViewKind::Axonometric { .. } | ViewKind::Schedule { .. } => None,
+                    ViewKind::Axonometric { .. }
+                    | ViewKind::Perspective { .. }
+                    | ViewKind::Schedule { .. } => None,
                 };
                 let to_world = to_world.unwrap_or_else(|| Box::new(|_| [0.0; 3]));
                 let plan = if matches!(
@@ -6965,19 +7019,23 @@ impl CreaBimApp {
                 if let Some(mut v) = self.view(id).cloned() {
                     let shadable = matches!(
                         v.kind,
-                        ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                        ViewKind::Section { .. }
+                            | ViewKind::Axonometric { .. }
+                            | ViewKind::Perspective { .. }
                     );
+                    let camera = matches!(v.kind, ViewKind::Perspective { .. });
                     let (text, value, unit) = match &mut v.kind {
                         ViewKind::Plan { cut_height, .. } => ("Cut height:", cut_height, " m"),
                         ViewKind::Section { depth, .. } => ("Depth:", depth, " m"),
                         ViewKind::Axonometric { altitude, .. } => ("Altitude:", altitude, "°"),
+                        ViewKind::Perspective { fov, .. } => ("Angle:", fov, "°"),
                         ViewKind::Schedule { .. } => return,
                     };
                     ui.label(text);
                     let field = if unit == "°" {
                         egui::DragValue::new(value)
                             .speed(0.05)
-                            .range(-89.0..=89.0)
+                            .range(if camera { 5.0..=150.0 } else { -89.0..=89.0 })
                             .suffix(unit)
                     } else {
                         crate::units::drag(value).range(0.1..=200.0)
@@ -7445,7 +7503,7 @@ impl CreaBimApp {
             Some(ElementKind::View(v)) => Some(match v.kind {
                 ViewKind::Plan { .. } => 1,
                 ViewKind::Section { .. } => 2,
-                ViewKind::Axonometric { .. } => 3,
+                ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => 3,
                 ViewKind::Schedule { .. } => 4,
             }),
             _ => None,
@@ -8931,6 +8989,8 @@ impl CreaBimApp {
         let mut object_type = false;
         // a placed view's new scale: (its view, the scale)
         let mut rescale: Option<(ElementId, f64)> = None;
+        // a camera's Look through it: where the 3D window's camera goes
+        let mut look_through: Option<(DVec3, DVec3, f64)> = None;
         // who it is comes first (above), then its sizes and build here,
         // then how views show it; each section folds and stays folded
         let section = if creabim_core::types::TypeCategory::of(&e.kind).is_some() {
@@ -9306,6 +9366,23 @@ impl CreaBimApp {
                                 egui::RichText::new("Or drag in the view to orbit it.").weak(),
                             );
                         }
+                        ViewKind::Perspective {
+                            eye,
+                            target,
+                            fov,
+                            aspect,
+                        } => {
+                            if let Some(l) = camera_fields(ui, eye, target, fov, aspect) {
+                                label = l;
+                            }
+                            if ui
+                                .button("Look through it in the 3D window")
+                                .on_hover_text("Put the 3D window's camera where this one is, to walk on from there or check it")
+                                .clicked()
+                            {
+                                look_through = Some((*eye, *target, *fov));
+                            }
+                        }
                         ViewKind::Schedule { .. } => {}
                     }
                     if matches!(
@@ -9328,7 +9405,9 @@ impl CreaBimApp {
                     }
                     if matches!(
                         v.kind,
-                        ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                        ViewKind::Section { .. }
+                            | ViewKind::Axonometric { .. }
+                            | ViewKind::Perspective { .. }
                     ) && view_style_combo(ui, "view_style", &mut v.style)
                     {
                         label = "View style"
@@ -10334,6 +10413,9 @@ impl CreaBimApp {
         }
         if object_type {
             self.object_type_section(ui, id);
+        }
+        if let Some((eye, target, fov)) = look_through {
+            self.look_through(eye, target, fov);
         }
         if let Some((view, scale)) = rescale {
             self.set_view_scale(view, scale);
@@ -12118,6 +12200,65 @@ fn with_plan_views(model: Model) -> Model {
 }
 
 /// A file's name without its folders.
+/// A camera's Properties: where it stands and looks, how wide and in what
+/// proportion. Returns the edit's name when one changed.
+fn camera_fields(
+    ui: &mut egui::Ui,
+    eye: &mut DVec3,
+    target: &mut DVec3,
+    fov: &mut f64,
+    aspect: &mut f64,
+) -> Option<&'static str> {
+    let mut label = None;
+    let len = |ui: &mut egui::Ui, text: &str, v: &mut f64| {
+        crate::props::row(ui, text, |ui| {
+            crate::props::fill(ui, crate::units::drag(v).range(-1e4..=1e4)).changed()
+        })
+    };
+    if len(ui, "Eye X", &mut eye.x) | len(ui, "Eye Y", &mut eye.y) {
+        label = Some("Move camera");
+    }
+    if len(ui, "Eye height", &mut eye.z) {
+        label = Some("Camera height");
+    }
+    if len(ui, "Target X", &mut target.x) | len(ui, "Target Y", &mut target.y) {
+        label = Some("Aim camera");
+    }
+    if len(ui, "Target height", &mut target.z) {
+        label = Some("Aim camera");
+    }
+    if crate::props::row(ui, "Angle", |ui| {
+        crate::props::fill(
+            ui,
+            egui::DragValue::new(fov)
+                .range(5.0..=150.0)
+                .speed(0.5)
+                .suffix("°"),
+        )
+        .on_hover_text("How wide the camera sees, across: 60° is a usual lens, 90° a wide one")
+        .changed()
+    }) {
+        label = Some("Camera angle");
+    }
+    if crate::props::row(ui, "Proportion", |ui| {
+        crate::props::fill(
+            ui,
+            egui::DragValue::new(aspect).range(0.2..=5.0).speed(0.01),
+        )
+        .on_hover_text("The picture's width over its height: 1.5 is 3:2, 1.78 is 16:9")
+        .changed()
+    }) {
+        label = Some("Camera picture");
+    }
+    ui.label(
+        egui::RichText::new(
+            "Heights are above ±0. Drag the camera or its target in a plan to move them.",
+        )
+        .weak(),
+    );
+    label
+}
+
 /// What to call an element in a count.
 pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
     match k {

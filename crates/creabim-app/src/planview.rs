@@ -82,12 +82,14 @@ pub enum Tool {
     Ceiling,
     /// A box on a plan or section that makes a larger-scale detail view.
     Callout,
+    /// Place a camera in a plan: a perspective view.
+    Camera,
     /// A detail component: flashing, membrane, insulation, blocking...
     Detail,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 41] = [
+    pub const ALL: [Tool; 42] = [
         Tool::Select,
         Tool::Wall,
         Tool::Door,
@@ -115,6 +117,7 @@ impl Tool {
         Tool::Section,
         Tool::Elevation,
         Tool::Callout,
+        Tool::Camera,
         Tool::Dimension,
         Tool::Tag,
         Tool::Angle,
@@ -178,6 +181,7 @@ impl Tool {
             Tool::RoomSeparator => "Room separator",
             Tool::Ceiling => "Ceiling",
             Tool::Callout => "Callout",
+            Tool::Camera => "Camera",
             Tool::Detail => "Detail component",
         }
     }
@@ -223,6 +227,7 @@ impl Tool {
             Tool::Room => "Click inside walls for a room that follows them (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch) where no walls close it off. Its name, number and finishes are in Properties.",
             Tool::RoomSeparator => "Click two points for a line that splits a room in two where there is no wall, such as between a kitchen and a dining room.",
             Tool::Callout => "On a plan or section, click two corners of a box round what to detail: it becomes a detail view at the scale in the top bar, numbered in a bubble on this view.",
+            Tool::Camera => "In a plan, click where the camera stands, then what it looks at: it becomes a perspective view under 3D views. Set its eye height and angle in the top bar; drag the camera or its target to aim it again.",
             Tool::Detail => "Pick what to draw in the top bar, a detail component or plain linework (line, rectangle, polygon, circle, arc, ellipse, spline), then click its points; Enter, a double-click or a right-click finishes (the first point again closes a region or a closed line). Esc keeps what is drawn. It shows in this view only.",
             Tool::Ceiling => "Click inside a room for a ceiling over it that follows its walls (3, Fill room), or draw its outline (1 Polygon, 2 Rectangle, 4 From sketch). Set its height and thickness in the top bar or Properties.",
         }
@@ -2273,7 +2278,7 @@ pub fn show(
     }
     // a callout's box or a detail component being drawn, and Enter to
     // finish the component
-    if matches!(tool, Tool::Callout | Tool::Detail) {
+    if matches!(tool, Tool::Callout | Tool::Detail | Tool::Camera) {
         crate::detailtool::preview(
             doc.model(),
             &painter,
@@ -2892,6 +2897,9 @@ pub fn show(
                 selection,
             ),
             (_, Tool::Tag) => tag_tool(doc, view, &view_def, picked(), raw, state, selection),
+            (PaneKind::Plan { .. }, Tool::Camera) => {
+                crate::detailtool::camera_click(doc, view, p, state, selection).map(|_| ())
+            }
             (PaneKind::Plan { .. } | PaneKind::Section { .. }, Tool::Callout) => {
                 // the new callout is selected where it was drawn; its view
                 // opens from Properties or with a double-click
@@ -3368,6 +3376,7 @@ fn plan_click(
         | Tool::SpotLevel
         | Tool::Sketch
         | Tool::Callout
+        | Tool::Camera
         | Tool::Detail => Ok(()),
         // a library profile placed at the click, pulled up (MU36)
         Tool::Extrusion if state.parts.extrusion_library.is_some() => {
@@ -3670,16 +3679,24 @@ fn ray_pick_all(
             let xy = PaneKind::section_point(start, end, p);
             (DVec3::new(xy.x, xy.y, p.y), look.extend(0.0))
         }
-        PaneKind::Axonometric => {
-            let Some(ElementKind::View(View {
+        PaneKind::Axonometric => match model.get(view).map(|e| &e.kind) {
+            Some(ElementKind::View(View {
                 kind: ViewKind::Axonometric { azimuth, altitude },
                 ..
-            })) = model.get(view).map(|e| &e.kind)
-            else {
-                return vec![];
-            };
-            creabim_geom::section::AxoFrame::new(model, *azimuth, *altitude).ray(p)
-        }
+            })) => creabim_geom::section::AxoFrame::new(model, *azimuth, *altitude).ray(p),
+            // a camera's ray, from its eye through the picture
+            Some(ElementKind::View(View {
+                kind:
+                    ViewKind::Perspective {
+                        eye,
+                        target,
+                        fov,
+                        aspect,
+                    },
+                ..
+            })) => creabim_geom::section::CameraFrame::new(*eye, *target, *fov, *aspect).ray(p),
+            _ => return vec![],
+        },
     };
     creabim_geom::pick::pick_all(scene, o.as_vec3(), d.as_vec3())
         .into_iter()
@@ -7345,7 +7362,7 @@ pub fn pane_kind(v: &View) -> PaneKind {
     match v.kind {
         ViewKind::Plan { level, .. } => PaneKind::Plan { level },
         ViewKind::Section { start, end, .. } => PaneKind::Section { start, end },
-        ViewKind::Axonometric { .. } => PaneKind::Axonometric,
+        ViewKind::Axonometric { .. } | ViewKind::Perspective { .. } => PaneKind::Axonometric,
         ViewKind::Schedule { .. } => PaneKind::Schedule,
     }
 }

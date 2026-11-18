@@ -282,7 +282,7 @@ fn main() -> ExitCode {
                         creabim_core::ViewKind::Plan { .. } => "plan",
                         creabim_core::ViewKind::Section { cut: true, .. } => "section",
                         creabim_core::ViewKind::Section { cut: false, .. } => "elevation",
-                        creabim_core::ViewKind::Axonometric { .. } => "3d",
+                        creabim_core::ViewKind::Axonometric { .. } | creabim_core::ViewKind::Perspective { .. } => "3d",
                         creabim_core::ViewKind::Schedule { .. } => "schedule",
                     };
                     println!("{kind:10} 1:{:<5} {}", v.scale, e.name);

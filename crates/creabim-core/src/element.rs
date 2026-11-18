@@ -91,6 +91,7 @@ impl Element {
                 ViewKind::Plan { level, .. } => vec![*level],
                 ViewKind::Section { .. }
                 | ViewKind::Axonometric { .. }
+                | ViewKind::Perspective { .. }
                 | ViewKind::Schedule { .. } => vec![],
             },
             ElementKind::Sheet(_) => vec![],
@@ -299,6 +300,28 @@ impl Element {
                             Ok(())
                         } else {
                             Err(format!("view altitude must be within ±90°, got {altitude}"))
+                        }
+                    }
+                    ViewKind::Perspective {
+                        eye,
+                        target,
+                        fov,
+                        aspect,
+                    } => {
+                        if !(eye.is_finite() && target.is_finite()) {
+                            Err("a camera needs a finite place".into())
+                        } else if eye.distance(*target) < 0.05 {
+                            Err("a camera needs to look somewhere away from itself".into())
+                        } else if !(fov.is_finite() && (5.0..=150.0).contains(fov)) {
+                            Err(format!(
+                                "a camera's angle must be from 5° to 150°, got {fov}"
+                            ))
+                        } else if !(aspect.is_finite() && (0.2..=5.0).contains(aspect)) {
+                            Err(format!(
+                                "a camera's picture proportion must be from 0.2 to 5, got {aspect}"
+                            ))
+                        } else {
+                            Ok(())
                         }
                     }
                     ViewKind::Schedule { .. } => Ok(()),
@@ -2080,6 +2103,15 @@ pub enum ViewKind {
     /// bearing `azimuth` (degrees, 0 = from the south, counter-clockwise)
     /// and `altitude` degrees above the horizon.
     Axonometric { azimuth: f64, altitude: f64 },
+    /// A perspective of the model seen by a camera at `eye`, looking at
+    /// `target`, `fov` degrees wide across, its picture `aspect` times as
+    /// wide as it is high, as an Archicad camera.
+    Perspective {
+        eye: DVec3,
+        target: DVec3,
+        fov: f64,
+        aspect: f64,
+    },
     /// A table of every element in a category, read live from the model.
     /// It is drawn at paper size, whatever the scale.
     Schedule {
@@ -2143,6 +2175,19 @@ impl View {
 }
 
 impl View {
+    /// A camera at `eye` looking at `target`, 60° wide, its picture 3:2.
+    pub fn perspective(eye: DVec3, target: DVec3) -> Self {
+        Self {
+            kind: ViewKind::Perspective {
+                eye,
+                target,
+                fov: 60.0,
+                aspect: 1.5,
+            },
+            ..Self::axonometric(0.0, 30.0)
+        }
+    }
+
     pub fn axonometric(azimuth: f64, altitude: f64) -> Self {
         Self {
             kind: ViewKind::Axonometric { azimuth, altitude },

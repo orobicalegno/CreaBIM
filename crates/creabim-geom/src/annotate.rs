@@ -16,6 +16,7 @@ pub enum Projector {
     Plan,
     Section(SectionFrame),
     Axo(AxoFrame),
+    Camera(crate::section::CameraFrame),
 }
 
 impl Projector {
@@ -28,6 +29,12 @@ impl Projector {
             ViewKind::Axonometric { azimuth, altitude } => {
                 Projector::Axo(AxoFrame::new(model, azimuth, altitude))
             }
+            ViewKind::Perspective {
+                eye,
+                target,
+                fov,
+                aspect,
+            } => Projector::Camera(crate::section::CameraFrame::new(eye, target, fov, aspect)),
             ViewKind::Schedule { .. } => return None,
         })
     }
@@ -37,6 +44,7 @@ impl Projector {
             Projector::Plan => p.truncate(),
             Projector::Section(f) => f.project(p).truncate(),
             Projector::Axo(f) => f.project(p).truncate(),
+            Projector::Camera(f) => f.project(p).truncate(),
         }
     }
 }
@@ -811,6 +819,81 @@ pub fn sheet_notes(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
         .collect()
 }
 
+/// Is height `z` on the floor of `level`: at or above it, below the next?
+fn on_floor(model: &Model, level: ElementId, z: f64) -> bool {
+    let Some(this) = model.level(level).map(|l| l.elevation) else {
+        return false;
+    };
+    let next = model
+        .levels()
+        .map(|(_, l)| l.elevation)
+        .filter(|h| *h > this + 1e-6)
+        .fold(f64::INFINITY, f64::min);
+    // the lowest floor takes what stands below it too
+    let lowest = model.levels().all(|(_, l)| l.elevation >= this - 1e-6);
+    (z >= this - 1e-6 || lowest) && z < next
+}
+
+/// A camera's mark in a plan of `level` it stands on: its body and lens
+/// pointing the way it looks, the edges of what it sees out to its
+/// target, and a cross on the target. `mm` is drawing units per paper
+/// millimetre.
+pub fn camera_symbol(
+    model: &Model,
+    id: ElementId,
+    v: &View,
+    level: ElementId,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let ViewKind::Perspective {
+        eye, target, fov, ..
+    } = v.kind
+    else {
+        return vec![];
+    };
+    if !on_floor(model, level, eye.z) {
+        return vec![];
+    }
+    let (e, t) = (eye.truncate(), target.truncate());
+    let f = (t - e).try_normalize().unwrap_or(DVec2::Y);
+    let side = f.perp();
+    let mut out = Vec::new();
+    let mut line = |a: DVec2, b: DVec2| {
+        out.push(PlanItem::Line {
+            id,
+            pen: crate::plan::Pen::Symbol,
+            a,
+            b,
+        })
+    };
+    // the body, 6 by 4 mm on paper, behind the eye, and the lens before it
+    let (l, w) = (6.0 * mm, 2.0 * mm);
+    let back = e - f * l;
+    let body = [back - side * w, e - side * w, e + side * w, back + side * w];
+    for i in 0..4 {
+        line(body[i], body[(i + 1) % 4]);
+    }
+    let lens = [
+        e - side * w * 0.5,
+        e + f * 2.0 * mm - side * w,
+        e + f * 2.0 * mm + side * w,
+        e + side * w * 0.5,
+    ];
+    for i in 0..4 {
+        line(lens[i], lens[(i + 1) % 4]);
+    }
+    // what it sees, out to the target's distance
+    let reach = e.distance(t).max(10.0 * mm);
+    let half = (fov / 2.0).to_radians();
+    for turn in [half, -half] {
+        line(e, e + DVec2::from_angle(turn).rotate(f) * reach);
+    }
+    let c = 1.5 * mm;
+    line(t - DVec2::new(c, c), t + DVec2::new(c, c));
+    line(t - DVec2::new(c, -c), t + DVec2::new(c, -c));
+    out
+}
+
 /// How a size is written beside an opening: whole centimetres, and a
 /// height of nothing as 000.
 fn centimetres(m: f64) -> String {
@@ -925,6 +1008,12 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     look,
                     &drafting,
                 ));
+            }
+            // a camera, in the plan of the floor it stands on
+            ElementKind::View(v) if matches!(v.kind, ViewKind::Perspective { .. }) => {
+                if let ViewKind::Plan { level, .. } = view.kind {
+                    out.extend(camera_symbol(model, e.id, v, level, view.scale / 1000.0));
+                }
             }
             // a door's or window's size, where its type or itself says so
             ElementKind::Opening(o) if o.frame.label => {

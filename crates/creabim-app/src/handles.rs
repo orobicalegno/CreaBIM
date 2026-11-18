@@ -985,6 +985,11 @@ pub fn handles(model: &Model, id: ElementId, face: Option<usize>) -> Vec<Handle>
                     ),
                 ]
             }
+            // a camera: where it stands and what it looks at
+            ViewKind::Perspective { eye, target, .. } => vec![
+                flat(HandleKind::ViewEnd { end: false }, eye),
+                flat(HandleKind::ViewEnd { end: true }, target),
+            ],
             _ => vec![],
         },
         ElementKind::CropBox(c) => {
@@ -1604,6 +1609,19 @@ pub fn apply(
             }
         }
         (ElementKind::View(v), HandleKind::ViewEnd { end: which }) => {
+            // a camera's eye or target moves in plan, at its own height
+            if let ViewKind::Perspective { eye, target, .. } = &mut v.kind {
+                if which {
+                    (target.x, target.y) = (now.x, now.y);
+                } else {
+                    (eye.x, eye.y) = (now.x, now.y);
+                }
+                if eye.truncate().distance(target.truncate()) < 0.1
+                    && (eye.z - target.z).abs() < 0.1
+                {
+                    return Err("a camera needs to look somewhere away from itself".into());
+                }
+            }
             if let ViewKind::Section { start, end, .. } = &mut v.kind {
                 let p = now.truncate();
                 if which {

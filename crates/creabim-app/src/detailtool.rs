@@ -31,6 +31,9 @@ pub struct DetailSettings {
     pub view: Option<ElementId>,
     /// Scale of the next detail view, 1:`callout_scale`.
     pub callout_scale: f64,
+    /// The next camera's eye height above the plan's level, and its angle.
+    pub camera_height: f64,
+    pub camera_fov: f64,
     /// The drafting layer and line type new linework is drawn with; none
     /// is no layer, and the layer's (or the pen's) line type.
     pub layer: Option<String>,
@@ -125,6 +128,8 @@ impl Default for DetailSettings {
             swap: false,
             view: None,
             callout_scale: 10.0,
+            camera_height: 1.6,
+            camera_fov: 60.0,
             layer: None,
             linetype: None,
             edit: None,
@@ -239,6 +244,50 @@ pub fn callout_click(
     state.status = Some(format!(
         "{name} at 1:{:.0} is under Details in the project browser. Open this view (in Properties) or double-click the callout to draw in it; it follows the model.",
         state.details.callout_scale
+    ));
+    Ok(Some(id))
+}
+
+/// A click with the Camera tool in plan `view`: where the camera stands,
+/// then what it looks at, which makes a perspective view. Returns the new
+/// view's id.
+pub fn camera_click(
+    doc: &mut Document,
+    view: ElementId,
+    p: DVec2,
+    state: &mut PlanState,
+    selection: &mut Selection,
+) -> Result<Option<ElementId>, ModelError> {
+    let Some(creabim_core::ViewKind::Plan { level, .. }) =
+        view_of(doc.model(), view).map(|v| v.kind.clone())
+    else {
+        state.status = Some("Cameras are placed in plans.".into());
+        return Ok(None);
+    };
+    let Some(eye) = state.pending.take() else {
+        state.pending = Some(p);
+        state.status = Some("Click what the camera looks at.".into());
+        return Ok(None);
+    };
+    if eye.distance(p) < 0.3 {
+        state.pending = Some(eye);
+        return Ok(None);
+    }
+    let z = doc.model().level(level).map_or(0.0, |l| l.elevation) + state.details.camera_height;
+    let mut v = View::perspective(eye.extend(z), p.extend(z));
+    if let creabim_core::ViewKind::Perspective { fov, .. } = &mut v.kind {
+        *fov = state.details.camera_fov;
+    }
+    let name = (1..)
+        .map(|n| format!("Camera {n}"))
+        .find(|n| !doc.model().iter().any(|e| &e.name == n))
+        .expect("unbounded");
+    let e = Element::new(name.clone(), ElementKind::View(v));
+    let id = e.id;
+    doc.commit(Transaction::new(format!("Place {name}")).insert(e))?;
+    selection.only(id);
+    state.status = Some(format!(
+        "{name} is under 3D views in the project browser. Open it there, or Look through it in the 3D window from Properties; drag it or its target to aim it."
     ));
     Ok(Some(id))
 }
@@ -734,6 +783,26 @@ pub fn preview(
                 painter.rect_stroke(r, 0.0, accent, egui::StrokeKind::Middle);
             }
         }
+        crate::planview::Tool::Camera => {
+            // the camera so far: where it stands, what it would look at,
+            // and the width it would see
+            if let (Some(a), Some(b)) = (state.pending, hover) {
+                let d = b - a;
+                if d.length() > 1e-6 {
+                    let half = (state.details.camera_fov / 2.0).to_radians();
+                    let s = |p: DVec2| xf.to_screen(p);
+                    painter.circle_stroke(s(a), 5.0, accent);
+                    painter.line_segment([s(a), s(b)], accent);
+                    for turn in [half, -half] {
+                        let edge = a + DVec2::from_angle(turn).rotate(d);
+                        painter.line_segment(
+                            [s(a), s(edge)],
+                            Stroke::new(1.0, crate::theme::interaction()),
+                        );
+                    }
+                }
+            }
+        }
         crate::planview::Tool::Detail => {
             let d = &state.details;
             if d.view != Some(view) || d.path.is_empty() {
@@ -1178,6 +1247,63 @@ mod tests {
         let id = v.id;
         doc.commit(Transaction::new("setup").insert(v)).unwrap();
         (doc, id)
+    }
+
+    #[test]
+    fn two_clicks_in_a_plan_place_a_camera_at_eye_height() {
+        let mut doc = Document::from_model(creabim_core::starter::starter_house());
+        let plan = doc
+            .model()
+            .iter()
+            .find(|e| e.name == "Ground Floor plan")
+            .unwrap()
+            .id;
+        let mut state = PlanState::default();
+        state.tool = Tool::Camera;
+        state.details.camera_height = 1.7;
+        state.details.camera_fov = 75.0;
+        let mut sel = Selection::default();
+        let p = DVec2::new;
+        assert_eq!(
+            camera_click(&mut doc, plan, p(18.0, -12.0), &mut state, &mut sel).unwrap(),
+            None
+        );
+        // a second click on the same spot is not a direction
+        assert_eq!(
+            camera_click(&mut doc, plan, p(18.1, -12.0), &mut state, &mut sel).unwrap(),
+            None
+        );
+        let id = camera_click(&mut doc, plan, p(5.0, 4.0), &mut state, &mut sel)
+            .unwrap()
+            .unwrap();
+        let e = doc.model().get(id).unwrap();
+        assert_eq!(e.name, "Camera 1");
+        let ElementKind::View(v) = &e.kind else {
+            panic!()
+        };
+        let creabim_core::ViewKind::Perspective {
+            eye, target, fov, ..
+        } = v.kind
+        else {
+            panic!()
+        };
+        assert_eq!(eye.truncate(), p(18.0, -12.0));
+        assert_eq!(target.truncate(), p(5.0, 4.0));
+        // the ground floor is at ±0
+        assert!((eye.z - 1.7).abs() < 1e-9 && (target.z - 1.7).abs() < 1e-9);
+        assert_eq!(fov, 75.0);
+        // not in a section
+        let section = doc
+            .model()
+            .iter()
+            .find(|e| matches!(&e.kind, ElementKind::View(v) if matches!(v.kind, creabim_core::ViewKind::Section { .. })))
+            .unwrap()
+            .id;
+        assert_eq!(
+            camera_click(&mut doc, section, p(0.0, 0.0), &mut state, &mut sel).unwrap(),
+            None
+        );
+        assert!(state.status.as_deref().unwrap().contains("plans"));
     }
 
     #[test]

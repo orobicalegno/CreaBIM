@@ -381,6 +381,7 @@ mod approved_icons {
         ("Planting", "planting"),
         ("Section", "scissors-line-dashed"),
         ("Callout", "callout"),
+        ("Camera", "camera"),
         ("Elevation", "elevation"),
         ("Crop box", "crop-box"),
         ("Frame all", "frame-all"),

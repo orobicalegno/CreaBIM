@@ -258,6 +258,7 @@ pub fn tool_page(t: Tool) -> &'static str {
         Tool::Room | Tool::RoomSeparator => "rooms",
         Tool::Ceiling => "ceilings",
         Tool::Callout => "details#callouts",
+        Tool::Camera => "views#cameras",
         Tool::Detail => "details#detail-components",
     }
 }
