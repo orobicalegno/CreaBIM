@@ -151,6 +151,10 @@ pub fn wall_layer_mesh_wrapped(
     // a curved wall bends at even steps round its arc (MU40)
     us.extend(wall.bends());
     let mut vs = vec![0.0, h];
+    // the lines a face may not be merged across: where the wall bends,
+    // its top breaks, crossing walls leave gaps and openings cut it
+    let mut kept_u: Vec<f64> = us.clone();
+    let mut kept_v: Vec<f64> = vs.clone();
     for c in cuts {
         // the opening's edges, and each step back where layers wrap
         let mut steps = vec![0.0];
@@ -167,20 +171,27 @@ pub fn wall_layer_mesh_wrapped(
             us.extend([g.u0, g.u1].into_iter().filter(|u| *u > 0.0 && *u < len));
             vs.extend([g.v0, g.v1].into_iter().filter(|v| *v > 0.0 && *v < h));
         }
+        // the opening's own edges are lines every face is split at; the
+        // steps where layers wrap are only needed where faces turn there
+        kept_u.extend([c.cut.u0, c.cut.u1]);
+        kept_v.extend([c.cut.v0, c.cut.v1]);
     }
     for g in &ends.gaps {
         us.extend([g.lo_mid(), g.hi_mid()]);
+        kept_u.extend([g.lo_mid(), g.hi_mid()]);
     }
     if let Some(top) = top {
         // where the top bends over a ridge or steps at an eave
         // each break twice, a millimetre apart: where the top changes
         // height it steps, not slopes (MU20)
-        us.extend(
-            top.breaks(wall.start, wall.end)
-                .into_iter()
-                .flat_map(|k| [k * len - 0.001, k * len + 0.001])
-                .filter(|u| *u > 0.0 && *u < len),
-        );
+        let breaks: Vec<f64> = top
+            .breaks(wall.start, wall.end)
+            .into_iter()
+            .flat_map(|k| [k * len - 0.001, k * len + 0.001])
+            .filter(|u| *u > 0.0 && *u < len)
+            .collect();
+        us.extend(&breaks);
+        kept_u.extend(breaks);
     }
     let sort = |xs: &mut Vec<f64>| {
         xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -189,6 +200,12 @@ pub fn wall_layer_mesh_wrapped(
     sort(&mut us);
     sort(&mut vs);
     sort(&mut ss);
+    // can a face run on across grid line `i` (between cells i - 1 and i)?
+    let free = |lines: &[f64], kept: &[f64], i: usize| -> bool {
+        i > 0 && i < lines.len() - 1 && !kept.iter().any(|k| (lines[i] - k).abs() < 1e-9)
+    };
+    let free_u: Vec<bool> = (0..us.len()).map(|i| free(&us, &kept_u, i)).collect();
+    let free_v: Vec<bool> = (0..vs.len()).map(|j| free(&vs, &kept_v, j)).collect();
 
     let (ni, nj, nk) = (us.len() - 1, vs.len() - 1, ss.len() - 1);
     let solid = |i: isize, j: isize, k: isize| -> bool {
@@ -265,63 +282,124 @@ pub fn wall_layer_mesh_wrapped(
     let along = DVec3::new(d.x, d.y, 0.0);
     let across = DVec3::new(n2.x, n2.y, 0.0);
 
+    // the faces, each a rectangle of grid cells merged where nothing
+    // turns: one quad where the wrap's steps would split it in many
     let mut m = TriMesh::default();
-    for i in 0..ni as isize {
-        for j in 0..nj as isize {
-            for k in 0..nk as isize {
-                if !solid(i, j, k) {
-                    continue;
-                }
-                let (ua, ub) = (us[i as usize], us[i as usize + 1]);
-                let (va, vb) = (vs[j as usize], vs[j as usize + 1]);
-                let (lo, hi) = (ss[k as usize], ss[k as usize + 1]);
-                // on a curve, the faces turn with it
-                let (along, across) = if wall.is_arc() {
-                    let t = wall.tangent_at((ua + ub) / 2.0);
-                    (DVec3::new(t.x, t.y, 0.0), DVec3::new(-t.y, t.x, 0.0))
-                } else {
-                    (along, across)
-                };
-                if !solid(i, j, k + 1) {
-                    m.add_quad(
-                        [p(ua, va, hi), p(ub, va, hi), p(ub, vb, hi), p(ua, vb, hi)],
-                        across,
-                    );
-                }
-                if !solid(i, j, k - 1) {
-                    m.add_quad(
-                        [p(ua, va, lo), p(ub, va, lo), p(ub, vb, lo), p(ua, vb, lo)],
-                        -across,
-                    );
-                }
-                if !solid(i - 1, j, k) {
-                    m.add_quad(
-                        [p(ua, va, lo), p(ua, va, hi), p(ua, vb, hi), p(ua, vb, lo)],
-                        end_normal(p(ua, va, lo), p(ua, va, hi), -along),
-                    );
-                }
-                if !solid(i + 1, j, k) {
-                    m.add_quad(
-                        [p(ub, va, lo), p(ub, va, hi), p(ub, vb, hi), p(ub, vb, lo)],
-                        end_normal(p(ub, va, lo), p(ub, va, hi), along),
-                    );
-                }
-                if !solid(i, j - 1, k) {
-                    m.add_quad(
-                        [p(ua, va, lo), p(ub, va, lo), p(ub, va, hi), p(ua, va, hi)],
-                        -DVec3::Z,
-                    );
-                }
-                if !solid(i, j + 1, k) {
-                    let q = [p(ua, vb, lo), p(ub, vb, lo), p(ub, vb, hi), p(ua, vb, hi)];
+    let frame = |ua: f64, ub: f64| {
+        // on a curve, the faces turn with it
+        if wall.is_arc() {
+            let t = wall.tangent_at((ua + ub) / 2.0);
+            (DVec3::new(t.x, t.y, 0.0), DVec3::new(-t.y, t.x, 0.0))
+        } else {
+            (along, across)
+        }
+    };
+    // the wall's faces (across it, at a layer's face or a return's)
+    for k in 0..nk {
+        for (dk, hi_side) in [(1isize, true), (-1, false)] {
+            let face = |i: usize, j: usize| {
+                solid(i as isize, j as isize, k as isize)
+                    && !solid(i as isize, j as isize, k as isize + dk)
+            };
+            let s_at = if hi_side { ss[k + 1] } else { ss[k] };
+            for (i0, i1, j0, j1) in merge_faces(ni, nj, &face, &free_u, &free_v) {
+                let (ua, ub, va, vb) = (us[i0], us[i1], vs[j0], vs[j1]);
+                let (_, across) = frame(ua, ub);
+                m.add_quad(
+                    [
+                        p(ua, va, s_at),
+                        p(ub, va, s_at),
+                        p(ub, vb, s_at),
+                        p(ua, vb, s_at),
+                    ],
+                    if hi_side { across } else { -across },
+                );
+            }
+        }
+    }
+    // ends, jambs and the sides of gaps (square to the wall's length)
+    let none = vec![false; nk + 1];
+    for i in 0..ni {
+        for (di, end_side) in [(-1isize, false), (1, true)] {
+            let face = |j: usize, k: usize| {
+                solid(i as isize, j as isize, k as isize)
+                    && !solid(i as isize + di, j as isize, k as isize)
+            };
+            let u = if end_side { us[i + 1] } else { us[i] };
+            let (along, _) = frame(us[i], us[i + 1]);
+            for (j0, j1, k0, k1) in merge_faces(nj, nk, &face, &free_v, &none) {
+                let (va, vb, lo, hi) = (vs[j0], vs[j1], ss[k0], ss[k1]);
+                m.add_quad(
+                    [p(u, va, lo), p(u, va, hi), p(u, vb, hi), p(u, vb, lo)],
+                    end_normal(
+                        p(u, va, lo),
+                        p(u, va, hi),
+                        if end_side { along } else { -along },
+                    ),
+                );
+            }
+        }
+    }
+    // bottoms, tops, heads and sills (level, or the attached top's slope)
+    for j in 0..nj {
+        for (dj, top_side) in [(-1isize, false), (1, true)] {
+            let face = |i: usize, k: usize| {
+                solid(i as isize, j as isize, k as isize)
+                    && !solid(i as isize, j as isize + dj, k as isize)
+            };
+            let v = if top_side { vs[j + 1] } else { vs[j] };
+            for (i0, i1, k0, k1) in merge_faces(ni, nk, &face, &free_u, &none) {
+                let (ua, ub, lo, hi) = (us[i0], us[i1], ss[k0], ss[k1]);
+                let q = [p(ua, v, lo), p(ub, v, lo), p(ub, v, hi), p(ua, v, hi)];
+                if top_side {
                     // an attached top slopes: shade it as it lies
                     let n = (q[2] - q[0]).cross(q[3] - q[1]).normalize_or(DVec3::Z);
                     m.add_quad(q, if n.z < 0.0 { -n } else { n });
+                } else {
+                    m.add_quad(q, -DVec3::Z);
                 }
             }
         }
     }
     m
+}
+
+/// The cells of an `na` by `nb` grid where `face` is, merged into as few
+/// rectangles as possible: each `(a0, a1, b0, b1)` in grid lines, running
+/// across line `a` only where `free_a[a]` and line `b` where `free_b[b]`.
+fn merge_faces(
+    na: usize,
+    nb: usize,
+    face: &dyn Fn(usize, usize) -> bool,
+    free_a: &[bool],
+    free_b: &[bool],
+) -> Vec<(usize, usize, usize, usize)> {
+    let mut there: Vec<bool> = (0..na * nb).map(|c| face(c / nb, c % nb)).collect();
+    let mut out = Vec::new();
+    for a in 0..na {
+        for b in 0..nb {
+            if !there[a * nb + b] {
+                continue;
+            }
+            // as far along b as it goes, then as far along a as every
+            // cell of that run goes
+            let mut b1 = b + 1;
+            while b1 < nb && free_b[b1] && there[a * nb + b1] {
+                b1 += 1;
+            }
+            let mut a1 = a + 1;
+            while a1 < na && free_a[a1] && (b..b1).all(|x| there[a1 * nb + x]) {
+                a1 += 1;
+            }
+            for x in a..a1 {
+                for y in b..b1 {
+                    there[x * nb + y] = false;
+                }
+            }
+            out.push((a, a1, b, b1));
+        }
+    }
+    out
 }
 
 /// Normal of a vertical end face running from `a` to `b` in plan, facing `towards`.

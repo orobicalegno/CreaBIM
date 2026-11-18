@@ -265,37 +265,78 @@ impl Node {
     }
 }
 
+/// The box round some polygons, `(lo, hi)`; none for no polygons.
+fn bounds(ps: &[Polygon]) -> Option<(DVec3, DVec3)> {
+    let mut pts = ps.iter().flat_map(|p| p.points.iter().copied());
+    let first = pts.next()?;
+    Some(pts.fold((first, first), |(lo, hi), q| (lo.min(q), hi.max(q))))
+}
+
+/// `a`'s polygons that reach into the box `b` (grown a little), and those
+/// wholly outside it.
+fn split_by_box(a: Vec<Polygon>, b: Option<(DVec3, DVec3)>) -> (Vec<Polygon>, Vec<Polygon>) {
+    let Some((lo, hi)) = b else {
+        return (vec![], a);
+    };
+    let pad = DVec3::splat(1e-5 + (hi - lo).max_element() * 1e-9);
+    let (lo, hi) = (lo - pad, hi + pad);
+    a.into_iter()
+        .partition(|p| match bounds(std::slice::from_ref(p)) {
+            Some((plo, phi)) => plo.cmple(hi).all() && phi.cmpge(lo).all(),
+            None => false,
+        })
+}
+
 /// `a op b`, both closed and outward-facing.
+///
+/// Only the part of `a` that reaches into `b`'s box is cut: a polygon of
+/// `a` wholly outside it can't meet `b`, and is passed through whole. Cut
+/// with the rest, it is split along every plane of `b` it crosses, however
+/// far away; cut again and again (a slab by each layer of each wall through
+/// it) the pieces multiplied and the cuts took minutes. Which side of `a`
+/// each part of `b` is on is still decided against the whole of `a`.
 pub fn boolean(a: Vec<Polygon>, b: Vec<Polygon>, op: BoolOp) -> Vec<Polygon> {
-    let mut a = Node::new(a);
+    // the whole of `a`, turned inside out as the cut has it, to tell what
+    // of `b` lies inside it
+    let mut whole = Node::new(a.clone());
+    if op != BoolOp::Union {
+        whole.invert();
+    }
+    let (near, far) = split_by_box(a, bounds(&b));
+    let mut a = Node::new(near);
     let mut b = Node::new(b);
     match op {
         BoolOp::Union => {
             a.clip_to(&b);
-            b.clip_to(&a);
+            b.clip_to(&whole);
             b.invert();
-            b.clip_to(&a);
+            b.clip_to(&whole);
             b.invert();
             a.build(b.all_polygons());
-            a.all_polygons()
+            let mut out = a.all_polygons();
+            out.extend(far);
+            out
         }
         BoolOp::Difference => {
             a.invert();
             a.clip_to(&b);
-            b.clip_to(&a);
+            b.clip_to(&whole);
             b.invert();
-            b.clip_to(&a);
+            b.clip_to(&whole);
             b.invert();
             a.build(b.all_polygons());
             a.invert();
-            a.all_polygons()
+            let mut out = a.all_polygons();
+            out.extend(far);
+            out
         }
+        // what of `a` lies outside `b`'s box is not in the intersection
         BoolOp::Intersection => {
             a.invert();
-            b.clip_to(&a);
+            b.clip_to(&whole);
             b.invert();
             a.clip_to(&b);
-            b.clip_to(&a);
+            b.clip_to(&whole);
             a.build(b.all_polygons());
             a.invert();
             a.all_polygons()
@@ -382,6 +423,48 @@ mod tests {
         assert!((volume(&u) - 8.5).abs() < 1e-6);
         let i = boolean(a, b, BoolOp::Intersection);
         assert!((volume(&i) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_slab_cut_again_and_again_keeps_few_pieces() {
+        // a slab 10 by 10 about the origin, cut by forty posts through it
+        // in a row, one after another, as joins cut it by each layer of
+        // each wall
+        let mut slab = from_mesh(&EditMesh::cuboid(DVec3::new(10.0, 10.0, 0.3)), DVec3::ZERO);
+        for i in 0..40 {
+            let x = -4.7 + 0.24 * i as f64;
+            let post = from_mesh(
+                &EditMesh::cuboid(DVec3::new(0.1, 0.1, 1.0)),
+                DVec3::new(x, -1.0 + 0.03 * i as f64, 0.0),
+            );
+            slab = boolean(slab, post, BoolOp::Difference);
+        }
+        let v = volume(&slab);
+        assert!(
+            (v - (10.0 * 10.0 * 0.3 - 40.0 * 0.01 * 0.3)).abs() < 1e-6,
+            "{v}"
+        );
+        // each cut adds a handful of pieces round its hole, not a multiple
+        // of all there are
+        assert!(slab.len() < 2000, "{} pieces", slab.len());
+    }
+
+    #[test]
+    fn a_shape_inside_another_still_counts_with_no_face_near_it() {
+        // a cavity: b wholly inside a, no face of a near it
+        let a = cube(4.0, DVec3::ZERO);
+        let b = cube(1.0, DVec3::splat(1.5));
+        let d = boolean(a.clone(), b.clone(), BoolOp::Difference);
+        assert!((volume(&d) - (64.0 - 1.0)).abs() < 1e-6, "{}", volume(&d));
+        let u = boolean(a.clone(), b.clone(), BoolOp::Union);
+        assert!((volume(&u) - 64.0).abs() < 1e-6, "{}", volume(&u));
+        let i = boolean(a.clone(), b.clone(), BoolOp::Intersection);
+        assert!((volume(&i) - 1.0).abs() < 1e-6, "{}", volume(&i));
+        // and wholly apart
+        let far = cube(1.0, DVec3::splat(10.0));
+        assert!((volume(&boolean(a.clone(), far.clone(), BoolOp::Difference)) - 64.0).abs() < 1e-6);
+        assert!((volume(&boolean(a.clone(), far.clone(), BoolOp::Union)) - 65.0).abs() < 1e-6);
+        assert!(volume(&boolean(a, far, BoolOp::Intersection)).abs() < 1e-6);
     }
 
     #[test]
