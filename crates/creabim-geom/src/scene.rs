@@ -92,11 +92,43 @@ fn layer_items(
             let openings: Vec<&Opening> = owned.iter().collect();
             let ends = joins.get(&e.id).cloned().unwrap_or_default();
             let top = creabim_core::walls::top_profile(model, w);
+            // its own doors, windows and holes come first: at those its
+            // layers may wrap into the reveals
+            let own = model
+                .dependents(e.id)
+                .into_iter()
+                .filter(|d| {
+                    matches!(
+                        model.get(*d).map(|x| &x.kind),
+                        Some(ElementKind::Opening(_))
+                    )
+                })
+                .count();
+            let cuts: Vec<crate::wall::WrappedCut> = owned
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| {
+                    let f = crate::opening::Fitted::of(o, w)?;
+                    let wrap = if i < own {
+                        creabim_core::opening_wrap(
+                            a,
+                            w,
+                            o,
+                            f.frame.depth,
+                            creabim_core::frame_shift_in(w, Some(a), o),
+                        )
+                    } else {
+                        Default::default()
+                    };
+                    Some(crate::wall::WrappedCut { cut: f.cut, wrap })
+                })
+                .collect();
             linings = reveal_linings(
                 model,
                 e.id,
                 w,
                 &openings,
+                &cuts,
                 &assembly::wall_bands(a, w),
                 level.elevation,
                 plain,
@@ -104,13 +136,14 @@ fn layer_items(
             assembly::wall_bands(a, w)
                 .into_iter()
                 .map(|b| {
-                    let m = crate::wall::wall_layer_mesh_v(
+                    let m = crate::wall::wall_layer_mesh_wrapped(
                         w,
                         level.elevation,
-                        &openings,
+                        &cuts,
                         &ends,
                         top.as_ref(),
                         (b.s0, b.s1),
+                        Some(b.index),
                         b.core,
                         b.ext,
                         b.vext,
@@ -196,12 +229,15 @@ impl SceneItem {
 /// The reveals of a layered wall's doors and windows lined, for the 3D
 /// view: each layer's part of the jambs, head and sill in the finish on
 /// its side of the wall (render outside, plaster inside), so an opening
-/// doesn't show the insulation or the membrane cut open.
+/// doesn't show the insulation or the membrane cut open. Where its
+/// layers wrap into a reveal (`cuts`), they line it themselves.
+#[allow(clippy::too_many_arguments)]
 fn reveal_linings(
     model: &Model,
     id: ElementId,
     w: &creabim_core::Wall,
     openings: &[&Opening],
+    cuts: &[crate::wall::WrappedCut],
     bands: &[assembly::Band],
     level_z: f64,
     plain: [f32; 3],
@@ -228,7 +264,26 @@ fn reveal_linings(
         let Some(c) = crate::wall::Cut::of(o, w) else {
             continue;
         };
+        // where its layers wrap, the reveal is lined by the layers
+        // themselves: no lining there
+        let lined: Vec<(f64, f64)> = cuts
+            .iter()
+            .find(|k| k.cut == c)
+            .map(|k| k.wrap.lined().collect())
+            .unwrap_or_default();
         for b in bands.iter().filter(|b| b.function != F::AirGap) {
+            let (mut s0, mut s1) = (b.s0, b.s1);
+            for (lo, hi) in &lined {
+                if *lo <= s0 + 1e-9 {
+                    s0 = s0.max(*hi);
+                }
+                if *hi >= s1 - 1e-9 {
+                    s1 = s1.min(*lo);
+                }
+            }
+            if s1 <= s0 + 1e-9 {
+                continue;
+            }
             // a finish shows itself; the rest take the finish nearest them
             let mid = (b.s0 + b.s1) / 2.0;
             let from = if b.function == F::Finish {
@@ -247,7 +302,7 @@ fn reveal_linings(
                     at(
                         if i & 1 == 0 { u0 } else { u1 },
                         if i & 2 == 0 { v0 } else { v1 },
-                        if i & 4 == 0 { b.s0 } else { b.s1 },
+                        if i & 4 == 0 { s0 } else { s1 },
                     )
                 };
                 cuboid(&mut mesh, [p(0), p(1), p(2), p(3), p(4), p(5), p(6), p(7)]);
@@ -492,6 +547,8 @@ fn build_scene_unjoined(
             | ElementKind::Reference(_)
             | ElementKind::PaperMark(_)
             | ElementKind::MarkRules(_)
+            | ElementKind::DraftLayers(_)
+            | ElementKind::Symbol(_)
             | ElementKind::StylePack(_)
             | ElementKind::ElementType(_)
             | ElementKind::Sketch(_)
@@ -849,7 +906,7 @@ fn opening_items(
     use crate::opening::Part;
     use creabim_core::OpeningKind;
     let material = creabim_core::material_of(model, e).map(|(_, m)| (m.color, m.surface()));
-    crate::opening::opening_meshes(o, w, level_z)
+    crate::opening::opening_meshes(o, w, level_z, creabim_core::frame_shift(model, o))
         .into_iter()
         .map(|(part, mesh)| {
             let (color, surface) = match (part, o.kind, material) {

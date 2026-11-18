@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::ui_model::Item;
-use creabim_core::assembly::{self, AssemblyUse, Layer, LayerFunction};
+use creabim_core::assembly::{self, AssemblyUse, Layer, LayerFunction, WrapSides};
 use creabim_core::Assembly;
 
 /// The assembly editor's own state, for the session.
@@ -218,13 +218,16 @@ pub(super) fn layer_table(
     let weak = ui.visuals().weak_text_color();
     let n = a.layers.len();
     let (core0, core1) = a.core();
+    // walls: which layers turn into the reveals of doors and windows
+    let wall = a.usage == AssemblyUse::Wall;
+    let wrapping = !a.wrap_openings.is_none();
     ui.label(
         egui::RichText::new(format!("{} face", a.usage.first_face()))
             .size(10.5)
             .color(weak),
     );
     egui::Grid::new(("layers", id))
-        .num_columns(5)
+        .num_columns(if wall { 6 } else { 5 })
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
             for (i, l) in edited.layers.iter_mut().enumerate() {
@@ -286,6 +289,20 @@ pub(super) fn layer_table(
                     l.thickness = t.max(assembly::MIN_LAYER);
                     label = "Layer thickness";
                 }
+                if wall {
+                    let mut wraps = l.wraps_openings();
+                    if ui
+                        .add_enabled(wrapping, egui::Checkbox::new(&mut wraps, "Wraps"))
+                        .on_hover_text("At doors and windows, the layer turns into the reveal and runs to the frame, on the faces chosen under Wrap at openings.")
+                        .on_disabled_hover_text("Choose a face under Wrap at openings first.")
+                        .changed()
+                    {
+                        // its function's own answer isn't kept: a finish wraps
+                        let by_function = l.function == LayerFunction::Finish;
+                        l.wraps = (wraps != by_function).then_some(wraps);
+                        label = "Layer wraps at openings";
+                    }
+                }
                 crate::props::flow(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if ui
@@ -325,6 +342,27 @@ pub(super) fn layer_table(
     if let Some(i) = remove {
         edited.layers.remove(i);
         label = "Remove layer";
+    }
+    if wall {
+        crate::props::flow(ui, |ui| {
+            ui.label("Wrap at openings");
+            egui::ComboBox::from_id_salt(("wrap", id))
+                .icon(crate::props::combo_icon)
+                .width(if compact { 110.0 } else { 140.0 })
+                .selected_text(edited.wrap_openings.label())
+                .show_ui(ui, |ui| {
+                    for w in WrapSides::ALL {
+                        if ui
+                            .selectable_value(&mut edited.wrap_openings, w, w.label())
+                            .changed()
+                        {
+                            label = "Wrap layers at openings";
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("At doors and windows, the layers ticked Wraps turn into the reveals from these faces of the wall and run to the frame; the layers they cover stop short. A door or window can go its own way in its Properties.");
+        });
     }
     crate::props::flow(ui, |ui| {
         if ui

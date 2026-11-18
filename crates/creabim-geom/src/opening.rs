@@ -63,8 +63,10 @@ impl Fitted {
     }
 }
 
-/// Every part of a door or window, in opening coordinates.
-pub fn opening_boxes(o: &Opening, wall: &Wall) -> Vec<PartBox> {
+/// Every part of a door or window, in opening coordinates, its frame
+/// standing `shift` across the wall from its centre line (towards the
+/// wall's left; [`creabim_core::frame_shift`]).
+pub fn opening_boxes(o: &Opening, wall: &Wall, shift: f64) -> Vec<PartBox> {
     let Some(f) = Fitted::of(o, wall) else {
         return vec![];
     };
@@ -75,7 +77,10 @@ pub fn opening_boxes(o: &Opening, wall: &Wall) -> Vec<PartBox> {
     let (w, h) = (f.width(), f.height());
     let fw = f.frame.width;
     let hd = f.frame.depth / 2.0;
-    let face = wall.thickness / 2.0;
+    // built facing +y, then turned round: how far the wall's face on the
+    // side it faces is from the middle of the frame
+    let facing = if o.faces_left(wall) { 1.0 } else { -1.0 };
+    let face = wall.thickness / 2.0 - facing * shift;
     let mut out = Vec::new();
     let mut add = |part, lo: DVec3, hi: DVec3| {
         if (hi - lo).min_element() > 1e-6 {
@@ -176,6 +181,13 @@ pub fn opening_boxes(o: &Opening, wall: &Wall) -> Vec<PartBox> {
             }
         }
     }
+    // and stood where the frame goes across the wall
+    if shift != 0.0 {
+        for pb in &mut out {
+            pb.lo.y += shift;
+            pb.hi.y += shift;
+        }
+    }
     out
 }
 
@@ -210,13 +222,14 @@ pub fn to_model(o: &Opening, wall: &Wall, level_z: f64) -> Option<impl Fn(DVec3)
     Some(move |p: DVec3| (start + d * (c.u0 + p.x) + n * p.y).extend(z0 + p.z))
 }
 
-/// The opening's parts as meshes in model coordinates, one per kind of part.
-pub fn opening_meshes(o: &Opening, wall: &Wall, level_z: f64) -> Vec<(Part, TriMesh)> {
+/// The opening's parts as meshes in model coordinates, one per kind of
+/// part, its frame `shift` across the wall from its centre line.
+pub fn opening_meshes(o: &Opening, wall: &Wall, level_z: f64, shift: f64) -> Vec<(Part, TriMesh)> {
     let Some(at) = to_model(o, wall, level_z) else {
         return vec![];
     };
     let mut out: Vec<(Part, TriMesh)> = Vec::new();
-    for pb in opening_boxes(o, wall) {
+    for pb in opening_boxes(o, wall, shift) {
         let i = match out.iter().position(|(p, _)| *p == pb.part) {
             Some(i) => i,
             None => {
@@ -348,11 +361,43 @@ mod tests {
             frame,
             flip_hand: false,
             flip_facing: false,
+            wrap: None,
+            frame_at: None,
         }
     }
 
     fn count(boxes: &[PartBox], part: Part) -> usize {
         boxes.iter().filter(|b| b.part == part).count()
+    }
+
+    #[test]
+    fn a_frame_moved_across_the_wall_takes_its_parts_and_its_sill_with_it() {
+        let o = opening(OpeningKind::Window, OpeningFrame::default());
+        let w = wall();
+        let span = |boxes: &[PartBox], part: Part| {
+            let ys = boxes.iter().filter(|b| b.part == part);
+            (
+                ys.clone().map(|b| b.lo.y).fold(f64::MAX, f64::min),
+                ys.map(|b| b.hi.y).fold(f64::MIN, f64::max),
+            )
+        };
+        let (mid, moved) = (opening_boxes(&o, &w, 0.0), opening_boxes(&o, &w, 0.03));
+        // the glass goes with the frame
+        let (g0, g1) = (span(&mid, Part::Glass), span(&moved, Part::Glass));
+        assert!((g1.0 - g0.0 - 0.03).abs() < 1e-9 && (g1.1 - g0.1 - 0.03).abs() < 1e-9);
+        // the sill still reaches the same face of the wall, past it by its
+        // nose, whichever way the frame went
+        let (f0, f1) = (span(&mid, Part::Frame), span(&moved, Part::Frame));
+        let reach = w.thickness / 2.0 + SILL_NOSE;
+        let outer = |f: (f64, f64)| f.0.abs().max(f.1.abs());
+        assert!((outer(f0) - reach).abs() < 1e-9, "{f0:?}");
+        assert!((outer(f1) - reach).abs() < 1e-9, "{f1:?}");
+        // and the frame's own depth is what it was
+        let depth = |boxes: &[PartBox]| {
+            let b = boxes.iter().find(|b| b.part == Part::Frame).unwrap();
+            b.hi.y - b.lo.y
+        };
+        assert!((depth(&mid) - depth(&moved)).abs() < 1e-9);
     }
 
     #[test]
@@ -377,7 +422,7 @@ mod tests {
     #[test]
     fn a_window_has_a_frame_round_set_back_glass() {
         let o = opening(OpeningKind::Window, OpeningFrame::default());
-        let boxes = opening_boxes(&o, &wall());
+        let boxes = opening_boxes(&o, &wall(), 0.0);
         // four frame members and the outside sill
         assert_eq!(count(&boxes, Part::Frame), 5);
         assert_eq!(count(&boxes, Part::Glass), 1);
@@ -399,7 +444,7 @@ mod tests {
             panes_up: 2,
             ..OpeningFrame::default()
         };
-        let boxes = opening_boxes(&opening(OpeningKind::Window, frame), &wall());
+        let boxes = opening_boxes(&opening(OpeningKind::Window, frame), &wall(), 0.0);
         assert_eq!(count(&boxes, Part::Glass), 6);
         // the frame and sill, two upright bars, a cross bar in each column
         assert_eq!(count(&boxes, Part::Frame), 5 + 2 + 3);
@@ -416,12 +461,12 @@ mod tests {
     #[test]
     fn a_door_has_a_leaf_and_handles_but_no_sill() {
         let o = opening(OpeningKind::Door, OpeningFrame::default());
-        let boxes = opening_boxes(&o, &wall());
+        let boxes = opening_boxes(&o, &wall(), 0.0);
         assert_eq!(count(&boxes, Part::Frame), 3);
         assert_eq!(count(&boxes, Part::Leaf), 1);
         assert_eq!(count(&boxes, Part::Glass), 0);
         assert!(count(&boxes, Part::Handle) >= 2);
-        let meshes = opening_meshes(&o, &wall(), 0.0);
+        let meshes = opening_meshes(&o, &wall(), 0.0, 0.0);
         // every part is a closed box
         for (_, m) in &meshes {
             assert!(m.volume() > 0.0);
@@ -433,13 +478,13 @@ mod tests {
         let mut w = wall();
         w.thickness = 0.05;
         let o = opening(OpeningKind::Window, OpeningFrame::default());
-        for b in opening_boxes(&o, &w) {
+        for b in opening_boxes(&o, &w, 0.0) {
             assert!(b.lo.y >= -0.025 - 1e-9 && b.hi.y <= 0.025 + 1e-9);
         }
     }
 
     fn leaf(o: &Opening) -> PartBox {
-        *opening_boxes(o, &wall())
+        *opening_boxes(o, &wall(), 0.0)
             .iter()
             .find(|b| b.part == Part::Leaf)
             .unwrap()
@@ -453,7 +498,7 @@ mod tests {
         assert!(l.hi.y > 0.0 && l.lo.y > -0.01);
         assert_eq!(door_hand(&o, &wall()), "Right, in");
         let handle = |o: &Opening| {
-            opening_boxes(o, &wall())
+            opening_boxes(o, &wall(), 0.0)
                 .iter()
                 .find(|b| b.part == Part::Handle)
                 .unwrap()
@@ -475,7 +520,7 @@ mod tests {
     fn a_window_faces_out_of_the_exterior_unless_flipped() {
         let mut o = opening(OpeningKind::Window, OpeningFrame::default());
         let sill = |o: &Opening| {
-            opening_boxes(o, &wall())
+            opening_boxes(o, &wall(), 0.0)
                 .into_iter()
                 .filter(|b| b.part == Part::Frame)
                 .min_by(|a, b| a.lo.y.min(-a.hi.y).total_cmp(&b.lo.y.min(-b.hi.y)))

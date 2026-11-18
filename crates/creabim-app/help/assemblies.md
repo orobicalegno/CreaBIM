@@ -27,4 +27,13 @@ Layered walls join layer by layer: L corners are mitred, and in a T the core run
 
 ## Doors and windows in layered walls
 
-In 3D, the reveals round a door or window in a layered wall are lined with the wall's finishes: the outer finish on the outside part of the reveal, the inner finish on the inside part. So the insulation and membranes don't show where the opening cuts through them. The linings are only for the 3D view; drawings and exports show the layers as they are.
+By default every layer stops square at a door or window. To have layers turn into the reveal and run to the frame, as plaster and render do on site, open the wall's assembly and set **Wrap at openings** to *Exterior*, *Interior* or *Both*: the faces of the wall the layers turn in from.
+
+- Each layer has a **Wraps** tick. Finishes wrap unless you untick them; any other layer wraps when you tick it.
+- A layer that wraps lines the jambs, the head and the sill from its own place in the wall to the face of the frame. Where several wrap, the outermost lies against the opening and the next one behind it.
+- The layers they cover stop short by the thickness of the returns, so the opening keeps its size. A bare hole has no frame: its returns stop at the core.
+- One door or window can differ from its wall: set **Layers wrap** in its *Properties*.
+
+Plans, sections and the 3D view all show the wrapped layers, and the layer solids written to IFC include them. The take-off still measures each layer without its returns.
+
+Where nothing wraps, the 3D view lines the reveals with the wall's finishes: the outer finish on the outside part of the reveal, the inner finish on the inside part. So the insulation and membranes don't show where the opening cuts through them. Those linings are only for the 3D view; drawings and exports show the layers as they are.

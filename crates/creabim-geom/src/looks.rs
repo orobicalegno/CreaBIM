@@ -333,6 +333,11 @@ impl Looks {
     /// Draw a polyline (paper mm) of element `id` in `pen`.
     pub fn line(&self, canvas: &mut dyn Canvas, id: ElementId, pen: Pen, pts: &[DVec2]) {
         let (s, rgb, long) = self.stroke(id, pen);
+        // linework drawn by hand keeps its own colour
+        let rgb = match pen {
+            Pen::Draft { rgb: Some(c), .. } => Some(c.map(|v| f32::from(v) / 255.0)),
+            _ => rgb,
+        };
         let mut draw = |pts: &[DVec2]| match rgb {
             Some(c) => canvas.line_rgb(pts, s, c),
             None => canvas.line(pts, s),

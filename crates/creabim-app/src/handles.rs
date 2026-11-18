@@ -1178,10 +1178,7 @@ fn detail_grips(model: &Model, d: &creabim_core::DetailItem) -> Vec<Handle> {
     };
     let across = d.across();
     let dir = |v: DVec2| (frame.to_model(v) - frame.to_model(DVec2::ZERO)).normalize_or_zero();
-    let widened = !matches!(
-        d.kind,
-        DetailKind::Membrane | DetailKind::Region { .. } | DetailKind::BreakLine
-    );
+    let widened = d.kind.has_width();
     if widened {
         let at = frame.to_model((*a + *b) / 2.0 + across * d.width / 2.0);
         out.push(Handle {
@@ -2378,7 +2375,9 @@ pub fn toggle_live(ctx: &egui::Context) -> bool {
     if ctx.egui_wants_keyboard_input() {
         return false;
     }
-    let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::D));
+    // consume_key ignores Shift, which took Shift+D (Duplicate) for D
+    let pressed =
+        ctx.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::D));
     if pressed {
         let on = !live_on(ctx);
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("grip.live"), on));
