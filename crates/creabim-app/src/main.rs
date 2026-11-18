@@ -82,7 +82,7 @@ fn main() -> eframe::Result {
     linux_setup();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("CreaBIM")
+            .with_title("Volumen")
             .with_inner_size([1400.0, 860.0])
             .with_icon(app_icon()),
         renderer: eframe::Renderer::Wgpu,
@@ -94,7 +94,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "CreaBIM",
+        "Volumen",
         options,
         Box::new(|cc| Ok(Box::new(app::CreaBimApp::new(cc)))),
     )

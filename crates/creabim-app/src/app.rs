@@ -7010,6 +7010,16 @@ impl CreaBimApp {
                 let _pd = Perf::new("show_plan: dark paper");
                 darken_shapes(ui.ctx(), layer, from);
             }
+            if self.shell.settings.crosshair
+                && matches!(
+                    kind,
+                    planview::PaneKind::Plan { .. } | planview::PaneKind::Section { .. }
+                )
+            {
+                // the pickbox while selecting; a point is asked for otherwise
+                let pickbox = self.plan.tool == planview::Tool::Select && !self.plan.point_pick;
+                planview::draw_crosshair(ui, rect, dark, self.shell.settings.cursor_size, pickbox);
+            }
             r
         };
         let _pt = Perf::new("show_plan: after");
@@ -11958,7 +11968,7 @@ impl eframe::App for CreaBimApp {
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("creabim_plan"),
                 egui::ViewportBuilder::default()
-                    .with_title("CreaBIM · Plan")
+                    .with_title("Volumen · Plan")
                     .with_inner_size([760.0, 560.0]),
                 |ui, _class| {
                     egui::CentralPanel::default().show(ui, |ui| {
@@ -12503,10 +12513,10 @@ fn window_title(path: &str, unsaved: bool) -> String {
     // a build being worked on says so in full: which version it leads to
     // (MU39: 1.0 showed while 1.0.1 was out and the next one in hand)
     let app = match version.split('.').collect::<Vec<_>>().as_slice() {
-        _ if version.contains('-') => format!("CreaBIM {version}"),
-        ["0", minor, ..] => format!("CreaBIM 0.{minor} beta"),
-        [major, minor, ..] => format!("CreaBIM {major}.{minor}"),
-        _ => "CreaBIM".to_string(),
+        _ if version.contains('-') => format!("Volumen {version}"),
+        ["0", minor, ..] => format!("Volumen 0.{minor} beta"),
+        [major, minor, ..] => format!("Volumen {major}.{minor}"),
+        _ => "Volumen".to_string(),
     };
     format!("{}{name} — {app}", if unsaved { "• " } else { "" })
 }
@@ -12826,7 +12836,7 @@ mod title_tests {
     fn the_title_names_the_project_marks_unsaved_and_the_test_version() {
         let v = env!("CARGO_PKG_VERSION");
         let saved = window_title("projects/Starter house.creabim", false);
-        assert!(saved.starts_with("Starter house — CreaBIM"), "{saved}");
+        assert!(saved.starts_with("Starter house — Volumen"), "{saved}");
         if v.starts_with("0.") {
             assert!(saved.ends_with(" beta"), "{saved}");
         }

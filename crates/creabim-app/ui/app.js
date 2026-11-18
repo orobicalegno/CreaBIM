@@ -22,7 +22,7 @@
   // (the small cut below 48 px, the full mark from 48 px up)
   function mark(full) {
     const name = full ? "creabim-mark-full" : "creabim-mark";
-    return `<svg class="mark" viewBox="0 0 200 200" aria-label="CreaBIM">${window.ICONS[name]}</svg>`;
+    return `<svg class="mark" viewBox="0 0 200 200" aria-label="Volumen">${window.ICONS[name]}</svg>`;
   }
 
   // The weaver and its nest, woven once where the logo lives (MU39, the
@@ -37,7 +37,7 @@
       new: `<path class="wm-ctx" d="M222 62 H318 V160 H222 Z M270 62 V112 H318"/>`,
     }[kind] || "";
     const w = ctxArt ? 330 : 200;
-    return `<svg class="woven ${play ? "play" : "still"}" viewBox="0 0 ${w} 200" aria-label="CreaBIM">` +
+    return `<svg class="woven ${play ? "play" : "still"}" viewBox="0 0 ${w} 200" aria-label="Volumen">` +
       `<g transform="translate(9 4)">` +
       `<path class="wm-branch" d="M26 52 H174"/>` +
       `<path class="wm-nest" d="M130 52 C162 64 172 100 166 128 C160 156 146 166 142 190 L118 190 C114 166 98 156 94 128 C88 100 98 64 130 52 Z"/>` +
@@ -428,6 +428,7 @@
   // ---- popup menus ----
 
   function drawPopup() {
+    document.body.classList.remove("cascade");
     if (S.close) return drawClose(S.close);
     if (S.dialog) return drawDialog(S.dialog);
     if (S.key === "palette" && S.items && S.items.length) return drawPalette();
@@ -444,48 +445,128 @@
       local.stack = [];
       local.hot = -1;
     }
-    // Follow the open submenu into fresh items, by label.
-    let items = S.items;
-    let title = null;
+    // The open submenus, each beside the row that opened it (a cascade):
+    // level 0 is the menu itself, each label on the stack one deeper.
+    const levels = [{ items: S.items, row: -1 }];
     for (const label of local.stack) {
-      const sub = items.find((i) => i.items && i.label === label);
-      if (!sub) { local.stack = []; items = S.items; title = null; break; }
-      items = sub.items;
-      title = label;
+      const items = levels[levels.length - 1].items;
+      const at = items.findIndex((i) => i.items && i.label === label);
+      if (at < 0) { local.stack = local.stack.slice(0, levels.length - 1); break; }
+      levels.push({ items: items[at].items, row: at });
     }
-    const row = (i) => {
+    const row = (i, n, lvl) => {
       if (i.sep) return `<div class="msep"></div>`;
       if (i.header) return `<div class="mhead">${esc(i.header)}</div>`;
-      if (i.items) return `<button class="mi" data-sub="${esc(i.label)}" ${i.enabled ? "" : "disabled"}><span class="ck">${i.icon ? icon(i.icon) : ""}</span><span class="label">${esc(i.label)}</span>${icon("chevron-right", "sub")}</button>`;
+      const open = lvl + 1 < levels.length && levels[lvl + 1].row === n;
+      if (i.items) return `<button class="mi ${open ? "open" : ""}" data-sub="${esc(i.label)}" data-lvl="${lvl}" data-row="${n}" ${i.enabled ? "" : "disabled"}><span class="ck">${i.icon ? icon(i.icon) : ""}</span><span class="label">${esc(i.label)}</span>${icon("chevron-right", "sub")}</button>`;
       // one icon column for every row; a toggle's state at the row's end,
       // before its shortcut (A7-6). A toggle without an icon shows its
       // tick in the icon column, as a plain check item.
       const toggle = i.checked != null;
       const lead = i.icon ? icon(i.icon) : (i.checked ? icon("check") : "");
       const state = toggle && i.icon ? `<span class="state">${i.checked ? icon("check") : ""}</span>` : "";
-      return `<button class="mi ${toggle && i.checked ? "on" : ""}" data-act="${esc(i.id)}" data-keep="${i.keep ? 1 : 0}" title="${esc(i.hint)}" ${i.enabled ? "" : "disabled"}>` +
+      return `<button class="mi ${toggle && i.checked ? "on" : ""}" data-act="${esc(i.id)}" data-keep="${i.keep ? 1 : 0}" data-lvl="${lvl}" title="${esc(i.hint)}" ${i.enabled ? "" : "disabled"}>` +
         `<span class="ck">${lead}</span><span class="label">${esc(i.label)}</span>${state}${i.key ? `<span class="key">${esc(i.key)}</span>` : ""}</button>`;
     };
-    const cols = S.columns > 1 && title === null ? columns(items, S.columns) : null;
-    let html = `<div class="mwrap"><div class="menu ${cols ? "cols" : ""}" ${cols ? `style="--cols:${cols.length}"` : ""}>`;
-    if (title !== null) html += `<button class="head" data-back="1">${icon("arrow-left")}<span>${esc(title)}</span></button><div class="msep"></div>`;
-    if (cols) {
-      // a long menu with sections reads as a panel of columns
-      for (const col of cols) html += `<div class="col">${col.map(row).join("")}</div>`;
-    } else {
-      html += items.map(row).join("");
-    }
-    html += `</div><div class="more">${icon("chevron-down")}</div></div>`;
-    root.innerHTML = html;
+    let html = "";
+    levels.forEach((L, lvl) => {
+      const cols = lvl === 0 && S.columns > 1 ? columns(L.items, S.columns) : null;
+      // rows keep their index in the list, so a submenu finds its row
+      const body = cols ? cols.map((col) => `<div class="col">${col.map((i) => row(i, L.items.indexOf(i), lvl)).join("")}</div>`).join("")
+        : L.items.map((i, n) => row(i, n, lvl)).join("");
+      html += `<div class="mbox" data-lvl="${lvl}"><div class="menu ${cols ? "cols" : ""}" ${cols ? `style="--cols:${cols.length}"` : ""}>${body}</div><div class="more">${icon("chevron-down")}</div></div>`;
+    });
+    root.innerHTML = `<div class="casc">${html}</div>`;
+    document.body.classList.add("cascade");
     if (local.hot >= 0) {
-      const b = root.querySelectorAll(".menu .mi:not(:disabled), .menu .head")[local.hot];
+      const b = hotButtons()[local.hot];
       if (b) b.classList.add("hot");
     }
-    const m = root.querySelector(".menu");
-    m.addEventListener("scroll", showMore);
+    for (const m of root.querySelectorAll(".menu")) m.addEventListener("scroll", showMore);
     local.sentH = local.sentW = null;
-    reportSize();
+    placeCascade();
     showMore();
+  }
+
+  // The rows the arrow keys move through: the deepest open level's.
+  function hotButtons() {
+    const boxes = root.querySelectorAll(".mbox");
+    const box = boxes[boxes.length - 1];
+    return box ? [...box.querySelectorAll(".mi:not(:disabled)")] : [...root.querySelectorAll(".menu .mi:not(:disabled), .menu .head")];
+  }
+
+  // Lay the cascade out: the menu where it opened, each submenu beside its
+  // row (to the right, or to the left with no room there), its top level
+  // with the row and kept inside the window. The page is as big as all of
+  // them together; the app moves it so the menu itself stays put.
+  function placeCascade() {
+    const boxes = [...root.querySelectorAll(".mbox")];
+    if (!boxes.length) return;
+    const room = S.room || { r: 4000, l: 0, d: 4000, u: 0 };
+    const up = !!S.up;
+    const sizes = boxes.map((b) => naturalSize(b.querySelector(".menu")));
+    // the menu itself: no taller than the room it opens into
+    const tall = Math.max(60, up ? room.u : room.d);
+    const pos = [{ x: 0, y: 0, w: sizes[0].w + 2, h: Math.min(sizes[0].h + 2, tall) }];
+    if (up) pos[0].y = -pos[0].h;
+    let right = true;
+    for (let k = 1; k < boxes.length; k++) {
+      const parent = pos[k - 1];
+      const w = sizes[k].w + 2;
+      const h = sizes[k].h + 2;
+      const btn = boxes[k - 1].querySelector(`.mi[data-row="${levelRow(k)}"]`);
+      const pm = boxes[k - 1].querySelector(".menu");
+      const rowTop = btn ? btn.offsetTop - pm.scrollTop - 5 : 0;
+      // beside the parent, overlapping its edge a little
+      let x = right ? parent.x + parent.w - 3 : parent.x - w + 3;
+      if (right && x + w > room.r) { right = false; x = parent.x - w + 3; }
+      if (!right && x < -room.l) { right = true; x = parent.x + parent.w - 3; }
+      // level with its row, but inside the window
+      const top = -(up ? room.u : 0);
+      const bottom = up ? 0 : room.d;
+      let y = parent.y + rowTop;
+      const hh = Math.min(h, bottom - top);
+      if (y + hh > bottom) y = bottom - hh;
+      if (y < top) y = top;
+      pos.push({ x, y, w, h: hh });
+    }
+    const minX = Math.min(...pos.map((p) => p.x));
+    const minY = Math.min(...pos.map((p) => p.y));
+    const maxX = Math.max(...pos.map((p) => p.x + p.w));
+    const maxY = Math.max(...pos.map((p) => p.y + p.h));
+    boxes.forEach((b, k) => {
+      const p = pos[k];
+      Object.assign(b.style, { left: `${p.x - minX}px`, top: `${p.y - minY}px`, width: `${p.w}px`, height: `${p.h}px` });
+    });
+    const bar = sizes.some((s, k) => s.h + 2 > pos[k].h) ? 10 : 0;
+    const want = { w: Math.ceil(maxX - minX) + bar, h: Math.ceil(maxY - minY), lx: -minX, ly: up ? maxY : -minY };
+    if (want.w === local.sentW && want.h === local.sentH && want.lx === local.sentL) return;
+    local.sentW = want.w;
+    local.sentH = want.h;
+    local.sentL = want.lx;
+    post({ t: "size", w: want.w, h: want.h, lx: want.lx, ly: want.ly });
+  }
+
+  // The row of level k-1 that opened level k.
+  function levelRow(k) {
+    let items = S.items;
+    let at = -1;
+    for (let i = 0; i < k; i++) {
+      at = items.findIndex((x) => x.items && x.label === local.stack[i]);
+      if (at < 0) return -1;
+      items = items[at].items;
+    }
+    return at;
+  }
+
+  // Open a submenu (level lvl + 1) from a row of level lvl, closing any
+  // deeper; or close the levels below lvl.
+  function openSub(lvl, label) {
+    const want = label == null ? local.stack.slice(0, lvl) : local.stack.slice(0, lvl).concat([label]);
+    if (want.join("\u0001") === local.stack.join("\u0001")) return;
+    local.stack = want;
+    local.hot = -1;
+    drawPopup();
   }
 
   // ---- New project: two large choices and the samples to learn from ----
@@ -565,7 +646,7 @@
         dlg.classList.remove("unsaved");
         dlg.classList.add("saved", "closing");
         dlg.querySelector("h2").textContent = "Saved.";
-        dlg.querySelector(".cs-sub").innerHTML = `Everything is in <b>${esc(c.file)}</b>. Closing CreaBIM…`;
+        dlg.querySelector(".cs-sub").innerHTML = `Everything is in <b>${esc(c.file)}</b>. Closing Volumen…`;
         const err = dlg.querySelector(".cs-err");
         if (err) err.remove();
       }
@@ -658,6 +739,7 @@
   // A popup that is a small panel rather than a list: the strip's
   // overflow, or a tool's quick help.
   function drawPanel(inner) {
+    document.body.classList.remove("cascade");
     local.key = S.key;
     local.stack = [];
     local.hot = -1;
@@ -713,16 +795,16 @@
 
   // A shadow and an arrow at the bottom while more of the menu is below.
   function showMore() {
-    const m = root.querySelector(".menu");
-    const more = root.querySelector(".more");
-    if (!m || !more) return;
-    more.classList.toggle("on", m.scrollTop + m.clientHeight < m.scrollHeight - 2);
+    for (const m of root.querySelectorAll(".menu")) {
+      const more = m.parentElement.querySelector(".more");
+      if (more) more.classList.toggle("on", m.scrollTop + m.clientHeight < m.scrollHeight - 2);
+    }
   }
 
   // the page's size changes as the app places it: measure again then
   window.addEventListener("resize", () => {
     if (pane !== "popup" || !root.querySelector(".menu")) return;
-    reportSize();
+    if (root.querySelector(".casc")) placeCascade(); else reportSize();
     showMore();
   });
 
@@ -758,7 +840,7 @@
   // Arrow keys, Enter and Esc in an open menu, from this page or passed on
   // from the views.
   function menuKey(k) {
-    const buttons = [...root.querySelectorAll(".menu .mi:not(:disabled), .menu .head")];
+    const buttons = hotButtons();
     if (buttons.length === 0) return;
     if (k === "ArrowDown" || k === "ArrowUp") {
       const n = buttons.length;
@@ -768,7 +850,8 @@
       showMore();
     } else if (k === "Enter" || k === "ArrowRight") {
       const b = buttons[local.hot];
-      if (b && (k === "Enter" || b.dataset.sub)) b.click();
+      if (b && b.dataset.sub) { openSub(+b.dataset.lvl, b.dataset.sub); local.hot = 0; hotButtons().forEach((x, i) => x.classList.toggle("hot", i === 0)); }
+      else if (b && k === "Enter") b.click();
     } else if (k === "ArrowLeft" || k === "Backspace") {
       if (local.stack.length) { local.stack.pop(); local.hot = -1; drawPopup(); }
     } else if (k === "Escape") {
@@ -1078,10 +1161,7 @@
       drawPopup();
       return;
     } else if (t.dataset.sub) {
-      local.stack.push(t.dataset.sub);
-      local.hot = -1;
-      drawPopup();
-      root.querySelector(".menu").scrollTop = 0;
+      openSub(+t.dataset.lvl, t.dataset.sub);
       return;
     } else if (t.dataset.act) {
       // a page picked from the search results ends the search
@@ -1106,6 +1186,18 @@
   document.addEventListener("dblclick", (e) => {
     const row = e.target.closest(".row");
     if (row && row.dataset.id && !local.dragged) post({ t: "open", id: row.dataset.id });
+  });
+
+  // A submenu opens as the pointer rests on its row, and closes as it
+  // rests on another row of the same menu (a cascade, as in Windows).
+  let hoverTimer = null;
+  document.addEventListener("mouseover", (e) => {
+    if (pane !== "popup" || !e.target.closest) return;
+    const b = e.target.closest(".mbox .mi");
+    if (!b || b.disabled) return;
+    clearTimeout(hoverTimer);
+    const lvl = +b.dataset.lvl;
+    hoverTimer = setTimeout(() => openSub(lvl, b.dataset.sub || null), b.dataset.sub ? 180 : 300);
   });
 
   // Slide between menus while one is open, like a menu bar.

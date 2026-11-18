@@ -5422,6 +5422,74 @@ fn section_letter(n: usize) -> String {
     }
 }
 
+/// AutoCAD's crosshairs: two lines through the pointer, as long as
+/// `size` per cent of the pane (100: right across it, CURSORSIZE), and
+/// the pickbox square at the centre while nothing asks for a point. They
+/// take the pointer's place, unless a grip or a pan asked for another one.
+pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox: bool) {
+    let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)) else {
+        return;
+    };
+    // over a menu or a window above the pane, the pointer stays as it is
+    if ui
+        .ctx()
+        .layer_id_at(p)
+        .is_some_and(|l| l.order != egui::Order::Background && l != ui.layer_id())
+    {
+        return;
+    }
+    let cur = ui.ctx().output(|o| o.cursor_icon);
+    if !matches!(cur, egui::CursorIcon::Default | egui::CursorIcon::Crosshair) {
+        return;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+    let ink = if dark {
+        Color32::from_gray(225)
+    } else {
+        Color32::from_gray(35)
+    };
+    let stroke = Stroke::new(1.0, ink);
+    let top = ui
+        .ctx()
+        .layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            ui.id().with("crosshair"),
+        ))
+        .with_clip_rect(rect);
+    let p = egui::pos2(p.x.round() + 0.5, p.y.round() + 0.5);
+    let half = if size >= 100.0 {
+        rect.width().max(rect.height())
+    } else {
+        rect.width().max(rect.height()) * size.max(1.0) / 200.0
+    };
+    // a gap round the pickbox, as AutoCAD leaves one
+    let gap = if pickbox { 5.0 } else { 0.0 };
+    top.line_segment(
+        [egui::pos2(p.x - half, p.y), egui::pos2(p.x - gap, p.y)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x + gap, p.y), egui::pos2(p.x + half, p.y)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x, p.y - half), egui::pos2(p.x, p.y - gap)],
+        stroke,
+    );
+    top.line_segment(
+        [egui::pos2(p.x, p.y + gap), egui::pos2(p.x, p.y + half)],
+        stroke,
+    );
+    if pickbox {
+        top.rect_stroke(
+            Rect::from_center_size(p, egui::vec2(9.0, 9.0)),
+            0.0,
+            stroke,
+            egui::StrokeKind::Middle,
+        );
+    }
+}
+
 static PLAN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 static PLAN_AXES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 

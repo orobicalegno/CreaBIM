@@ -63,12 +63,12 @@ impl CreaBimApp {
             Item::Separator,
             Item::new("app.report", "Report a problem…")
                 .icon("file-text")
-                .hint("Save one file to attach to a bug report: what CreaBIM did lately, your settings and, if you like, the project. Nothing is sent anywhere"),
+                .hint("Save one file to attach to a bug report: what Volumen did lately, your settings and, if you like, the project. Nothing is sent anywhere"),
             Item::new("area.show:log", "Show the log")
                 .icon("log")
                 .hint("The activity log in a view of its own, problems in red"),
             Item::Separator,
-            Item::new("help:about", "About CreaBIM").icon("info"),
+            Item::new("help:about", "About Volumen").icon("info"),
         ]
     }
 
@@ -76,7 +76,7 @@ impl CreaBimApp {
     /// shortcuts page.
     pub(crate) fn help_menus(&self) -> Vec<(&'static str, Vec<Item>)> {
         vec![
-            ("CreaBIM", self.app_menu()),
+            ("Volumen", self.app_menu()),
             ("File", self.menu_items("menu:File")),
             ("Edit", self.menu_items("menu:Edit")),
             ("View", self.menu_items("menu:View")),

@@ -1,6 +1,6 @@
 # IFC
 
-**IFC** (Industry Foundation Classes) is the open file format that BIM programs use to share models. An IFC file says not just what shapes there are, but what they are: this is a wall on the ground floor, made of brick, with these doors in it. CreaBIM uses IFC ids for its own elements, so a model that goes out and comes back keeps its identity.
+**IFC** (Industry Foundation Classes) is the open file format that BIM programs use to share models. An IFC file says not just what shapes there are, but what they are: this is a wall on the ground floor, made of brick, with these doors in it. Volumen uses IFC ids for its own elements, so a model that goes out and comes back keeps its identity.
 
 ## Exporting
 
@@ -15,8 +15,8 @@ Before writing, the export asks how walls, slabs and roofs go out, and says what
 
 | Choice | The other program gets |
 | --- | --- |
-| **As modelled elements** (recommended) | One IfcWall or IfcSlab each, with its layer set and its plain body. It comes back into CreaBIM as it went out. |
-| **Joined shapes, as drawn** | Their bodies cut where walls run through slabs, as CreaBIM shows them |
+| **As modelled elements** (recommended) | One IfcWall or IfcSlab each, with its layer set and its plain body. It comes back into Volumen as it went out. |
+| **Joined shapes, as drawn** | Their bodies cut where walls run through slabs, as Volumen shows them |
 | **Layers as separate elements** | The structure stays the IfcWall or IfcSlab; finishes, insulation and membranes become IfcCovering elements (cladding, flooring, roofing) covering it. For trades and quantities by layer. |
 
 The project's name, site and building, from *Manage › Project information*, name the IFC project, site and building.
@@ -28,7 +28,7 @@ The project's name, site and building, from *Manage › Project information*, na
 - **Walls** become native, editable walls when their body is a straight upright prism, whether the file writes it as an extrusion or as a faceted B-rep or face set (as FreeCAD and many other tools do). A B-rep wall may already have its door and window holes cut: they are read back as openings. A wall drawn round a room along a polyline axis, perhaps one extrusion per layer, becomes one wall per straight run, meeting at the corners.
 - **Slabs** become native when they are flat upright prisms, with any holes, and with their top at any height: off a storey, the slab sits on the storey below with a top offset.
 - **Doors and windows** become native in a native wall: through the file's opening relationships (`IfcRelVoidsElement`, `IfcRelFillsElement`), or, when the file has none, in the wall their body sits in. They take the size of the hole cut in the wall when there is one, so they show in the door and window schedules and get marks. A hole nothing fills becomes a wall opening.
-- **Columns and beams** become native when they are straight prisms: an upright one with a rectangular or round section, a level bar with a rectangular section. Their types come back. Columns, beams, roofs, stairs and railings CreaBIM wrote come back exactly as they were.
+- **Columns and beams** become native when they are straight prisms: an upright one with a rectangular or round section, a level bar with a rectangular section. Their types come back. Columns, beams, roofs, stairs and railings Volumen wrote come back exactly as they were.
 - Types, assemblies, materials and grid systems come back too. Furniture and fixtures with an IfcFurnitureType, IfcSanitaryTerminalType, IfcElectricApplianceType or IfcSystemFurnitureElementType that has a body map come in as [objects](furniture) of that type.
 - Everything else with a shape (a gable wall, a sloped roof slab, stairs and railings from other tools, terrain…) comes in as a mesh that keeps its IFC class. Openings in a mesh are cut into it, and its corners are joined up, so it is closed.
 - Units, placements and IFC ids are kept, and a plan is made for each storey.

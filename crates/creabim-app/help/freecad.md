@@ -2,7 +2,7 @@
 
 ## Export to FreeCAD
 
-*File › FreeCAD (.FCStd)* writes a FreeCAD document with every element as a solid, with its BIM type and CreaBIM id. Open it in FreeCAD, edit it, save it, and link it back.
+*File › FreeCAD (.FCStd)* writes a FreeCAD document with every element as a solid, with its BIM type and Volumen id. Open it in FreeCAD, edit it, save it, and link it back.
 
 ## Link a FreeCAD file
 

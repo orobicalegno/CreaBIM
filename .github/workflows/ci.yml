@@ -113,9 +113,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p creabim-app -p creabim-cli
+      - run: |
+          Copy-Item target/release/creabim-app.exe target/release/Volumen.exe
+          Copy-Item target/release/creabim.exe target/release/volumen-cli.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: creabim-windows
+          name: volumen-windows
           path: |
-            target/release/creabim-app.exe
-            target/release/creabim.exe
+            target/release/Volumen.exe
+            target/release/volumen-cli.exe

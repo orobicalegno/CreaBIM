@@ -4,7 +4,7 @@ A **material** is what an element is made of: concrete, brick, timber, glass. It
 
 ## The material library
 
-CreaBIM comes with 52 common building materials in 17 categories. *Materials › Add from the library* adds one, or a whole category with *Add them all*. The material browser's *Library* tab shows them with descriptions.
+Volumen comes with 52 common building materials in 17 categories. *Materials › Add from the library* adds one, or a whole category with *Add them all*. The material browser's *Library* tab shows them with descriptions.
 
 ## The material browser
 

@@ -63,4 +63,4 @@ A fixture's symbol is drawn in full even when it is above the cut height. Ceilin
 
 ## IFC
 
-Each fixture type exports as its IFC type (IfcOutletType POWEROUTLET, IfcSwitchingDeviceType TOGGLESWITCH, IfcLightFixtureType POINTSOURCE, IfcSpaceHeaterType RADIATOR, IfcAirTerminalType DIFFUSER and so on), with its shape and plan symbol as representation maps. Each placed fixture is an occurrence at its real height. Its type's mounting (*Wall*, *Floor* or *Ceiling*) and default height are kept in the type's CreaBIM property set, so opening the file brings ceiling fixtures back hung from the ceiling. See [IFC](ifc).
+Each fixture type exports as its IFC type (IfcOutletType POWEROUTLET, IfcSwitchingDeviceType TOGGLESWITCH, IfcLightFixtureType POINTSOURCE, IfcSpaceHeaterType RADIATOR, IfcAirTerminalType DIFFUSER and so on), with its shape and plan symbol as representation maps. Each placed fixture is an occurrence at its real height. Its type's mounting (*Wall*, *Floor* or *Ceiling*) and default height are kept in the type's Volumen property set, so opening the file brings ceiling fixtures back hung from the ceiling. See [IFC](ifc).

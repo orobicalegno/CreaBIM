@@ -2,7 +2,7 @@
 
 When a part of the building is not a wall, slab, roof or column, model it as an **extrusion** or a **sweep**. Both are ordinary elements: they have a material and a name, they show cut in plans and sections and solid in 3D, and you can change their sizes later in *Properties*. A **void** has the same shape tools but cuts what it meets instead of being solid.
 
-CreaBIM does not decide what a part is. A chimney, a hearth, a coping, a plinth and a flight of steps are all made the same way. You give each one its name, its material and the IFC class it exports as.
+Volumen does not decide what a part is. A chimney, a hearth, a coping, a plinth and a flight of steps are all made the same way. You give each one its name, its material and the IFC class it exports as.
 
 ## Extrusions
 
@@ -69,6 +69,6 @@ An extrusion, a void and a sweep through points have the same grips as a slab. D
 
 ## Exchange
 
-In IFC, an extrusion or a sweep is written as the class you picked, with its shape as built. A void is written as an *IfcOpeningElement* in each element it cuts. Those elements keep their uncut shape, so other tools see a proper opening. The IFCX format carries every part's own parameters, so CreaBIM reads it back as the same editable extrusion, sweep or void. See [IFC](ifc).
+In IFC, an extrusion or a sweep is written as the class you picked, with its shape as built. A void is written as an *IfcOpeningElement* in each element it cuts. Those elements keep their uncut shape, so other tools see a proper opening. The IFCX format carries every part's own parameters, so Volumen reads it back as the same editable extrusion, sweep or void. See [IFC](ifc).
 
 Views can hide extrusions and sweeps through the *Extrusions and sweeps* category. Voids are in *Openings, shafts and void cutters* (see [Visibility](visibility)).

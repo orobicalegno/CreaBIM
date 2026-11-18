@@ -16,7 +16,7 @@ For an exact value, type it during the drag (`Tab`), or click a temporary dimens
 
 ## Your grip style
 
-*CreaBIM › Settings… › Grips* changes how grips look, for you only: *Quiet* (squares at corners, bars on edges), *Edges are the handles* (almost nothing at rest; an edge shows its bar under the pointer) or *One grip shape* (the same small circle everywhere). Rest on one to see it on the selection. It never changes anyone's drawings, and it goes with you from project to project.
+*Volumen › Settings… › Grips* changes how grips look, for you only: *Quiet* (squares at corners, bars on edges), *Edges are the handles* (almost nothing at rest; an edge shows its bar under the pointer) or *One grip shape* (the same small circle everywhere). Rest on one to see it on the selection. It never changes anyone's drawings, and it goes with you from project to project.
 
 ## Turning, sliding and sizing
 

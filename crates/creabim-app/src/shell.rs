@@ -123,6 +123,9 @@ struct Popup {
     /// opens upwards from there instead.
     above: Option<f32>,
     size: egui::Vec2,
+    /// How far right of the page's left edge the menu itself starts: its
+    /// open submenus can sit to its left, and the menu stays where it opened.
+    lead: f32,
 }
 
 pub(super) fn view_style_icon(s: ViewStyle) -> &'static str {
@@ -439,7 +442,7 @@ impl CreaBimApp {
             return items;
         }
         match key {
-            "menu:CreaBIM" => self.app_menu(),
+            "menu:Volumen" => self.app_menu(),
             "units.menu" => self.unit_items(),
             "select.menu" => self.select_menu_items(),
             "sweep.library" => self.sweep_library_items(),
@@ -857,10 +860,10 @@ impl CreaBimApp {
                 .hint("The new JSON-based IFC. Its schema is still an alpha, so other tools may not read it yet."),
             Item::new("export.glb", "glTF (.glb) for Blender")
                 .icon("box")
-                .hint("Every element as a mesh with its CreaBIM id, so edits saved in Blender come back to the same elements."),
+                .hint("Every element as a mesh with its Volumen id, so edits saved in Blender come back to the same elements."),
             Item::new("export.fcstd", "FreeCAD (.FCStd)")
                 .icon("freecad")
-                .hint("Every element as a solid with its BIM type and CreaBIM id; open it in FreeCAD, edit, save, and link it back."),
+                .hint("Every element as a solid with its BIM type and Volumen id; open it in FreeCAD, edit, save, and link it back."),
             Item::new("export.pdf", "Sheets as PDF").icon("file-text"),
             Item::new("export.svg", "This view or sheet as SVG").icon("file"),
             Item::new("export.dxf", "This view or sheet as DXF")
@@ -1270,6 +1273,14 @@ impl CreaBimApp {
                 .checked(!self.shell.settings.guides_hidden)
                 .icon("slash")
                 .hint("Hide the guides in every view without deleting them, and bring them back"),
+            Item::new("view.grid", "Grid behind drawings")
+                .checked(self.shell.settings.plan_grid)
+                .icon("grid-3x3")
+                .hint("The light grid behind plans, sections and details: off for plain paper"),
+            Item::new("view.axes", "X and Y axes")
+                .checked(self.shell.settings.axis_lines)
+                .icon("move")
+                .hint("The red X and green Y lines through the origin, in plans and in the 3D view"),
             Item::sub(
                 "2D view visibility",
                 self.vis_target(false)
@@ -1831,6 +1842,9 @@ impl CreaBimApp {
             | "view.xray" | "view.rooms" | "view.ceiling" | "view.tagrooms" | "view.roomtags"
             // (these four were handled below but never routed here: MU22)
             | "view.tempdims" | "view.ranges" | "view.reference" | "sheet.preview" | "sheet.text"
+            // the grid and the axes behind drawings were never routed here
+            // either: their menu items did nothing
+            | "view.grid" | "view.axes" | "view.north"
             | "sheet.north" | "sheet.scalebar" | "sheet.pdf" | "export.sheets" | "sheet.cloud"
             | "sheet.revtable" | "tag.all" | "sheet.keyplan" | "sheet.guides" => {
                 self.view_action(head)
@@ -2217,7 +2231,7 @@ impl CreaBimApp {
                     return;
                 };
                 let r = std::fs::write(&out, creabim_exchange::gltf::export_glb(self.doc.model()));
-                self.report(r, format!("Exported {out}. In Blender: File > Import > glTF, or use the CreaBIM add-on."));
+                self.report(r, format!("Exported {out}. In Blender: File > Import > glTF, or use the Volumen add-on."));
             }
             "export.fcstd" => {
                 let Some(out) = self.export_to(with_extension(&self.path, "FCStd")) else {
@@ -2625,6 +2639,17 @@ impl CreaBimApp {
                     "Grid off: plain paper behind drawings.".into()
                 };
             }
+            "view.axes" => {
+                let s = &mut self.shell.settings;
+                s.axis_lines = !s.axis_lines;
+                s.store();
+                self.geometry_key = None;
+                self.status = if self.shell.settings.axis_lines {
+                    "X and Y axes on: red along X, green along Y, through the origin.".into()
+                } else {
+                    "X and Y axes off.".into()
+                };
+            }
             "view.tempdims" => {
                 self.plan.temp_dims_off = !self.plan.temp_dims_off;
                 self.shell.settings.temp_dims_off = self.plan.temp_dims_off;
@@ -2634,6 +2659,33 @@ impl CreaBimApp {
                 } else {
                     "Temporary dimensions on.".into()
                 };
+            }
+            "view.north" => {
+                let Some(v) = self.view(id) else { return };
+                if !matches!(v.kind, ViewKind::Plan { .. }) {
+                    self.status = "A north arrow goes in a plan: open one first.".into();
+                    return;
+                }
+                // where the view is looking, then dragged where it goes
+                let at = self
+                    .plan
+                    .cameras
+                    .get(&id)
+                    .map_or(glam::DVec2::ZERO, |c| c.0);
+                let mut mark = creabim_core::PaperMark::north_arrow(id, at);
+                mark.size = 10.0;
+                let e = Element::new("North arrow", ElementKind::PaperMark(mark));
+                let new = e.id;
+                let r = self
+                    .doc
+                    .commit(creabim_core::Transaction::new("Add north arrow").insert(e));
+                if r.is_ok() {
+                    self.selection.only(new);
+                }
+                self.report(
+                    r.map(|_| ()),
+                    "North arrow added, turned to the project's true north (Project information). Drag it where it goes; Properties sets its size.",
+                );
             }
             "view.tag" => {
                 let r = planview::tag_openings(&mut self.doc, id);
@@ -3526,7 +3578,7 @@ impl CreaBimApp {
                 "unsaved": self.unsaved(),
                 "note": "",
             },
-            "app": {"key": "menu:CreaBIM", "label": "CreaBIM"},
+            "app": {"key": "menu:Volumen", "label": "Volumen"},
             "right": [{
                 "kind": "menu", "key": "workspaces", "label": "", "value": self.areas.workspace,
                 "icon": "workspace", "big": true,
@@ -3634,6 +3686,21 @@ impl CreaBimApp {
                 "icon": "grid-3x3", "on": self.shell.settings.plan_grid,
                 "hint": "The light grid behind drawings: off for plain paper. For every plan, section and detail",
             }));
+            options.push(json!({
+                "kind": "toggle", "id": "view.axes", "label": "X and Y axes",
+                "icon": "move", "on": self.shell.settings.axis_lines,
+                "hint": "The red X and green Y lines through the origin, in plans and in the 3D view",
+            }));
+            if self
+                .active_view
+                .and_then(|id| self.view(id))
+                .is_some_and(|v| matches!(v.kind, ViewKind::Plan { .. }))
+            {
+                options.push(json!({
+                    "kind": "button", "id": "view.north", "label": "North arrow", "icon": "north-arrow",
+                    "hint": "A small north arrow in this plan, turned to the project's true north",
+                }));
+            }
             options.push(json!({
                 "kind": "button", "id": "view.tag", "label": "Tag openings", "icon": "tag",
                 "hint": "Tag every door and window in this view that has no tag yet",
@@ -4105,6 +4172,7 @@ impl CreaBimApp {
             up: None,
             above: None,
             size: egui::vec2(w, 380.0),
+            lead: 0.0,
         });
         self.shell.focus_popup = true;
     }
@@ -4127,6 +4195,7 @@ impl CreaBimApp {
             up: None,
             above: None,
             size,
+            lead: 0.0,
         });
         self.shell.focus_popup = true;
     }
@@ -4180,6 +4249,7 @@ impl CreaBimApp {
             up: None,
             above: None,
             size,
+            lead: 0.0,
         });
         self.shell.focus_popup = true;
     }
@@ -4311,6 +4381,7 @@ impl CreaBimApp {
                     up,
                     above,
                     size: egui::vec2(w.max(220.0), 12.0 + 29.0 * n),
+                    lead: 0.0,
                 });
             }
             "size" => {
@@ -4324,6 +4395,7 @@ impl CreaBimApp {
                         _ => b["w"].as_f64().unwrap_or(200.0) as f32,
                     };
                     p.size = egui::vec2(w, h);
+                    p.lead = b["lx"].as_f64().unwrap_or(0.0) as f32;
                 }
             }
             "set" => {
@@ -4636,7 +4708,7 @@ impl CreaBimApp {
         let popup = self.shell.popup.as_ref().map(|p| {
             let up = p.up.or_else(|| opens_up(p, screen));
             let size = popup_size(&Popup { up, ..p.clone() }, screen);
-            let mut at = p.at;
+            let mut at = p.at - egui::vec2(p.lead, 0.0);
             if let Some(bottom) = up {
                 at.y = bottom - size.y;
             }
@@ -4707,7 +4779,15 @@ impl CreaBimApp {
             };
             (
                 rect,
-                json!({"theme": self.theme(), "key": p.key, "items": ui_model::list(&items), "columns": columns}),
+                json!({"theme": self.theme(), "key": p.key, "items": ui_model::list(&items), "columns": columns,
+                    "up": up.is_some(),
+                    // the room round where the menu opened, for its submenus
+                    "room": {
+                        "r": screen.right() - 6.0 - p.at.x,
+                        "l": p.at.x - screen.left() - 6.0,
+                        "d": screen.bottom() - 6.0 - p.at.y,
+                        "u": up.map_or(0.0, |b| b - screen.top() - 6.0),
+                    }}),
                 items.is_empty(),
             )
         });
@@ -4784,6 +4864,7 @@ impl CreaBimApp {
             up: None,
             above: Some(r.top() - 4.0),
             size: egui::vec2(240.0, 12.0 + 29.0 * n),
+            lead: 0.0,
         });
     }
 
@@ -4803,6 +4884,7 @@ impl CreaBimApp {
             up: None,
             above: Some(pos.y - 2.0),
             size: egui::vec2(230.0, 12.0 + 28.0 * n),
+            lead: 0.0,
         });
     }
 

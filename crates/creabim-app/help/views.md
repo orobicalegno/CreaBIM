@@ -1,6 +1,6 @@
 # Views
 
-In CreaBIM a **view** is a way of looking at the model, kept in the project: a floor plan, a section, an elevation, a 3D view or a schedule. Views are drawn from the model each time, so they never go out of date. They save, undo and update with it.
+In Volumen a **view** is a way of looking at the model, kept in the project: a floor plan, a section, an elevation, a 3D view or a schedule. Views are drawn from the model each time, so they never go out of date. They save, undo and update with it.
 
 ## Kinds of views
 

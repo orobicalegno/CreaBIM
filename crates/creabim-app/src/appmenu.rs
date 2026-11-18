@@ -66,7 +66,7 @@ pub(crate) fn save_error(e: &str) -> String {
         "read-only",
         "write-protected",
     ]) {
-        "The file or its folder is read-only, or CreaBIM isn't allowed to write there. Choose another folder with Save as…".into()
+        "The file or its folder is read-only, or Volumen isn't allowed to write there. Choose another folder with Save as…".into()
     } else if any(&[
         "os error 112)",
         "os error 28)",
@@ -324,7 +324,7 @@ impl CreaBimApp {
 
 /// Where a manual update check looks: the project's releases page. Nothing
 /// is fetched in the background; the page opens in the browser when asked.
-pub(crate) const RELEASES: &str = "https://github.com/chopinregis/CreaBIM/releases";
+pub(crate) const RELEASES: &str = "https://github.com/orobicalegno/CreaBIM/releases";
 
 /// One way to start a project in the New project window.
 pub(crate) struct Start {
@@ -430,14 +430,14 @@ impl CreaBimApp {
     /// The CreaBIM menu, first in the menu bar.
     pub(super) fn app_menu(&self) -> Vec<Item> {
         vec![
-            Item::new("app.about", "About CreaBIM")
+            Item::new("app.about", "About Volumen")
                 .icon("info")
                 .hint("The version, the licence and the guide"),
             Item::Header(crate::help::version_line()),
             Item::Separator,
             Item::new("app.updates", "Check for updates…")
                 .icon("refresh-cw")
-                .hint("Opens the releases page in your browser. CreaBIM never checks by itself: it stays offline."),
+                .hint("Opens the releases page in your browser. Volumen never checks by itself: it stays offline."),
             Item::new("app.settings", "Settings…")
                 .key("Ctrl+,")
                 .icon("settings")
@@ -447,7 +447,7 @@ impl CreaBimApp {
                 .icon("keyboard"),
             Item::new("app.log", "Open the activity log")
                 .icon("file")
-                .hint("What CreaBIM did, step by step (drags frame by frame, edits, tools): attach it to a bug report. It stays on this computer."),
+                .hint("What Volumen did, step by step (drags frame by frame, edits, tools): attach it to a bug report. It stays on this computer."),
             Item::Separator,
             Item::new("app.exit", "Exit").key("Alt+F4").icon("log-out"),
         ]
@@ -525,7 +525,7 @@ impl CreaBimApp {
             "app.updates" => {
                 ctx.open_url(egui::OpenUrl::new_tab(RELEASES));
                 self.status = format!(
-                    "This is CreaBIM {}. The releases page is open in your browser; nothing was downloaded.",
+                    "This is Volumen {}. The releases page is open in your browser; nothing was downloaded.",
                     crate::help::version_line().trim_start_matches("Version ")
                 );
             }
@@ -579,6 +579,8 @@ impl CreaBimApp {
         let mut grip_hover = None;
         let mut edit_bar = self.shell.settings.edit_bar.clone();
         let mut axis_lines = self.shell.settings.axis_lines;
+        let mut crosshair = self.shell.settings.crosshair;
+        let mut cursor_size = self.shell.settings.cursor_size;
         let mut interaction = self.shell.settings.interaction.clone();
         let mut edge_w = self.shell.settings.edit_edge_width;
         let mut vert_s = self.shell.settings.edit_vertex_size;
@@ -777,6 +779,13 @@ impl CreaBimApp {
                                         crate::props::row(ui, "Vertex size", |ui| {
                                             ui.add(egui::Slider::new(&mut vert_s, 2.0..=10.0).step_by(1.0).suffix(" px"))
                                         });
+                                        crate::props::section(ui, "2D cursor");
+                                        ui.checkbox(&mut crosshair, "Crosshairs, as in AutoCAD")
+                                            .on_hover_text("In plans and sections the pointer is two lines right across the view, with the pickbox square while selecting.");
+                                        crate::props::row(ui, "Crosshair size", |ui| {
+                                            ui.add_enabled(crosshair, egui::Slider::new(&mut cursor_size, 1.0..=100.0).step_by(1.0).suffix(" %"))
+                                                .on_hover_text("CURSORSIZE: how long the lines are, per cent of the view. 100 runs right across it.")
+                                        });
                                         crate::props::section(ui, "3D view");
                                         ui.checkbox(&mut axis_lines, "X and Y axes on the grid")
                                             .on_hover_text("The model's X axis in red and Y in green through its origin. Z shows, in blue, only while a move keeps to it.");
@@ -788,7 +797,7 @@ impl CreaBimApp {
                                             let label = |k: &str| match k {
                                                 "classic" => "Classic: left drag orbits",
                                                 "archicad" => "Archicad: middle pans, Shift + middle orbits",
-                                                _ => "CreaBIM: middle orbits, left boxes",
+                                                _ => "Volumen: middle orbits, left boxes",
                                             };
                                             egui::ComboBox::from_id_salt("settings.navigation").icon(crate::props::combo_icon)
                                                 .selected_text(label(&navigation))
@@ -800,7 +809,7 @@ impl CreaBimApp {
                                                 });
                                         });
                                         ui.label(
-                                            egui::RichText::new("CreaBIM (recommended): left click selects, a left drag on empty space draws a box, a middle drag orbits (Alt + left drag without one), a right drag or Shift + middle pans, a right click opens the menu, the wheel zooms. Archicad: a middle drag pans, Shift + middle orbits, a middle double-click frames everything. Classic: a left drag orbits in 3D. Every way orbits about the point of the model the drag starts on, and the wheel zooms toward the point under the pointer.")
+                                            egui::RichText::new("Volumen (recommended): left click selects, a left drag on empty space draws a box, a middle drag orbits (Alt + left drag without one), a right drag or Shift + middle pans, a right click opens the menu, the wheel zooms. Archicad: a middle drag pans, Shift + middle orbits, a middle double-click frames everything. Classic: a left drag orbits in 3D. Every way orbits about the point of the model the drag starts on, and the wheel zooms toward the point under the pointer.")
                                                 .weak()
                                                 .small(),
                                         );
@@ -882,6 +891,13 @@ impl CreaBimApp {
         }
         if interaction != self.shell.settings.interaction {
             self.shell.settings.interaction = interaction;
+            self.shell.settings.store();
+        }
+        if crosshair != self.shell.settings.crosshair
+            || cursor_size != self.shell.settings.cursor_size
+        {
+            self.shell.settings.crosshair = crosshair;
+            self.shell.settings.cursor_size = cursor_size;
             self.shell.settings.store();
         }
         if axis_lines != self.shell.settings.axis_lines {
@@ -999,12 +1015,12 @@ impl CreaBimApp {
                     (
                         IfcBody::Modelled,
                         "As modelled elements (recommended)",
-                        "Each wall and slab is one IfcWall or IfcSlab, its layers carried as its layer set, its body the plain extrusion. Every BIM program reads it, and it comes back into CreaBIM as it went out. The other program settles the joins.",
+                        "Each wall and slab is one IfcWall or IfcSlab, its layers carried as its layer set, its body the plain extrusion. Every BIM program reads it, and it comes back into Volumen as it went out. The other program settles the joins.",
                     ),
                     (
                         IfcBody::Joined,
                         "Joined shapes, as drawn",
-                        "Bodies cut where walls run through slabs, as CreaBIM shows them: for coordination and clash checks. Some programs then read a cut slab as a generic shape, not a slab, and it won't come back into CreaBIM as a slab.",
+                        "Bodies cut where walls run through slabs, as Volumen shows them: for coordination and clash checks. Some programs then read a cut slab as a generic shape, not a slab, and it won't come back into Volumen as a slab.",
                     ),
                     (
                         IfcBody::Layers,
@@ -1284,7 +1300,7 @@ mod close_tests {
         assert!(!app.close_ok);
         std::thread::sleep(SAVED_HOLDS);
         app.close_step(&ctx);
-        assert!(app.close_ok && !app.close_ask, "then CreaBIM closes");
+        assert!(app.close_ok && !app.close_ask, "then Volumen closes");
         let _ = std::fs::remove_dir_all(dir);
     }
 

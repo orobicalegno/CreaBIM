@@ -894,6 +894,59 @@ pub fn camera_symbol(
     out
 }
 
+/// A small, plain north arrow in a plan: a slim arrowhead, its left half
+/// filled, on a short stem, and an N beyond its tip, `m.size` paper
+/// millimetres tall, pointing to north (the project's true north unless
+/// the mark has its own angle). `mm` is drawing units per paper mm.
+pub fn north_symbol(
+    id: ElementId,
+    m: &creabim_core::PaperMark,
+    true_north: f64,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let a = m.north_angle(true_north).to_radians();
+    let turn = DVec2::from_angle(a);
+    let s = m.size * mm;
+    let at = |x: f64, y: f64| m.at + turn.rotate(DVec2::new(x * s, y * s));
+    let (tip, notch, left, right, foot) = (
+        at(0.0, 0.5),
+        at(0.0, 0.05),
+        at(-0.16, -0.05),
+        at(0.16, -0.05),
+        at(0.0, -0.5),
+    );
+    let line = |a: DVec2, b: DVec2| PlanItem::Line {
+        id,
+        pen: crate::plan::Pen::Fine,
+        a,
+        b,
+    };
+    vec![
+        PlanItem::Fill {
+            id,
+            points: vec![tip, left, notch],
+            hatch: creabim_core::Hatch::Solid,
+            rgb: Some([0.0, 0.0, 0.0]),
+        },
+        line(tip, left),
+        line(left, notch),
+        line(notch, right),
+        line(right, tip),
+        line(notch, foot),
+        PlanItem::Text {
+            id,
+            at: at(0.0, 0.5) + turn.rotate(DVec2::new(0.0, 2.2 * mm)),
+            text: "N".into(),
+            size: (m.size * 0.28).clamp(2.0, 5.0),
+            align: crate::paper::Anchor::Middle,
+            mm,
+            rgb: None,
+            bold: true,
+            angle: a,
+        },
+    ]
+}
+
 /// How a size is written beside an opening: whole centimetres, and a
 /// height of nothing as 000.
 fn centimetres(m: f64) -> String {
@@ -1008,6 +1061,14 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     look,
                     &drafting,
                 ));
+            }
+            // a north arrow placed in this view, turned to true north
+            ElementKind::PaperMark(m)
+                if m.sheet == view_id
+                    && matches!(m.kind, creabim_core::PaperMarkKind::NorthArrow { .. }) =>
+            {
+                let north = model.project_info().map_or(0.0, |(_, p)| p.true_north);
+                out.extend(north_symbol(e.id, m, north, view.scale / 1000.0));
             }
             // a camera, in the plan of the floor it stands on
             ElementKind::View(v) if matches!(v.kind, ViewKind::Perspective { .. }) => {

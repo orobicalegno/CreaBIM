@@ -8,7 +8,7 @@ Every change can be undone: `Ctrl+Z` undoes, `Ctrl+Y` (or `Ctrl+Shift+Z`) redoes
 
 - `Ctrl+C` copies the selection, `Ctrl+X` cuts it, and `Ctrl+V` pastes it back in the same place. Walls keep their doors and windows.
 - Then press `M` or `G` to move the pasted copy where it belongs.
-- The copy is text, so you can paste it into a second CreaBIM window.
+- The copy is text, so you can paste it into a second Volumen window.
 
 `Shift+D` (duplicate) copies and starts moving the copy in one go. In Move, `Ctrl` leaves a copy behind at each click.
 

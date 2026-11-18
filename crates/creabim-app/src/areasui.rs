@@ -997,7 +997,7 @@ impl CreaBimApp {
                     Item::new("area.show:log", "Log")
                         .icon("log")
                         .checked(here == Shows::Log)
-                        .hint("What CreaBIM did, as it happens, problems in red; copy it, or save a problem report"),
+                        .hint("What Volumen did, as it happens, problems in red; copy it, or save a problem report"),
                 );
                 items
             }

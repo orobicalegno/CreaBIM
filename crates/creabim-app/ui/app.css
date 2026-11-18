@@ -694,6 +694,14 @@ html[data-pane="popup"] body {
 
 .mwrap { position: relative; height: 100%; }
 
+/* A menu and its open submenus, each its own box beside the row that
+   opened it; the page between them is clear (the app shows through). */
+html[data-pane="popup"]:has(body.cascade), html[data-pane="popup"] body.cascade { background: transparent; border: none; }
+.casc { position: relative; width: 100%; height: 100%; }
+.mbox { position: absolute; background: var(--panel-2); border: 1px solid var(--border-2); border-radius: 6px; overflow: hidden; }
+.mbox .menu { height: 100%; }
+.mi.open:not(:disabled) { background: var(--raise); }
+
 /* A menu as tall as the window allows; longer ones scroll inside. */
 .menu {
   padding: 5px;
