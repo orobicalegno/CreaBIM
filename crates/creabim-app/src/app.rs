@@ -9628,6 +9628,13 @@ impl CreaBimApp {
                                     }
                                 });
                         });
+                        if wall_outline_row(
+                            ui,
+                            "section.wall_outline",
+                            &mut v.graphics.wall_outline_from,
+                        ) {
+                            label = "Wall layers";
+                        }
                     }
                     if matches!(v.kind, ViewKind::Axonometric { .. }) {
                         ui.add_space(6.0);
@@ -11994,6 +12001,7 @@ impl eframe::App for CreaBimApp {
         self.help_window(&ctx);
         self.report_window(&ctx);
         self.drafting_settings_window(&ctx);
+        self.layer_manager_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus
         self.plan.web_menus = false;
@@ -12232,6 +12240,35 @@ fn stem(path: &str) -> String {
     } else {
         name
     }
+}
+
+/// The Walls row of a plan's or section's graphics: every layer, or the
+/// outline only (always, or from a scale on), as Archicad's partial
+/// structure display. True when it changed.
+fn wall_outline_row(ui: &mut egui::Ui, id: &str, from: &mut Option<f64>) -> bool {
+    let label = |f: Option<f64>| match f {
+        None => "Every layer".to_string(),
+        Some(s) if s <= 1.0 => "Outline only".to_string(),
+        Some(s) => format!("Outline from 1:{s}"),
+    };
+    let mut changed = false;
+    crate::props::row(ui, "Walls", |ui| {
+        egui::ComboBox::from_id_salt(id)
+            .icon(crate::props::combo_icon)
+            .selected_text(label(*from))
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for f in [None, Some(1.0), Some(100.0), Some(200.0), Some(500.0)] {
+                    changed |= ui
+                        .selectable_value(from, f, label(f))
+                        .on_hover_text(
+                            "Outline only: each wall one mass, no lines between its layers or where walls join; its fill follows the drawing style (grey, solid in Poché, none in Clean). From a scale: only at that scale and smaller ones (1:200, 1:500).",
+                        )
+                        .changed();
+                }
+            });
+    });
+    changed
 }
 
 #[cfg(test)]
@@ -12675,6 +12712,9 @@ fn plan_graphics_ui(
                 }
             });
     });
+    if wall_outline_row(ui, "view.wall_outline", &mut g.wall_outline_from) {
+        label = Some("Wall layers");
+    }
     if crate::props::check(ui, "Below the cut", &mut g.below_fill, "Tinted")
         .on_hover_text("Furniture, fittings and imported meshes under the cut get a light fill.")
         .changed()

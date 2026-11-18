@@ -54,6 +54,10 @@ A plan's *Properties* has a *Graphics* group:
 - The pen, colour, pattern and hatch of each category are **object styles** of the project's style pack, and a view can override them: see [Graphic styles](graphic-styles).
 - *View range*: what levels a plan draws, and the roof or site plan seen from above: see [View range](view-range).
 
+### Walls by their outline only
+
+For drawings at small scales (1:200, 1:500), *⋯ › Walls: outline only* in a plan's or section's header draws each wall as one mass: only its outline, with no lines between its layers or where walls join, as Archicad's partial structure display. Its fill follows the *Drawing style*: light grey in *Technical*, solid in *Poché*, none in *Clean*. *Properties › Graphics › Walls* can also make it **from a scale on**: *Outline from 1:200* keeps every layer at 1:50 and 1:100 and outlines the walls at 1:200 and smaller scales.
+
 ### North arrow, grid and axes
 
 - **North arrow**: *⋯ › North arrow* in a plan's header places a small, plain north arrow in the middle of what the plan shows. Drag it where it goes. It points to the project's true north (*Project information*), unless it is given an angle of its own in *Properties*, where its size (paper millimetres) is set too. It shows on the sheets the plan is placed on.

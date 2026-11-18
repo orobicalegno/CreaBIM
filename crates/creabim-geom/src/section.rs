@@ -878,7 +878,12 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
             _ => None,
         })
         .unwrap_or(&v.kind);
-    let mut d = match kind {
+    if let creabim_core::ViewKind::Schedule { category, by_type } = kind {
+        let table = crate::schedule::schedule_by(model, *category, *by_type);
+        return Some(crate::schedule::schedule_drawing(view, &e.name, &table));
+    }
+    let outline = v.graphics.walls_outlined(v.scale);
+    let mut d = crate::plan::with_wall_outlines(outline, || match kind {
         // seen from above, nothing is cut: no rooms, no underlay
         creabim_core::ViewKind::Plan { level, cut_height } if v.graphics.range.from_above => {
             crate::ranges::plan(model, v, *level, *cut_height)
@@ -958,11 +963,8 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
             let frame = CameraFrame::new(*eye, *target, *fov, *aspect);
             perspective_view_in(model, scene(), &frame, style, reveal, &crop, view)
         }
-        creabim_core::ViewKind::Schedule { category, by_type } => {
-            let table = crate::schedule::schedule_by(model, *category, *by_type);
-            return Some(crate::schedule::schedule_drawing(view, &e.name, &table));
-        }
-    };
+        creabim_core::ViewKind::Schedule { .. } => unreachable!("drawn above"),
+    });
     if reveal && v.hidden_in_colour {
         tint_hidden(model, view, kind, &mut d.items);
     }

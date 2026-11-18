@@ -253,6 +253,10 @@ impl CutPiece {
     /// What it merges with: the same material, or for a layer without
     /// one, layers of the same function (air gaps run on into each other).
     fn key(&self, model: &Model) -> (Option<ElementId>, u8) {
+        // walls by their outline: every layer of every wall one mass
+        if walls_outlined() && is_wall(model, self.id) {
+            return (None, 240);
+        }
         match self.layer {
             None => material_key(model, self.id),
             Some(l) => match l.material {
@@ -266,6 +270,9 @@ impl CutPiece {
     /// The colour of the material this piece cuts: its layer's, else the
     /// element's own (or its core layer's); none for an air gap.
     fn colour(&self, model: &Model) -> Option<[f32; 3]> {
+        if walls_outlined() && is_wall(model, self.id) {
+            return None;
+        }
         let mat = |id: ElementId| match &model.get(id)?.kind {
             ElementKind::Material(m) => Some(m.color),
             _ => None,
@@ -286,6 +293,11 @@ impl CutPiece {
     }
 
     fn hatch(&self, model: &Model) -> Hatch {
+        // one even fill (the poché the drawing style turns grey, black or
+        // nothing), no hatch per material
+        if walls_outlined() && is_wall(model, self.id) {
+            return Hatch::Solid;
+        }
         match self.layer {
             None => hatch_of(model, self.id),
             Some(l) => match l.material.and_then(|m| model.get(m)).map(|e| &e.kind) {
@@ -423,6 +435,27 @@ fn inside_spans(a: DVec2, b: DVec2, poly: &[DVec2], eps: f64) -> Vec<(f64, f64)>
         })
         .map(|w| (w[0], w[1]))
         .collect()
+}
+
+thread_local! {
+    static OUTLINE_WALLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Draw walls by their outline only while `f` runs (a view's
+/// [`creabim_core::PlanGraphics::walls_outlined`]).
+pub fn with_wall_outlines<T>(on: bool, f: impl FnOnce() -> T) -> T {
+    let was = OUTLINE_WALLS.with(|c| c.replace(on));
+    let out = f();
+    OUTLINE_WALLS.with(|c| c.set(was));
+    out
+}
+
+fn walls_outlined() -> bool {
+    OUTLINE_WALLS.with(|c| c.get())
+}
+
+fn is_wall(model: &Model, id: ElementId) -> bool {
+    matches!(model.get(id).map(|e| &e.kind), Some(ElementKind::Wall(_)))
 }
 
 /// Turn cut polygons into fills plus outlines, leaving out outline segments
@@ -2416,6 +2449,47 @@ pub fn level_under(model: &Model, z: f64) -> Option<ElementId> {
 
 #[cfg(test)]
 mod tests {
+    /// Walls by their outline only (Archicad's partial structure display):
+    /// no lines between a wall's layers, one even fill, and fewer lines.
+    #[test]
+    fn outlined_walls_lose_the_lines_between_their_layers() {
+        let m = creabim_core::sample::layered_house();
+        let level = m
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Level(_)))
+            .unwrap()
+            .id;
+        let wall_lines = |items: &[PlanItem], pen: Pen| {
+            items
+                .iter()
+                .filter(|it| {
+                    matches!(it, PlanItem::Line { pen: p, id, .. }
+                        if *p == pen && matches!(m.get(*id).map(|e| &e.kind), Some(ElementKind::Wall(_))))
+                })
+                .count()
+        };
+        let layered = plan_view(&m, level, 1.2).items;
+        let outlined = with_wall_outlines(true, || plan_view(&m, level, 1.2).items);
+        assert!(
+            wall_lines(&layered, Pen::Projection) > 0,
+            "the sample's walls show their layers"
+        );
+        assert_eq!(
+            wall_lines(&outlined, Pen::Projection),
+            0,
+            "no seams between layers"
+        );
+        assert!(wall_lines(&outlined, Pen::Cut) > 0, "the outline stays");
+        assert!(outlined.iter().all(|it| match it {
+            PlanItem::Fill { id, hatch, rgb, .. }
+                if matches!(m.get(*id).map(|e| &e.kind), Some(ElementKind::Wall(_))) =>
+                *hatch == Hatch::Solid && rgb.is_none(),
+            _ => true,
+        }));
+        // and only while asked
+        assert_eq!(plan_view(&m, level, 1.2).items.len(), layered.len());
+    }
+
     use super::*;
 
     fn cut_footings(model: &Model, level: &str, cut: f64) -> usize {

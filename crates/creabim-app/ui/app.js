@@ -507,25 +507,28 @@
     const sizes = boxes.map((b) => naturalSize(b.querySelector(".menu")));
     // the menu itself: no taller than the room it opens into
     const tall = Math.max(60, up ? room.u : room.d);
-    const pos = [{ x: 0, y: 0, w: sizes[0].w + 2, h: Math.min(sizes[0].h + 2, tall) }];
+    // a box that scrolls keeps room for its scrollbar inside it
+    const wide = (k, h) => sizes[k].w + 2 + (sizes[k].h + 2 > h ? 10 : 0);
+    const h0 = Math.min(sizes[0].h + 2, tall);
+    const pos = [{ x: 0, y: 0, w: wide(0, h0), h: h0 }];
     if (up) pos[0].y = -pos[0].h;
     let right = true;
     for (let k = 1; k < boxes.length; k++) {
       const parent = pos[k - 1];
-      const w = sizes[k].w + 2;
       const h = sizes[k].h + 2;
       const btn = boxes[k - 1].querySelector(`.mi[data-row="${levelRow(k)}"]`);
       const pm = boxes[k - 1].querySelector(".menu");
       const rowTop = btn ? btn.offsetTop - pm.scrollTop - 5 : 0;
-      // beside the parent, overlapping its edge a little
-      let x = right ? parent.x + parent.w - 3 : parent.x - w + 3;
-      if (right && x + w > room.r) { right = false; x = parent.x - w + 3; }
-      if (!right && x < -room.l) { right = true; x = parent.x + parent.w - 3; }
       // level with its row, but inside the window
       const top = -(up ? room.u : 0);
       const bottom = up ? 0 : room.d;
       let y = parent.y + rowTop;
       const hh = Math.min(h, bottom - top);
+      const w = wide(k, hh);
+      // beside the parent, overlapping its edge a little
+      let x = right ? parent.x + parent.w - 3 : parent.x - w + 3;
+      if (right && x + w > room.r) { right = false; x = parent.x - w + 3; }
+      if (!right && x < -room.l) { right = true; x = parent.x + parent.w - 3; }
       if (y + hh > bottom) y = bottom - hh;
       if (y < top) y = top;
       pos.push({ x, y, w, h: hh });
@@ -538,8 +541,7 @@
       const p = pos[k];
       Object.assign(b.style, { left: `${p.x - minX}px`, top: `${p.y - minY}px`, width: `${p.w}px`, height: `${p.h}px` });
     });
-    const bar = sizes.some((s, k) => s.h + 2 > pos[k].h) ? 10 : 0;
-    const want = { w: Math.ceil(maxX - minX) + bar, h: Math.ceil(maxY - minY), lx: -minX, ly: up ? maxY : -minY };
+    const want = { w: Math.ceil(maxX - minX), h: Math.ceil(maxY - minY), lx: -minX, ly: up ? maxY : -minY };
     if (want.w === local.sentW && want.h === local.sentH && want.lx === local.sentL) return;
     local.sentW = want.w;
     local.sentH = want.h;

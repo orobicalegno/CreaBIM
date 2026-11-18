@@ -198,6 +198,19 @@ pub struct PlanGraphics {
     /// How what is cut is drawn (A4-11).
     #[serde(default, skip_serializing_if = "DrawingStyle::is_default")]
     pub drawing_style: DrawingStyle,
+    /// Walls by their outline only, as one mass with no lines between
+    /// their layers or where they join (Archicad's partial structure
+    /// display), from this scale on: 1 always, 200 at 1:200 and smaller
+    /// scales; none, every layer drawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall_outline_from: Option<f64>,
+}
+
+impl PlanGraphics {
+    /// Are walls drawn by their outline only at 1:`scale`?
+    pub fn walls_outlined(&self, scale: f64) -> bool {
+        self.wall_outline_from.is_some_and(|s| scale >= s - 1e-9)
+    }
 }
 
 /// How a view draws what it cuts (A4-11): a set of overrides over its
@@ -283,6 +296,7 @@ impl Default for PlanGraphics {
             below_grey: false,
             range: PlanRange::default(),
             drawing_style: DrawingStyle::default(),
+            wall_outline_from: None,
         }
     }
 }
