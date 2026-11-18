@@ -877,7 +877,8 @@ pub fn export_ifc4(model: &Model, opts: &ExportOptions) -> String {
             c.local_placement(Some(pl), start, None)
         };
         let mut parts = Vec::new();
-        for b in creabim_geom::opening::opening_boxes(o, wall) {
+        let shift = creabim_core::frame_shift(model, o);
+        for b in creabim_geom::opening::opening_boxes(o, wall, shift) {
             let size = b.hi - b.lo;
             let lo = if turned {
                 DVec3::new(width - b.hi.x, -b.hi.y, b.lo.z)

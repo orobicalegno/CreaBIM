@@ -195,6 +195,8 @@ pub fn holes(host: ElementId, w: &Wall, pattern: &ScreenPattern) -> Vec<Opening>
             frame: OpeningFrame::default(),
             flip_hand: false,
             flip_facing: false,
+            wrap: None,
+            frame_at: None,
         })
         .collect()
 }

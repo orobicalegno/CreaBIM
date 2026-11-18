@@ -249,6 +249,72 @@ pub(super) fn wall_fields(
     label
 }
 
+/// How a door or window is drawn: a window's way of opening (and the
+/// share of its first leaf), the subframe round it, and whether plans
+/// write its size. Shared by an opening's and a type's Properties.
+/// Returns the edit's name when one changed.
+pub(super) fn frame_drawing_fields(
+    ui: &mut egui::Ui,
+    kind: OpeningKind,
+    f: &mut creabim_core::OpeningFrame,
+) -> &'static str {
+    use creabim_core::Operation;
+    let mut label = "";
+    if kind == OpeningKind::Window {
+        let name =
+            |op: Option<Operation>| op.map_or("Glass in the frame (as before)", |o| o.label());
+        let mut op = f.operation;
+        crate::props::Combo::new("Opens")
+            .selected_text(name(op))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut op, None, name(None));
+                for o in Operation::ALL {
+                    // a kind keeps its own settings when picked again
+                    let pick = match (f.operation, o) {
+                        (Some(cur), o) if cur.same(o) => Some(cur),
+                        _ => Some(o),
+                    };
+                    if ui
+                        .selectable_label(op.is_some_and(|c| c.same(o)), o.label())
+                        .clicked()
+                    {
+                        op = pick;
+                    }
+                }
+            })
+            .response
+            .on_hover_text("How the window opens: its leaves in 3D and the symbol plans draw for it. A casement's hinge side and a sliding leaf's way follow the Hand flip.");
+        if op != f.operation {
+            f.operation = op;
+            label = "Window opening";
+        }
+        if let Some(Operation::DoubleCasement { first }) = &mut f.operation {
+            let mut pc = *first * 100.0;
+            if crate::props::row(ui, "First leaf", |ui| {
+                crate::props::fill(
+                    ui,
+                    egui::DragValue::new(&mut pc).range(10.0..=90.0).suffix(" %").speed(1.0),
+                )
+                .on_hover_text("The share of the width of the leaf at the wall's start side; 50 % is two the same.")
+                .changed()
+            }) {
+                *first = (pc / 100.0).clamp(0.1, 0.9);
+                label = "Window leaves";
+            }
+        }
+    }
+    if num(ui, "Subframe", &mut f.subframe, 0.0, 0.3) {
+        label = "Subframe";
+    }
+    if crate::props::switch(ui, &mut f.label, "Size in plans")
+        .on_hover_text("Plans write the opening's size beside it, in centimetres: width over height on the inside, the sill's height on the outside.")
+        .changed()
+    {
+        label = "Size in plans";
+    }
+    label
+}
+
 /// A door's hand and swing, or a window's facing. Returns the edit's name.
 pub(super) fn opening_fields(ui: &mut egui::Ui, model: &Model, o: &mut Opening) -> &'static str {
     let mut label = "";
@@ -310,6 +376,97 @@ pub(super) fn opening_fields(ui: &mut egui::Ui, model: &Model, o: &mut Opening) 
         }
         OpeningKind::Hole => {
             ui.label("A bare opening: a hole through the wall with no door or window in it");
+        }
+    }
+    // where the frame stands across the wall: against a face of one of
+    // its layers, on that layer's side
+    if o.kind != OpeningKind::Hole {
+        use creabim_core::{FrameAt, LayerFace};
+        let layers: Vec<String> = match model
+            .get(o.host)
+            .and_then(|e| creabim_core::assembly_of(model, e))
+        {
+            Some((_, a)) => a
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let name = l
+                        .material
+                        .and_then(|m| model.get(m))
+                        .map_or(l.function.label(), |e| e.name.as_str());
+                    format!("{}. {name} {}", i + 1, crate::units::len(l.thickness))
+                })
+                .collect(),
+            // a wall of one material is one layer
+            None => vec!["Wall".to_string()],
+        };
+        let name = |at: Option<FrameAt>| match at {
+            None => "Middle of the wall".to_string(),
+            Some(at) => format!(
+                "{}: {} face",
+                layers
+                    .get(at.layer.min(layers.len() - 1))
+                    .map_or("Wall", |s| s.as_str()),
+                match at.face {
+                    LayerFace::Exterior => "exterior",
+                    LayerFace::Interior => "interior",
+                }
+            ),
+        };
+        let mut at = o.frame_at;
+        let offset = at.map_or(0.0, |a| a.offset);
+        crate::props::Combo::new("Frame at")
+            .selected_text(name(at))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut at, None, name(None));
+                for layer in 0..layers.len() {
+                    for face in [LayerFace::Exterior, LayerFace::Interior] {
+                        let choice = Some(FrameAt {
+                            layer,
+                            face,
+                            offset,
+                        });
+                        ui.selectable_value(&mut at, choice, name(choice));
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Where the frame stands across the wall. On a layer's exterior face the frame's outer face is flush with it and the frame runs inwards; on its interior face the frame's inner face is flush with it and the frame runs outwards. Layers are counted from the exterior.");
+        if at != o.frame_at {
+            o.frame_at = at;
+            label = "Frame position"
+        }
+        if let Some(at) = &mut o.frame_at {
+            if num(ui, "Frame offset", &mut at.offset, -2.0, 2.0) {
+                label = "Frame offset"
+            }
+        }
+    }
+    // how the wall's layers line its reveals, where the wall is layered
+    let layered = model
+        .get(o.host)
+        .and_then(|e| creabim_core::assembly_of(model, e))
+        .map(|(_, a)| a.wrap_openings);
+    if let Some(by_wall) = layered {
+        use creabim_core::WrapSides;
+        let name = |w: Option<WrapSides>| match w {
+            None => format!("As the wall ({})", by_wall.label().to_lowercase()),
+            Some(w) => w.label().to_string(),
+        };
+        let mut wrap = o.wrap;
+        crate::props::Combo::new("Layers wrap")
+            .selected_text(name(wrap))
+            .show_ui(ui, |ui| {
+                for w in std::iter::once(None).chain(WrapSides::ALL.map(Some)) {
+                    ui.selectable_value(&mut wrap, w, name(w));
+                }
+            })
+            .response
+            .on_hover_text("Which faces of the wall its layers turn in from to line this opening's reveals, up to the frame. The wall's assembly sets it for all its openings; this one can differ.");
+        if wrap != o.wrap {
+            o.wrap = wrap;
+            label = "Wrap layers at opening"
         }
     }
     label
