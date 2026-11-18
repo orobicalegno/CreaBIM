@@ -153,3 +153,55 @@ impl CreaBimApp {
         }
     }
 }
+
+impl CreaBimApp {
+    /// AutoCAD's layer manager for the drafting layers: the tree of layers
+    /// and sub-layers, over the drawings.
+    pub(super) fn layer_manager_window(&mut self, ctx: &egui::Context) {
+        if !self.shell.layer_manager {
+            return;
+        }
+        let mut open = true;
+        let table = creabim_core::detail::layers(self.doc.model());
+        let mut edit = None;
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        egui::Window::new("Drafting layers")
+            .open(&mut open)
+            .collapsible(false)
+            .constrain_to(area)
+            .default_pos(area.right_top() + egui::vec2(-460.0, 24.0))
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height((area.height() - 90.0).max(160.0))
+                    .show(ui, |ui| {
+                        crate::detailtool::layer_tree(ui, &table, &mut edit);
+                    });
+                ui.label(
+                    egui::RichText::new(
+                        "A sub-layer is hidden with the layer it is under, and takes its colour and line type unless it has its own. Put linework on a layer in its Properties.",
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
+        let tx = match edit {
+            Some(crate::detailtool::LayerEdit::Set(t)) => {
+                Some(creabim_core::detail::set_layers(self.doc.model(), t))
+            }
+            Some(crate::detailtool::LayerEdit::Rename { old, new }) => Some(
+                creabim_core::detail::rename_layer(self.doc.model(), &old, &new),
+            ),
+            _ => None,
+        };
+        if let Some(tx) = tx.filter(|t| !t.ops.is_empty()) {
+            match self.doc.commit(tx) {
+                Ok(_) => self.status = "Drafting layers changed. Ctrl+Z to undo.".into(),
+                Err(e) => self.status = format!("Couldn't do that: {e}"),
+            }
+        }
+        if !open {
+            self.shell.layer_manager = false;
+        }
+    }
+}

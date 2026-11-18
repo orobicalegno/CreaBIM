@@ -57,6 +57,8 @@ pub(super) struct Shell {
     tab_tool: Option<Tool>,
     /// AutoCAD's Drafting Settings window is open.
     pub drafting_settings: bool,
+    /// The drafting layers' manager is open.
+    pub layer_manager: bool,
 }
 
 impl Default for Shell {
@@ -79,6 +81,7 @@ impl Default for Shell {
             bar: None,
             tab_tool: None,
             drafting_settings: false,
+            layer_manager: false,
         }
     }
 }
@@ -1322,6 +1325,9 @@ impl CreaBimApp {
                 .checked(!self.shell.settings.guides_hidden)
                 .icon("slash")
                 .hint("Hide the guides in every view without deleting them, and bring them back"),
+            Item::new("layers.manager", "Drafting layers…")
+                .icon("layers")
+                .hint("LAYER: the drafting layers as a tree, with sub-layers"),
             Item::new("view.grid", "Grid behind drawings")
                 .checked(self.shell.settings.plan_grid)
                 .icon("grid-3x3")
@@ -1636,6 +1642,7 @@ impl CreaBimApp {
                 }
             }
             "osnap.settings" => self.shell.drafting_settings = true,
+            "layers.manager" => self.shell.layer_manager = !self.shell.layer_manager,
             "osnap.once" => {
                 let kinds = crate::snaps::SnapSettings::SWITCH_KINDS;
                 let kind = match arg {
@@ -1971,7 +1978,7 @@ impl CreaBimApp {
             | "view.tempdims" | "view.ranges" | "view.reference" | "sheet.preview" | "sheet.text"
             // the grid and the axes behind drawings were never routed here
             // either: their menu items did nothing
-            | "view.grid" | "view.axes" | "view.north"
+            | "view.grid" | "view.axes" | "view.north" | "view.walloutline"
             | "sheet.north" | "sheet.scalebar" | "sheet.pdf" | "export.sheets" | "sheet.cloud"
             | "sheet.revtable" | "tag.all" | "sheet.keyplan" | "sheet.guides" => {
                 self.view_action(head)
@@ -2786,6 +2793,27 @@ impl CreaBimApp {
                 } else {
                     "Temporary dimensions on.".into()
                 };
+            }
+            "view.walloutline" => {
+                let Some(mut v) = self.view(id).cloned() else {
+                    return;
+                };
+                if !matches!(v.kind, ViewKind::Plan { .. } | ViewKind::Section { .. }) {
+                    return;
+                }
+                let on = !v.graphics.walls_outlined(v.scale);
+                v.graphics.wall_outline_from = on.then_some(1.0);
+                let r = self
+                    .doc
+                    .edit_merged(id, "Wall layers", |e| e.kind = ElementKind::View(v.clone()));
+                self.report(
+                    r,
+                    if on {
+                        "Walls by their outline only: one mass each, no lines between layers. Properties › Graphics › Walls can make it from a scale on."
+                    } else {
+                        "Walls with every layer."
+                    },
+                );
             }
             "view.north" => {
                 let Some(v) = self.view(id) else { return };
@@ -3818,6 +3846,17 @@ impl CreaBimApp {
                 "icon": "move", "on": self.shell.settings.axis_lines,
                 "hint": "The red X and green Y lines through the origin, in plans and in the 3D view",
             }));
+            if let Some(v) = self
+                .active_view
+                .and_then(|id| self.view(id))
+                .filter(|v| matches!(v.kind, ViewKind::Plan { .. } | ViewKind::Section { .. }))
+            {
+                options.push(json!({
+                    "kind": "toggle", "id": "view.walloutline", "label": "Walls: outline only",
+                    "icon": "square", "on": v.graphics.walls_outlined(v.scale),
+                    "hint": "Each wall drawn as one mass with only its outline, no lines between its layers: a cleaner drawing at 1:200 and 1:500",
+                }));
+            }
             if self
                 .active_view
                 .and_then(|id| self.view(id))

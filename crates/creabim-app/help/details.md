@@ -62,6 +62,17 @@ Select a piece of linework to style it in *Properties*:
 
 A **drafting layer** is a name you put linework on, to style and hide it together: axes, hidden edges, notes to self. Open *Drafting layers* at the foot of a line's *Properties* to add, rename and remove layers, and for each one set its colour and line type and tick whether it shows. Linework takes its layer's colour and line type unless it has its own. A hidden layer's linework is not drawn in any view or on any sheet.
 
+### Layers in a tree
+
+Layers can be nested, a layer with **sub-layers** under it ("Walls", and under it "Existing" and "New"). *View › Drafting layers…* opens the layer manager, the same list as in *Properties*, shown as a tree:
+
+- **+** on a layer adds a sub-layer under it; *Add layer* adds a top-level one.
+- **Under…** moves a layer under another one, or back to the top level.
+- **v** and **>** fold and unfold a layer's sub-layers.
+- Hiding a layer hides all its sub-layers with it.
+- A sub-layer takes its parent's colour and line type unless it has its own: a colour of its own ticked, a line type other than *Continuous*.
+- Removing a layer moves its sub-layers up to its parent; its linework stays, on no layer. Renaming one keeps its sub-layers under it.
+
 The layers belong to the project, so they are the same in every view. While you draw, pick the layer and line type of the next line in the tool options.
 
 ## Drawing on a sheet

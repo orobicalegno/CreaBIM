@@ -515,6 +515,24 @@ pub struct DraftLayer {
     /// Its linework is not drawn, in any view or on any sheet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// The layer it is a sub-layer of, by name: hidden with it, and with
+    /// its colour and line type unless it has its own (a colour of its
+    /// own, a line type other than Continuous).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+impl DraftLayer {
+    /// A new top-level layer, black and continuous.
+    pub fn named(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            color: None,
+            linetype: LineType::Continuous,
+            hidden: false,
+            parent: None,
+        }
+    }
 }
 
 /// The project's drafting layers: at most one such element per project,
@@ -530,6 +548,104 @@ impl DraftLayers {
         self.layers.iter().find(|l| l.name == name)
     }
 
+    /// Layer `name` and its parents, nearest first (a missing or looping
+    /// parent ends the chain).
+    pub fn chain(&self, name: &str) -> Vec<&DraftLayer> {
+        let mut out: Vec<&DraftLayer> = vec![];
+        let mut at = self.get(name);
+        while let Some(l) = at {
+            if out.iter().any(|o| o.name == l.name) {
+                break;
+            }
+            out.push(l);
+            at = l.parent.as_deref().and_then(|p| self.get(p));
+        }
+        out
+    }
+
+    /// Layer `name` as its linework is drawn: hidden when it or a parent
+    /// is, its colour and line type its own or else its nearest parent's.
+    pub fn effective(&self, name: &str) -> Option<DraftLayer> {
+        let chain = self.chain(name);
+        let first = (*chain.first()?).clone();
+        Some(DraftLayer {
+            hidden: chain.iter().any(|l| l.hidden),
+            color: chain.iter().find_map(|l| l.color),
+            linetype: chain
+                .iter()
+                .map(|l| l.linetype)
+                .find(|t| *t != LineType::Continuous)
+                .unwrap_or(LineType::Continuous),
+            ..first
+        })
+    }
+
+    /// How deep layer `name` sits in the tree: 0 at the top.
+    pub fn depth(&self, name: &str) -> usize {
+        self.chain(name).len().saturating_sub(1)
+    }
+
+    /// Its whole name through its parents, "Walls-Existing-Hatch".
+    pub fn path(&self, name: &str) -> String {
+        let mut names: Vec<&str> = self.chain(name).iter().map(|l| l.name.as_str()).collect();
+        names.reverse();
+        names.join("-")
+    }
+
+    /// Would making `child` a sub-layer of `parent` close a loop?
+    pub fn would_loop(&self, child: &str, parent: &str) -> bool {
+        self.chain(parent).iter().any(|l| l.name == child)
+    }
+
+    /// The layers in tree order, each with its depth: a parent, then its
+    /// sub-layers under it, in the order they are listed.
+    pub fn tree(&self) -> Vec<(usize, usize)> {
+        let mut out = vec![];
+        let tops: Vec<usize> = (0..self.layers.len())
+            .filter(|i| {
+                self.layers[*i]
+                    .parent
+                    .as_deref()
+                    .is_none_or(|p| self.get(p).is_none())
+            })
+            .collect();
+        fn walk(t: &DraftLayers, i: usize, depth: usize, out: &mut Vec<(usize, usize)>) {
+            if out.iter().any(|(j, _)| *j == i) {
+                return;
+            }
+            out.push((i, depth));
+            let name = &t.layers[i].name;
+            for k in 0..t.layers.len() {
+                if t.layers[k].parent.as_deref() == Some(name.as_str()) {
+                    walk(t, k, depth + 1, out);
+                }
+            }
+        }
+        for i in tops {
+            walk(self, i, 0, &mut out);
+        }
+        // a loop of parents left nothing at the top: list them anyway
+        for i in 0..self.layers.len() {
+            if !out.iter().any(|(j, _)| *j == i) {
+                out.push((i, 0));
+            }
+        }
+        out
+    }
+
+    /// Take layer `name` out; its sub-layers move up to its parent.
+    pub fn remove(&mut self, name: &str) {
+        let Some(i) = self.layers.iter().position(|l| l.name == name) else {
+            return;
+        };
+        let gone = self.layers.remove(i);
+        for l in &mut self.layers {
+            if l.parent.as_deref() == Some(name) {
+                l.parent = gone.parent.clone();
+            }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         for (i, l) in self.layers.iter().enumerate() {
             if l.name.trim().is_empty() {
@@ -537,6 +653,17 @@ impl DraftLayers {
             }
             if self.layers[..i].iter().any(|o| o.name == l.name) {
                 return Err(format!("two drafting layers are named {:?}", l.name));
+            }
+            if let Some(p) = &l.parent {
+                if self.get(p).is_none() {
+                    return Err(format!(
+                        "drafting layer {:?} is under {p:?}, which is gone",
+                        l.name
+                    ));
+                }
+                if self.would_loop(&l.name, p) {
+                    return Err(format!("drafting layer {:?} is under itself", l.name));
+                }
             }
         }
         Ok(())
@@ -565,6 +692,10 @@ pub fn rename_layer(model: &Model, old: &str, new: &str) -> Transaction {
     for l in &mut table.layers {
         if l.name == old {
             l.name = new.to_string();
+        }
+        // its sub-layers follow it
+        if l.parent.as_deref() == Some(old) {
+            l.parent = Some(new.to_string());
         }
     }
     let mut tx = set_layers(model, table);
@@ -657,7 +788,8 @@ impl DetailItem {
     /// a component, and for linework on a hidden layer, which isn't drawn.
     pub fn look(&self, layers: &DraftLayers) -> Option<LineLook> {
         let (_, pen) = self.kind.as_draft()?;
-        let layer = self.layer.as_deref().and_then(|n| layers.get(n));
+        let layer = self.layer.as_deref().and_then(|n| layers.effective(n));
+        let layer = layer.as_ref();
         if layer.is_some_and(|l| l.hidden) {
             return None;
         }

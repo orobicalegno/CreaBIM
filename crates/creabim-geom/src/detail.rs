@@ -223,7 +223,7 @@ pub fn detail_items(
             // hidden with its layer; else each piece where the symbol puts it
             if d.layer
                 .as_deref()
-                .and_then(|n| layers.get(n))
+                .and_then(|n| layers.effective(n))
                 .is_some_and(|l| l.hidden)
             {
                 return out;
@@ -482,12 +482,14 @@ mod tests {
                     color: Some([200, 0, 0]),
                     linetype: LineType::DashDot,
                     hidden: false,
+                    parent: None,
                 },
                 DraftLayer {
                     name: "Notes".into(),
                     color: None,
                     linetype: LineType::Continuous,
                     hidden: true,
+                    parent: None,
                 },
             ],
         };

@@ -856,7 +856,7 @@ pub fn detail_fields(
     layers: &creabim_core::DraftLayers,
     layer_edit: &mut Option<LayerEdit>,
 ) -> &'static str {
-    use creabim_core::{DraftLayer, DraftShape, LinePen, LineType};
+    use creabim_core::{DraftShape, LinePen, LineType};
     let mut label = "";
     let fillable = d.fillable();
     if let DetailKind::Symbol { .. } = d.kind {
@@ -914,7 +914,8 @@ pub fn detail_fields(
                 }
             });
         let by = |what: &str| format!("By {what}");
-        let on_layer = d.layer.as_deref().and_then(|n| layers.get(n));
+        let on_layer = d.layer.as_deref().and_then(|n| layers.effective(n));
+        let on_layer = on_layer.as_ref();
         crate::props::Combo::new("Line type")
             .selected_text(
                 d.linetype
@@ -961,9 +962,11 @@ pub fn detail_fields(
                 if ui.selectable_value(&mut d.layer, None, "None").changed() {
                     label = "Line layer";
                 }
-                for l in &layers.layers {
+                for (i, depth) in layers.tree() {
+                    let l = &layers.layers[i];
+                    let text = format!("{}{}", "    ".repeat(depth), l.name);
                     if ui
-                        .selectable_value(&mut d.layer, Some(l.name.clone()), &l.name)
+                        .selectable_value(&mut d.layer, Some(l.name.clone()), text)
                         .changed()
                     {
                         label = "Line layer";
@@ -1022,97 +1025,7 @@ pub fn detail_fields(
         }
         // the project's layers, edited here: they are every view's
         if crate::props::subsection(ui, "draft.layers", "Drafting layers", false) {
-            let mut table = layers.clone();
-            let mut changed = false;
-            let mut remove = None;
-            for (i, l) in table.layers.iter_mut().enumerate() {
-                crate::props::flow(ui, |ui| {
-                    let mut shown = !l.hidden;
-                    if ui
-                        .checkbox(&mut shown, "")
-                        .on_hover_text(
-                            "Show or hide this layer's linework, in every view and on sheets.",
-                        )
-                        .changed()
-                    {
-                        l.hidden = !shown;
-                        changed = true;
-                    }
-                    // a name is typed whole, then kept: every line on the
-                    // layer is renamed with it
-                    let id = ui.id().with(("draft.layer.name", i));
-                    let mut text = ui
-                        .data_mut(|m| m.get_temp::<String>(id))
-                        .unwrap_or_else(|| l.name.clone());
-                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0));
-                    if r.lost_focus() {
-                        ui.data_mut(|m| m.remove::<String>(id));
-                        if text.trim() != l.name && !text.trim().is_empty() {
-                            *layer_edit = Some(LayerEdit::Rename {
-                                old: l.name.clone(),
-                                new: text.trim().to_string(),
-                            });
-                        }
-                    } else if r.changed() || r.has_focus() {
-                        ui.data_mut(|m| m.insert_temp(id, text));
-                    }
-                    let mut own = l.color.is_some();
-                    if ui
-                        .checkbox(&mut own, "")
-                        .on_hover_text("Give the layer a colour; off, its linework is black.")
-                        .changed()
-                    {
-                        l.color = own.then_some([200, 0, 0]);
-                        changed = true;
-                    }
-                    if let Some(c) = &mut l.color {
-                        changed |= ui.color_edit_button_srgb(c).changed();
-                    }
-                    egui::ComboBox::from_id_salt(("draft.layer.type", i))
-                        .icon(crate::props::combo_icon)
-                        .width(84.0)
-                        .selected_text(l.linetype.label())
-                        .show_ui(ui, |ui| {
-                            for t in LineType::ALL {
-                                changed |=
-                                    ui.selectable_value(&mut l.linetype, t, t.label()).changed();
-                            }
-                        });
-                    if ui
-                        .small_button("✕")
-                        .on_hover_text("Remove the layer. Its linework stays, on no layer.")
-                        .clicked()
-                    {
-                        remove = Some(i);
-                    }
-                });
-            }
-            if let Some(i) = remove {
-                table.layers.remove(i);
-                changed = true;
-            }
-            if ui
-                .button("Add layer")
-                .on_hover_text(
-                    "A new drafting layer; rename it, then put linework on it with Layer above.",
-                )
-                .clicked()
-            {
-                let name = (1..)
-                    .map(|n| format!("Layer {n}"))
-                    .find(|n| table.get(n).is_none())
-                    .expect("unbounded");
-                table.layers.push(DraftLayer {
-                    name,
-                    color: None,
-                    linetype: LineType::Continuous,
-                    hidden: false,
-                });
-                changed = true;
-            }
-            if changed && layer_edit.is_none() {
-                *layer_edit = Some(LayerEdit::Set(table));
-            }
+            layer_tree(ui, layers, layer_edit);
         }
         return label;
     }
@@ -1231,6 +1144,197 @@ pub fn join_fields(ui: &mut egui::Ui, model: &Model, j: &mut JoinRule) -> &'stat
         }
     });
     label
+}
+
+/// The project's drafting layers as a tree, as AutoCAD's layer manager
+/// with nested layers: each row shows or hides the layer (and with it its
+/// sub-layers), names it, colours it and sets its line type; + adds a
+/// sub-layer under it; dragging a row by its handle onto another makes it
+/// a sub-layer of that one, onto "Top level" makes it a layer of its own.
+/// A change goes in `layer_edit`.
+pub fn layer_tree(
+    ui: &mut egui::Ui,
+    layers: &creabim_core::DraftLayers,
+    layer_edit: &mut Option<LayerEdit>,
+) {
+    use creabim_core::{DraftLayer, LineType};
+    let mut table = layers.clone();
+    let mut changed = false;
+    let mut remove: Option<String> = None;
+    let mut add_under: Option<Option<String>> = None;
+    let mut moved: Option<(String, Option<String>)> = None;
+    let fresh = |t: &creabim_core::DraftLayers| {
+        (1..)
+            .map(|n| format!("Layer {n}"))
+            .find(|n| t.get(n).is_none())
+            .expect("unbounded")
+    };
+    // which branches are folded, kept for the session
+    let folded_id = egui::Id::new("draft.layers.folded");
+    let mut folded: Vec<String> = ui.data(|d| d.get_temp(folded_id)).unwrap_or_default();
+    let mut fold_changed = false;
+    let tree = layers.tree();
+    let mut hide_below: Option<usize> = None;
+
+    for (i, depth) in tree {
+        if let Some(d) = hide_below {
+            if depth > d {
+                continue;
+            }
+            hide_below = None;
+        }
+        let name = layers.layers[i].name.clone();
+        let has_children = layers
+            .layers
+            .iter()
+            .any(|o| o.parent.as_deref() == Some(name.as_str()));
+        let is_folded = folded.contains(&name);
+        if is_folded {
+            hide_below = Some(depth);
+        }
+        let parent_hidden = layers.chain(&name).iter().skip(1).any(|l| l.hidden);
+        ui.horizontal(|ui| {
+            ui.add_space(14.0 * depth as f32);
+            // fold the branch
+            if has_children {
+                if ui
+                    .small_button(if is_folded { ">" } else { "v" })
+                    .on_hover_text("Fold or unfold its sub-layers")
+                    .clicked()
+                {
+                    if is_folded {
+                        folded.retain(|n| *n != name);
+                    } else {
+                        folded.push(name.clone());
+                    }
+                    fold_changed = true;
+                }
+            } else {
+                ui.add_space(22.0);
+            }
+            let l = table.layers.iter_mut().find(|l| l.name == name).expect("listed");
+            let mut shown = !l.hidden;
+            if ui
+                .add_enabled(!parent_hidden, egui::Checkbox::without_text(&mut shown))
+                .on_hover_text(if parent_hidden {
+                    "Hidden with the layer it is under"
+                } else {
+                    "Show or hide this layer's linework (and its sub-layers'), in every view and on sheets"
+                })
+                .changed()
+            {
+                l.hidden = !shown;
+                changed = true;
+            }
+            // a name is typed whole, then kept: every line on the layer is
+            // renamed with it
+            let id = ui.id().with(("draft.layer.name", &name));
+            let mut text = ui
+                .data_mut(|m| m.get_temp::<String>(id))
+                .unwrap_or_else(|| l.name.clone());
+            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(90.0));
+            if r.lost_focus() {
+                ui.data_mut(|m| m.remove::<String>(id));
+                if text.trim() != l.name && !text.trim().is_empty() {
+                    *layer_edit = Some(LayerEdit::Rename {
+                        old: l.name.clone(),
+                        new: text.trim().to_string(),
+                    });
+                }
+            } else if r.changed() || r.has_focus() {
+                ui.data_mut(|m| m.insert_temp(id, text));
+            }
+            let mut own = l.color.is_some();
+            if ui
+                .checkbox(&mut own, "")
+                .on_hover_text("Give the layer a colour of its own; off, it takes its parent's, or black.")
+                .changed()
+            {
+                l.color = own.then_some([200, 0, 0]);
+                changed = true;
+            }
+            if let Some(c) = &mut l.color {
+                changed |= ui.color_edit_button_srgb(c).changed();
+            }
+            egui::ComboBox::from_id_salt(("draft.layer.type", &name))
+                .icon(crate::props::combo_icon)
+                .width(84.0)
+                .selected_text(l.linetype.label())
+                .show_ui(ui, |ui| {
+                    for t in LineType::ALL {
+                        changed |= ui.selectable_value(&mut l.linetype, t, t.label()).changed();
+                    }
+                })
+                .response
+                .on_hover_text("Continuous takes the parent layer's line type");
+            if ui
+                .small_button("+")
+                .on_hover_text("Add a sub-layer under this one")
+                .clicked()
+            {
+                add_under = Some(Some(name.clone()));
+            }
+            // move it in the tree: under another layer, or to the top
+            ui.menu_button("Under…", |ui| {
+                if ui.button("Top level").clicked() {
+                    moved = Some((name.clone(), None));
+                    ui.close();
+                }
+                ui.separator();
+                for (k, d) in layers.tree() {
+                    let other = &layers.layers[k].name;
+                    if *other == name || layers.would_loop(&name, other) {
+                        continue;
+                    }
+                    let text = format!("{}{}", "    ".repeat(d), other);
+                    if ui.button(text).clicked() {
+                        moved = Some((name.clone(), Some(other.clone())));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Put this layer under another one, or make it a top-level layer");
+            if ui
+                .small_button("x")
+                .on_hover_text("Remove the layer. Its linework stays, on no layer; its sub-layers move up.")
+                .clicked()
+            {
+                remove = Some(name.clone());
+            }
+        });
+    }
+    if fold_changed {
+        ui.data_mut(|d| d.insert_temp(folded_id, folded));
+    }
+    if let Some(name) = remove {
+        table.remove(&name);
+        changed = true;
+    }
+    if let Some((name, parent)) = moved {
+        if let Some(l) = table.layers.iter_mut().find(|l| l.name == name) {
+            l.parent = parent;
+            changed = true;
+        }
+    }
+    if ui
+        .button("Add layer")
+        .on_hover_text(
+            "A new top-level drafting layer; rename it, then put linework on it with Layer above.",
+        )
+        .clicked()
+    {
+        add_under = Some(None);
+    }
+    if let Some(parent) = add_under {
+        let mut l = DraftLayer::named(&fresh(&table));
+        l.parent = parent;
+        table.layers.push(l);
+        changed = true;
+    }
+    if changed && layer_edit.is_none() {
+        *layer_edit = Some(LayerEdit::Set(table));
+    }
 }
 
 #[cfg(test)]

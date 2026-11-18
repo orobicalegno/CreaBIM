@@ -33,6 +33,7 @@ fn layers_are_kept_in_the_project_and_renamed_with_their_linework() {
             color: Some([200, 0, 0]),
             linetype: LineType::DashDot,
             hidden: false,
+            parent: None,
         }],
     };
     let tx = set_layers(doc.model(), table.clone());
@@ -146,4 +147,67 @@ fn linework_is_made_into_a_symbol_placed_and_exploded() {
     doc.commit(tx).unwrap();
     assert_eq!(details(&doc).len(), 2);
     assert!(symbols(doc.model()).is_empty());
+}
+
+#[test]
+fn sub_layers_hide_with_their_parent_and_take_its_colour_and_line_type() {
+    let mut walls = DraftLayer::named("Walls");
+    walls.color = Some([0, 0, 200]);
+    walls.linetype = LineType::Dashed;
+    let mut existing = DraftLayer::named("Existing");
+    existing.parent = Some("Walls".into());
+    let mut hatch = DraftLayer::named("Hatch");
+    hatch.parent = Some("Existing".into());
+    hatch.color = Some([0, 150, 0]);
+    let mut table = DraftLayers {
+        layers: vec![hatch, walls, existing],
+    };
+    assert!(table.validate().is_ok());
+    // listed as a tree: parent, then what is under it
+    let order: Vec<(&str, usize)> = table
+        .tree()
+        .into_iter()
+        .map(|(i, d)| (table.layers[i].name.as_str(), d))
+        .collect();
+    assert_eq!(order, vec![("Walls", 0), ("Existing", 1), ("Hatch", 2)]);
+    assert_eq!(table.path("Hatch"), "Walls-Existing-Hatch");
+    // its own colour, its grandparent's line type
+    let h = table.effective("Hatch").unwrap();
+    assert_eq!(
+        (h.color, h.linetype, h.hidden),
+        (Some([0, 150, 0]), LineType::Dashed, false)
+    );
+    assert_eq!(
+        table.effective("Existing").unwrap().color,
+        Some([0, 0, 200])
+    );
+    // hiding the top hides the branch
+    table.layers[1].hidden = true;
+    assert!(table.effective("Hatch").unwrap().hidden);
+    // no loops
+    assert!(table.would_loop("Walls", "Hatch"));
+    table.layers[1].parent = Some("Hatch".into());
+    assert!(table.validate().is_err());
+    table.layers[1].parent = None;
+    // removed, its sub-layers move up
+    table.remove("Existing");
+    assert_eq!(table.get("Hatch").unwrap().parent.as_deref(), Some("Walls"));
+}
+
+#[test]
+fn renaming_a_layer_keeps_its_sub_layers_under_it() {
+    let mut doc = Document::new();
+    let mut child = DraftLayer::named("Doors");
+    child.parent = Some("Plan".into());
+    let table = DraftLayers {
+        layers: vec![DraftLayer::named("Plan"), child],
+    };
+    doc.commit(set_layers(doc.model(), table)).unwrap();
+    doc.commit(rename_layer(doc.model(), "Plan", "Ground floor"))
+        .unwrap();
+    let t = layers(doc.model());
+    assert_eq!(
+        t.get("Doors").unwrap().parent.as_deref(),
+        Some("Ground floor")
+    );
 }
