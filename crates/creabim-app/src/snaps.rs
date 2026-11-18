@@ -56,7 +56,19 @@ pub enum SnapKind {
     /// increment when that is on.
     Grid,
     /// An even division of an edge: its thirds, quarters… (MU34 B1).
+    /// AutoCAD's Node.
     Division,
+    /// The centre of a closed shape (AutoCAD's Geometric Center).
+    GeoCenter,
+    /// Where a text or a symbol is placed from (AutoCAD's Insertion).
+    Insertion,
+    /// Where a line from the start point touches a circle or arc.
+    Tangent,
+    /// Where two lines would cross if they ran on (AutoCAD's Apparent
+    /// intersection, extended).
+    Apparent,
+    /// Ortho (F8): square to the X or Y axis through the start point.
+    Ortho,
 }
 
 static DIVISIONS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
@@ -76,16 +88,16 @@ impl SnapKind {
         match self {
             SnapKind::Endpoint => "Endpoint",
             SnapKind::Midpoint => "Midpoint",
-            SnapKind::Center => "Centre",
+            SnapKind::Center => "Center",
             SnapKind::Quadrant => "Quadrant",
             SnapKind::Intersection => "Intersection",
             SnapKind::Perpendicular => "Perpendicular",
-            SnapKind::OnEdge => "On edge",
+            SnapKind::OnEdge => "Nearest",
             SnapKind::OnFace => "On face",
             SnapKind::Guide => "On guide",
             SnapKind::OnGridLine => "On grid/level",
-            SnapKind::AxisX => "On X axis",
-            SnapKind::AxisY => "On Y axis",
+            SnapKind::AxisX => "Polar: 0°",
+            SnapKind::AxisY => "Polar: 90°",
             SnapKind::Aligned => "Aligned",
             SnapKind::AlignedCross => "Aligned both ways",
             SnapKind::OnTempGuide => "On guide line",
@@ -93,7 +105,12 @@ impl SnapKind {
             SnapKind::UnderlayFace => "Underlay face",
             SnapKind::UnderlayCentre => "Underlay centreline",
             SnapKind::Grid => "",
-            SnapKind::Division => "Division",
+            SnapKind::Division => "Node",
+            SnapKind::GeoCenter => "Geometric center",
+            SnapKind::Insertion => "Insertion",
+            SnapKind::Tangent => "Tangent",
+            SnapKind::Apparent => "Extended intersection",
+            SnapKind::Ortho => "Ortho",
         }
     }
 
@@ -108,13 +125,18 @@ impl SnapKind {
                 | SnapKind::Center
                 | SnapKind::Quadrant
                 | SnapKind::Intersection
+                | SnapKind::GeoCenter
+                | SnapKind::Insertion
+                | SnapKind::Tangent
+                | SnapKind::Apparent
         )
     }
 }
 
 /// Which snaps are on, with a master switch over them all (F3). Holding Alt
 /// suspends them while picking; see [`SnapSettings::live`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SnapSettings {
     pub on: bool,
     pub endpoint: bool,
@@ -129,14 +151,31 @@ pub struct SnapSettings {
     /// Grid lines (and level lines in sections), and where they cross.
     pub grid_lines: bool,
     pub guides: bool,
-    /// Square to the X and Y axes through where a line started.
+    /// Polar tracking (F10): the X and Y axes through where a line
+    /// started, and the angles of the polar increment.
     pub axis: bool,
     /// In line with the other points of the shape being drawn, and where
-    /// two such alignments cross.
+    /// two such alignments cross (Volumen's own, off as in AutoCAD).
     pub tracking: bool,
-    /// Temporary guide lines from points and edges the pointer rests on,
-    /// and where they cross.
+    /// Object snap tracking (F11): lines through the points the pointer
+    /// rests on, and where they cross.
     pub references: bool,
+    /// AutoCAD's Node: the even divisions of edges, and points.
+    pub node: bool,
+    /// The centre of closed shapes.
+    pub geo_center: bool,
+    /// Where texts and symbols are placed from.
+    pub insertion: bool,
+    /// Touching circles and arcs from the start point.
+    pub tangent: bool,
+    /// Along an edge rested on, past its ends.
+    pub extension: bool,
+    /// Where two lines would cross if they ran on.
+    pub apparent: bool,
+    /// Through the start point, parallel to an edge rested on.
+    pub parallel: bool,
+    /// Ortho (F8): from the start point only square to X or Y.
+    pub ortho: bool,
     /// Grid snap (Alt+S): points land on a grid of `step_um` in space, and
     /// lengths along guide and axis lines round to it. Off by default, and
     /// off whenever the app starts: drags and points are free unless you
@@ -187,7 +226,7 @@ pub fn set_current_marks(every: f64) {
 
 impl Default for SnapSettings {
     fn default() -> Self {
-        Self::ALL
+        Self::AUTOCAD
     }
 }
 
@@ -207,10 +246,96 @@ impl SnapSettings {
         axis: true,
         tracking: true,
         references: true,
+        node: true,
+        geo_center: true,
+        insertion: true,
+        tangent: true,
+        extension: true,
+        apparent: true,
+        parallel: true,
+        ortho: false,
         increment: false,
         marks: false,
         step_um: 50_000,
     };
+
+    /// As AutoCAD starts: Endpoint, Center, Intersection and Extension
+    /// (OSMODE 4133), polar tracking and object snap tracking on, Ortho off.
+    pub const AUTOCAD: Self = Self {
+        on: true,
+        endpoint: true,
+        midpoint: false,
+        intersection: true,
+        perpendicular: false,
+        nearest: false,
+        center: true,
+        quadrant: false,
+        grid_lines: true,
+        guides: true,
+        axis: true,
+        tracking: false,
+        references: true,
+        node: false,
+        geo_center: false,
+        insertion: false,
+        tangent: false,
+        extension: true,
+        apparent: false,
+        parallel: false,
+        ortho: false,
+        increment: false,
+        marks: false,
+        step_um: 50_000,
+    };
+
+    /// Only `kind` for one pick: AutoCAD's object snap override (Shift +
+    /// right-click, or typing END, MID…).
+    pub fn only(self, kind: SnapKind) -> Self {
+        let none = Self {
+            endpoint: false,
+            midpoint: false,
+            intersection: false,
+            perpendicular: false,
+            nearest: false,
+            center: false,
+            quadrant: false,
+            grid_lines: true,
+            guides: true,
+            axis: false,
+            tracking: false,
+            references: false,
+            node: false,
+            geo_center: false,
+            insertion: false,
+            tangent: false,
+            extension: false,
+            apparent: false,
+            parallel: false,
+            ortho: false,
+            ..self
+        };
+        let mut s = none;
+        match kind {
+            SnapKind::Endpoint => s.endpoint = true,
+            SnapKind::Midpoint => s.midpoint = true,
+            SnapKind::Center => s.center = true,
+            SnapKind::GeoCenter => s.geo_center = true,
+            SnapKind::Division => s.node = true,
+            SnapKind::Quadrant => s.quadrant = true,
+            SnapKind::Intersection => s.intersection = true,
+            SnapKind::Insertion => s.insertion = true,
+            SnapKind::Perpendicular => s.perpendicular = true,
+            SnapKind::Tangent => s.tangent = true,
+            SnapKind::OnEdge => s.nearest = true,
+            SnapKind::Apparent => s.apparent = true,
+            SnapKind::OnTempGuide => s.extension = true,
+            SnapKind::GuideCross => s.parallel = true,
+            // None: no object snap at all for this pick
+            SnapKind::Grid => s.on = false,
+            _ => {}
+        }
+        s
+    }
 
     /// These settings as they apply this frame: holding Alt turns them all
     /// off for the moment.
@@ -244,7 +369,12 @@ impl SnapSettings {
             && match kind {
                 SnapKind::Endpoint => self.endpoint,
                 SnapKind::Midpoint => self.midpoint,
-                SnapKind::Division => divisions() > 2,
+                SnapKind::Division => self.node && divisions() > 2,
+                SnapKind::GeoCenter => self.geo_center,
+                SnapKind::Insertion => self.insertion,
+                SnapKind::Tangent => self.tangent,
+                SnapKind::Apparent => self.apparent,
+                SnapKind::Ortho => self.ortho,
                 SnapKind::Center => self.center,
                 SnapKind::Quadrant => self.quadrant,
                 SnapKind::Intersection => self.intersection,
@@ -257,7 +387,9 @@ impl SnapSettings {
                 SnapKind::OnGridLine => self.grid_lines,
                 SnapKind::AxisX | SnapKind::AxisY => self.axis,
                 SnapKind::Aligned | SnapKind::AlignedCross => self.tracking,
-                SnapKind::OnTempGuide | SnapKind::GuideCross => self.references,
+                SnapKind::OnTempGuide | SnapKind::GuideCross => {
+                    self.references || self.extension || self.parallel || self.axis
+                }
                 SnapKind::Grid => self.increment,
             }
     }
@@ -312,24 +444,52 @@ impl SnapSettings {
         }
     }
 
-    /// Each switch with its label, in the order the snap bar lists them.
-    pub fn switches(&mut self) -> [(&'static str, &mut bool); 12] {
+    /// AutoCAD's object snap modes with their labels, in its order.
+    pub fn switches(&mut self) -> [(&'static str, &mut bool); 14] {
         [
             ("Endpoint", &mut self.endpoint),
             ("Midpoint", &mut self.midpoint),
-            ("Intersection", &mut self.intersection),
-            ("Perpendicular", &mut self.perpendicular),
-            ("Nearest on edge", &mut self.nearest),
-            ("Centre", &mut self.center),
+            ("Center", &mut self.center),
+            ("Geometric center", &mut self.geo_center),
+            ("Node", &mut self.node),
             ("Quadrant", &mut self.quadrant),
+            ("Intersection", &mut self.intersection),
+            ("Extension", &mut self.extension),
+            ("Insertion", &mut self.insertion),
+            ("Perpendicular", &mut self.perpendicular),
+            ("Tangent", &mut self.tangent),
+            ("Nearest", &mut self.nearest),
+            ("Apparent intersection", &mut self.apparent),
+            ("Parallel", &mut self.parallel),
+        ]
+    }
+
+    /// The kind of snap each of [`SnapSettings::switches`] is, for its
+    /// marker.
+    pub const SWITCH_KINDS: [SnapKind; 14] = [
+        SnapKind::Endpoint,
+        SnapKind::Midpoint,
+        SnapKind::Center,
+        SnapKind::GeoCenter,
+        SnapKind::Division,
+        SnapKind::Quadrant,
+        SnapKind::Intersection,
+        SnapKind::OnTempGuide,
+        SnapKind::Insertion,
+        SnapKind::Perpendicular,
+        SnapKind::Tangent,
+        SnapKind::OnEdge,
+        SnapKind::Apparent,
+        SnapKind::GuideCross,
+    ];
+
+    /// What Volumen snaps to besides AutoCAD's modes: objects of its own
+    /// (grid and level lines, guides) and its alignment with the shape.
+    pub fn extras(&mut self) -> [(&'static str, &mut bool); 3] {
+        [
             ("Grid and level lines", &mut self.grid_lines),
             ("Guides", &mut self.guides),
-            ("X/Y axis tracking", &mut self.axis),
             ("Alignment with the shape's points", &mut self.tracking),
-            (
-                "Guide lines from rested points and edges",
-                &mut self.references,
-            ),
         ]
     }
 }
@@ -754,6 +914,12 @@ impl Snapper {
                         let j = (i + 1) % points.len();
                         s.add_segment(p3(points[i]), p3(points[j]), Source::Edge, Some(id));
                     }
+                    if let Some(c) = centroid(points) {
+                        s.point(p3(c), SnapKind::GeoCenter, Source::Edge, Some(id));
+                    }
+                }
+                PlanItem::Text { at, .. } => {
+                    s.point(p3(*at), SnapKind::Insertion, Source::Edge, Some(id));
                 }
                 PlanItem::Arc {
                     center,
@@ -985,12 +1151,14 @@ impl Snapper {
         let near = |p: DVec3| {
             project(p)
                 .map(|s| s.distance(cursor))
-                .filter(|d| *d < TOLERANCE)
+                .filter(|d| *d < aperture())
         };
         // points beat edges: the nearest point within tolerance, by priority
         let rank = |k: SnapKind| match k {
             SnapKind::Endpoint => 0.0,
             SnapKind::Intersection => 0.5,
+            SnapKind::Insertion => 0.8,
+            SnapKind::GeoCenter => 1.0,
             SnapKind::Midpoint | SnapKind::Center | SnapKind::Quadrant => 1.0,
             SnapKind::Division => 1.2,
             _ => 2.0,
@@ -1017,6 +1185,104 @@ impl Snapper {
                 .iter()
                 .filter(|s| cfg.takes(s.src) && !self.hidden(s.host))
         };
+        // touching a circle or arc from the start point
+        if let (Some(f), true) = (from, cfg.allows(SnapKind::Tangent)) {
+            let mut best: Option<(f32, DVec3, Option<ElementId>)> = None;
+            let mut seen: Vec<(DVec3, f64)> = vec![];
+            for sg in segments() {
+                let Some((c, r, ..)) = sg.arc else { continue };
+                if seen
+                    .iter()
+                    .any(|(k, q)| k.distance(c) < 1e-9 && (q - r).abs() < 1e-9)
+                {
+                    continue;
+                }
+                seen.push((c, r));
+                let (c2, f2) = (c.truncate(), f.truncate());
+                let dist = c2.distance(f2);
+                if dist <= r + 1e-9 {
+                    continue;
+                }
+                let base = (f2 - c2).to_angle();
+                let half = (r / dist).acos();
+                for t in [base + half, base - half] {
+                    let tp = (c2 + DVec2::from_angle(t) * r).extend(c.z);
+                    // on the arc as drawn, not only on its circle
+                    let on = segments().any(|g| {
+                        g.arc
+                            .is_some_and(|(k, q, ..)| k.distance(c) < 1e-9 && (q - r).abs() < 1e-9)
+                            && closest_on_segment(g.a, g.b, tp).distance(tp) < r * 0.02 + 1e-6
+                    });
+                    if !on {
+                        continue;
+                    }
+                    if let Some(d) = near(tp) {
+                        if best.is_none_or(|b| d < b.0) {
+                            best = Some((d, tp, sg.host));
+                        }
+                    }
+                }
+            }
+            if let Some((_, p, host)) = best {
+                return Some(Guided::plain(
+                    Snap {
+                        p,
+                        kind: SnapKind::Tangent,
+                        host,
+                    },
+                    None,
+                ));
+            }
+        }
+        // where two lines near the pointer would cross, run on
+        if cfg.allows(SnapKind::Apparent) {
+            let mut lines: Vec<(f32, DVec3, DVec3, Option<ElementId>)> = segments()
+                .filter(|g| g.arc.is_none())
+                .filter_map(|g| {
+                    let (sa, sb) = (project(g.a)?, project(g.b)?);
+                    let d = sb - sa;
+                    let len = d.length();
+                    if len < 1e-3 {
+                        return None;
+                    }
+                    let off = ((cursor - sa).x * d.y - (cursor - sa).y * d.x).abs() / len;
+                    (off < aperture()).then_some((off, g.a, g.b, g.host))
+                })
+                .collect();
+            lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+            lines.truncate(48);
+            let mut best: Option<(f32, DVec3, Option<ElementId>)> = None;
+            for i in 0..lines.len() {
+                for j in i + 1..lines.len() {
+                    let (_, a, b, h) = lines[i];
+                    let (_, c, d, _) = lines[j];
+                    let Some(p) = line_line(
+                        a.truncate(),
+                        (b - a).truncate(),
+                        c.truncate(),
+                        (d - c).truncate(),
+                    ) else {
+                        continue;
+                    };
+                    let p = p.extend(a.z);
+                    if let Some(dd) = near(p) {
+                        if best.is_none_or(|q| dd < q.0) {
+                            best = Some((dd, p, h));
+                        }
+                    }
+                }
+            }
+            if let Some((_, p, host)) = best {
+                return Some(Guided::plain(
+                    Snap {
+                        p,
+                        kind: SnapKind::Apparent,
+                        host,
+                    },
+                    None,
+                ));
+            }
+        }
         // the temporary guides near the pointer
         let near_guides: Vec<(f32, usize)> = if cfg.allows(SnapKind::OnTempGuide) {
             guides
@@ -1026,7 +1292,7 @@ impl Snapper {
                     let d = g
                         .shape
                         .screen_distance(cursor, project, g.z.unwrap_or(0.0))?;
-                    (d < TOLERANCE).then_some((d, i))
+                    (d < aperture()).then_some((d, i))
                 })
                 .collect()
         } else {
@@ -1039,7 +1305,7 @@ impl Snapper {
         let mut lines: Vec<(f32, Line)> = vec![];
         if let Some(free) = free {
             let mut all: Vec<Line> = vec![];
-            if let (Some(f), true) = (from, cfg.allows(SnapKind::AxisX)) {
+            if let (Some(f), true) = (from, cfg.allows(SnapKind::AxisX) && !cfg.ortho) {
                 for along_x in [true, false] {
                     all.push(Line {
                         at: f,
@@ -1066,7 +1332,7 @@ impl Snapper {
                 let foot = l.foot(free);
                 if let (Some(sp), Some(sf)) = (project(foot), project(free)) {
                     let d = sp.distance(sf);
-                    if d < TOLERANCE && foot.distance(l.at) > 1e-3 {
+                    if d < aperture() && foot.distance(l.at) > 1e-3 {
                         lines.push((d, l));
                     }
                 }
@@ -1103,7 +1369,7 @@ impl Snapper {
                         continue;
                     };
                     let t = screen_t(sa, sb, cursor);
-                    if (sa + (sb - sa) * t).distance(cursor) >= TOLERANCE {
+                    if (sa + (sb - sa) * t).distance(cursor) >= aperture() {
                         continue;
                     }
                     let (a, b) = (s.a.truncate(), s.b.truncate());
@@ -1197,7 +1463,7 @@ impl Snapper {
             let t = screen_t(sa, sb, cursor);
             let on = sa + (sb - sa) * t;
             let d = on.distance(cursor);
-            if d < TOLERANCE && best.is_none_or(|(bd, _)| d < bd) {
+            if d < aperture() && best.is_none_or(|(bd, _)| d < bd) {
                 let p = s.a + (s.b - s.a) * t as f64;
                 best = Some((
                     d,
@@ -1248,6 +1514,24 @@ impl Snapper {
             return Some(Guided::plain(s, None));
         }
         let step = cfg.step(self.grid);
+        // Ortho: square to X or Y from the start point, whichever is nearer
+        // the pointer; object snaps above still win
+        if let (Some(f), Some(free), true) = (from, free, cfg.allows(SnapKind::Ortho)) {
+            let d = free - f;
+            let p = if d.x.abs() >= d.y.abs() {
+                DVec3::new(f.x + grid_round(d.x, step), f.y, f.z)
+            } else {
+                DVec3::new(f.x, f.y + grid_round(d.y, step), f.z)
+            };
+            return Some(Guided::plain(
+                Snap {
+                    p,
+                    kind: SnapKind::Ortho,
+                    host: None,
+                },
+                None,
+            ));
+        }
         // a point on the nearest guide, when no alignment is as near: a
         // round distance along it from where it runs from
         let guide = near_guides
@@ -1331,6 +1615,22 @@ impl Snapper {
             )
         })
     }
+}
+
+/// The centre of the area a closed outline holds (AutoCAD's geometric
+/// center), none for one with no area.
+pub fn centroid(pts: &[DVec2]) -> Option<DVec2> {
+    if pts.len() < 3 {
+        return None;
+    }
+    let (mut a, mut c) = (0.0, DVec2::ZERO);
+    for i in 0..pts.len() {
+        let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+        let k = p.perp_dot(q);
+        a += k;
+        c += (p + q) * k;
+    }
+    (a.abs() > 1e-12).then(|| c / (3.0 * a))
 }
 
 /// The quarter angles (multiples of 90°) from `lo` to `hi`, radians.
@@ -1582,138 +1882,248 @@ pub fn face_centres(mesh: &creabim_geom::mesh::TriMesh) -> Vec<DVec3> {
     out
 }
 
-/// Draw the snap marker at `at`: a square for ends, a triangle for
-/// midpoints, a cross for intersections, a right angle for perpendicular
-/// feet, a circle for centres, a diamond for quadrants, a small circle on
-/// edges. Axis snaps draw their axis from `from`.
+static MARKER_PX: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(6);
+static TOOLTIPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static APERTURE_PX: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(10);
+
+/// AutoSnap's look, for this frame: the marker's half size in pixels,
+/// whether its tooltip shows, and the aperture (how near the pointer must
+/// be, in pixels).
+pub fn set_autosnap(marker: u8, tooltip: bool, aperture: u8) {
+    use std::sync::atomic::Ordering::Relaxed;
+    MARKER_PX.store(marker.clamp(2, 20), Relaxed);
+    TOOLTIPS.store(tooltip, Relaxed);
+    APERTURE_PX.store(aperture.clamp(3, 50), Relaxed);
+}
+
+/// How near, in pixels, the pointer must be for a snap to take it.
+pub fn aperture() -> f32 {
+    APERTURE_PX.load(std::sync::atomic::Ordering::Relaxed) as f32
+}
+
+thread_local! {
+    static MARK: std::cell::Cell<Option<Pos2>> = const { std::cell::Cell::new(None) };
+}
+
+/// A new frame: no snap marker drawn yet.
+pub fn begin_marks() {
+    MARK.with(|m| m.set(None));
+}
+
+/// Where this frame's snap marker is, for AutoSnap's magnet: the
+/// crosshairs lock onto it.
+pub fn last_mark() -> Option<Pos2> {
+    MARK.with(|m| m.get())
+}
+
+/// AutoSnap's marker colour: AutoCAD's green, darker on light paper.
+pub const MARKER: Color32 = Color32::from_rgb(0, 160, 40);
+
+/// Draw the snap marker at `at` as AutoCAD does, and its tooltip.
 pub fn draw(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) {
-    let Some(c) = marker(painter, snap, at, from) else {
+    let Some(_) = marker(painter, snap, at, from) else {
         return;
     };
-    let label = snap.kind.label();
-    if !label.is_empty() {
-        painter.text(
-            at + egui::vec2(10.0, 10.0),
-            egui::Align2::LEFT_TOP,
-            label,
-            egui::FontId::proportional(12.0),
-            c,
-        );
+    tooltip(painter, at, snap.kind.label());
+}
+
+/// AutoCAD's snap tooltip: the mode's name in a small box below right of
+/// the marker.
+pub fn tooltip(painter: &Painter, at: Pos2, label: &str) {
+    if label.is_empty() || !TOOLTIPS.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
     }
+    let font = egui::FontId::proportional(12.0);
+    let galley = painter.layout_no_wrap(label.to_string(), font, Color32::from_gray(20));
+    let r = MARKER_PX.load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let min = at + egui::vec2(r + 10.0, r + 10.0);
+    let rect = egui::Rect::from_min_size(min, galley.size() + egui::vec2(10.0, 4.0));
+    painter.rect_filled(rect, 2.0, Color32::from_rgb(255, 255, 225));
+    painter.rect_stroke(
+        rect,
+        2.0,
+        Stroke::new(1.0, Color32::from_gray(120)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(min + egui::vec2(5.0, 2.0), galley, Color32::from_gray(20));
+}
+
+/// A snap mode's marker alone, for its row in the settings.
+pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
+    let keep = MARK.with(|m| m.get());
+    let k = match kind {
+        // Extension and Parallel, drawn as AutoCAD's
+        SnapKind::OnTempGuide => {
+            let s = Stroke::new(1.5, MARKER);
+            for i in 0..3 {
+                let x = -6.0 + 4.5 * i as f32;
+                painter.line_segment([at + egui::vec2(x, 0.0), at + egui::vec2(x + 2.0, 0.0)], s);
+            }
+            painter.line_segment([at + egui::vec2(-2.0, -3.0), at + egui::vec2(-2.0, 3.0)], s);
+            return;
+        }
+        SnapKind::GuideCross => {
+            let s = Stroke::new(1.5, MARKER);
+            painter.line_segment([at + egui::vec2(-5.0, 4.0), at + egui::vec2(1.0, -4.0)], s);
+            painter.line_segment([at + egui::vec2(-1.0, 4.0), at + egui::vec2(5.0, -4.0)], s);
+            return;
+        }
+        k => k,
+    };
+    let m = MARKER_PX.swap(5, std::sync::atomic::Ordering::Relaxed);
+    marker(
+        painter,
+        Snap {
+            p: DVec3::ZERO,
+            kind: k,
+            host: None,
+        },
+        at,
+        None,
+    );
+    MARKER_PX.store(m, std::sync::atomic::Ordering::Relaxed);
+    MARK.with(|c| c.set(keep));
 }
 
 /// The marker of [`draw`] without its label; its colour, if it drew one.
+/// AutoCAD's glyphs: a square for Endpoint, a triangle for Midpoint, a
+/// circle for Center, a circle with a star for Geometric center, a circle
+/// crossed for Node, a diamond for Quadrant, an X for Intersection, a
+/// square in a square for Insertion, a right angle for Perpendicular, a
+/// circle with a bar on top for Tangent, an hourglass for Nearest, an X in
+/// a square for Apparent intersection.
 fn marker(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) -> Option<Color32> {
     let c = match snap.kind {
-        SnapKind::Endpoint | SnapKind::Intersection => Color32::from_rgb(20, 150, 60),
-        SnapKind::Midpoint | SnapKind::Division => Color32::from_rgb(20, 120, 200),
-        SnapKind::Center | SnapKind::Quadrant => Color32::from_rgb(200, 120, 20),
-        SnapKind::Perpendicular => Color32::from_rgb(160, 60, 180),
-        SnapKind::OnEdge | SnapKind::Guide | SnapKind::OnGridLine => Color32::from_rgb(200, 40, 40),
-        SnapKind::OnFace => Color32::from_rgb(40, 110, 200),
-        SnapKind::AxisX => Color32::from_rgb(220, 50, 50),
-        SnapKind::AxisY => Color32::from_rgb(40, 160, 60),
         SnapKind::Aligned | SnapKind::AlignedCross => TRACK,
         SnapKind::OnTempGuide | SnapKind::GuideCross => GUIDE,
-        SnapKind::UnderlayFace | SnapKind::UnderlayCentre => Color32::from_rgb(20, 140, 150),
         SnapKind::Grid => return None,
+        _ => MARKER,
     };
     let s = Stroke::new(2.0, c);
-    let r = 6.0;
+    let r = MARKER_PX.load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let v = egui::vec2;
+    if c == MARKER {
+        MARK.with(|m| m.set(Some(at)));
+    }
+    let seg = |a: egui::Vec2, b: egui::Vec2| painter.line_segment([at + a, at + b], s);
+    let square = |k: f32| {
+        painter.rect_stroke(
+            egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * k)),
+            0.0,
+            s,
+            egui::StrokeKind::Middle,
+        );
+    };
+    let cross = |k: f32| {
+        seg(v(-k, -k), v(k, k));
+        seg(v(-k, k), v(k, -k));
+    };
     match snap.kind {
-        SnapKind::Endpoint => {
-            painter.rect_stroke(
-                egui::Rect::from_center_size(at, egui::Vec2::splat(r * 2.0)),
-                0.0,
-                s,
-                egui::StrokeKind::Middle,
-            );
-        }
-        SnapKind::Division => {
-            painter.line_segment([at + egui::vec2(0.0, -r), at + egui::vec2(0.0, r)], s);
-            painter.circle_stroke(at, r * 0.55, s);
-        }
+        SnapKind::Endpoint => square(r),
         SnapKind::Midpoint => {
             painter.add(egui::Shape::closed_line(
-                vec![
-                    at + egui::vec2(0.0, -r),
-                    at + egui::vec2(r, r * 0.8),
-                    at + egui::vec2(-r, r * 0.8),
-                ],
+                vec![at + v(0.0, -r), at + v(r, r * 0.8), at + v(-r, r * 0.8)],
                 s,
             ));
         }
         SnapKind::Center => {
             painter.circle_stroke(at, r, s);
-            painter.circle_filled(at, 1.5, c);
+        }
+        SnapKind::GeoCenter => {
+            painter.circle_stroke(at, r, s);
+            // a star inside
+            for k in 0..3 {
+                let a = std::f32::consts::PI * k as f32 / 3.0 + std::f32::consts::FRAC_PI_2;
+                let d = v(a.cos(), a.sin()) * r * 0.6;
+                seg(-d, d);
+            }
+        }
+        SnapKind::Division => {
+            painter.circle_stroke(at, r, s);
+            cross(r * 0.7);
         }
         SnapKind::Quadrant => {
             painter.add(egui::Shape::closed_line(
                 vec![
-                    at + egui::vec2(0.0, -r),
-                    at + egui::vec2(r, 0.0),
-                    at + egui::vec2(0.0, r),
-                    at + egui::vec2(-r, 0.0),
+                    at + v(0.0, -r),
+                    at + v(r, 0.0),
+                    at + v(0.0, r),
+                    at + v(-r, 0.0),
                 ],
                 s,
             ));
         }
-        SnapKind::Intersection => {
-            painter.line_segment([at + egui::vec2(-r, -r), at + egui::vec2(r, r)], s);
-            painter.line_segment([at + egui::vec2(-r, r), at + egui::vec2(r, -r)], s);
+        SnapKind::Intersection => cross(r),
+        SnapKind::Insertion => {
+            // two squares overlapping, as AutoCAD's
+            painter.rect_stroke(
+                egui::Rect::from_min_max(at + v(-r, -r), at + v(r * 0.3, r * 0.3)),
+                0.0,
+                s,
+                egui::StrokeKind::Middle,
+            );
+            painter.rect_stroke(
+                egui::Rect::from_min_max(at + v(-r * 0.3, -r * 0.3), at + v(r, r)),
+                0.0,
+                s,
+                egui::StrokeKind::Middle,
+            );
         }
         SnapKind::Perpendicular => {
-            painter.line_segment([at + egui::vec2(-r, r), at + egui::vec2(r, r)], s);
-            painter.line_segment([at + egui::vec2(-r, r), at + egui::vec2(-r, -r)], s);
-            painter.line_segment([at + egui::vec2(-r, 0.0), at + egui::vec2(0.0, 0.0)], s);
-            painter.line_segment([at + egui::vec2(0.0, 0.0), at + egui::vec2(0.0, r)], s);
+            seg(v(-r, r), v(r, r));
+            seg(v(-r, r), v(-r, -r));
+            seg(v(-r, 0.0), v(0.0, 0.0));
+            seg(v(0.0, 0.0), v(0.0, r));
+        }
+        SnapKind::Tangent => {
+            painter.circle_stroke(at, r * 0.8, s);
+            seg(v(-r, -r * 0.8), v(r, -r * 0.8));
         }
         SnapKind::OnEdge | SnapKind::Guide | SnapKind::OnGridLine => {
-            painter.circle_stroke(at, r * 0.7, s);
+            // the hourglass of Nearest
+            painter.add(egui::Shape::closed_line(
+                vec![at + v(-r, -r), at + v(r, -r), at + v(-r, r), at + v(r, r)],
+                s,
+            ));
+        }
+        SnapKind::Apparent => {
+            square(r);
+            cross(r * 0.7);
         }
         // a small square lying in the face
         SnapKind::OnFace => {
             painter.rect_stroke(
-                egui::Rect::from_center_size(at, egui::vec2(r * 1.4, r * 1.4)),
+                egui::Rect::from_center_size(at, v(r * 1.4, r * 1.4)),
                 1.0,
                 s,
                 egui::StrokeKind::Middle,
             );
         }
+        // the small cross of an acquired tracking point
         SnapKind::Aligned | SnapKind::OnTempGuide => {
-            painter.circle_filled(at, 3.0, c);
+            seg(v(-r * 0.6, 0.0), v(r * 0.6, 0.0));
+            seg(v(0.0, -r * 0.6), v(0.0, r * 0.6));
         }
-        SnapKind::AlignedCross | SnapKind::GuideCross => {
-            painter.line_segment([at + egui::vec2(-r, -r), at + egui::vec2(r, r)], s);
-            painter.line_segment([at + egui::vec2(-r, r), at + egui::vec2(r, -r)], s);
-            painter.circle_stroke(at, r * 0.75, Stroke::new(1.5, c));
-        }
-        SnapKind::AxisX | SnapKind::AxisY => {
+        SnapKind::AlignedCross | SnapKind::GuideCross => cross(r * 0.7),
+        SnapKind::AxisX | SnapKind::AxisY | SnapKind::Ortho => {
             if let Some(f) = from {
                 painter.add(egui::Shape::dashed_line(
                     &[f, at],
-                    Stroke::new(1.5, c),
-                    6.0,
-                    4.0,
+                    Stroke::new(1.0, c),
+                    3.0,
+                    3.0,
                 ));
             }
-            painter.circle_filled(at, 3.0, c);
+            seg(v(-r * 0.6, 0.0), v(r * 0.6, 0.0));
+            seg(v(0.0, -r * 0.6), v(0.0, r * 0.6));
         }
-        // a face: a ring with a bar on one side; a centreline: a ring
-        // with a line through its middle
         SnapKind::UnderlayFace => {
             painter.circle_stroke(at, r * 0.7, s);
-            painter.line_segment([at + egui::vec2(-r, r), at + egui::vec2(r, r)], s);
+            seg(v(-r, r), v(r, r));
         }
         SnapKind::UnderlayCentre => {
             painter.circle_stroke(at, r * 0.7, s);
-            painter.line_segment(
-                [
-                    at + egui::vec2(-r * 1.4, 0.0),
-                    at + egui::vec2(r * 1.4, 0.0),
-                ],
-                s,
-            );
+            seg(v(-r * 1.4, 0.0), v(r * 1.4, 0.0));
         }
         SnapKind::Grid => {}
     }
@@ -1971,7 +2381,17 @@ pub const MAX_REFERENCES: usize = 8;
 /// `from`; level, plumb and every `step` degrees through each point;
 /// radial lines and circles about centres and arcs, and tangents to them
 /// from `from`. A `step` of 0 (or 90) leaves out the angled guides.
-pub fn temp_guides(refs: &[Reference], from: Option<DVec3>, step: f64) -> Vec<TempGuide> {
+pub fn temp_guides(
+    refs: &[Reference],
+    from: Option<DVec3>,
+    step: f64,
+    cfg: &SnapSettings,
+) -> Vec<TempGuide> {
+    // as AutoCAD: object snap tracking (orthogonal) from rested points,
+    // Extension and Parallel from rested edges, polar angles from the
+    // start; the other guides are Volumen's own (with its alignment)
+    let (otrack, extras) = (cfg.references, cfg.tracking);
+    let polar = cfg.axis && !cfg.ortho;
     let mut out: Vec<TempGuide> = vec![];
     let from = from.map(|f| f.truncate());
     let line = |out: &mut Vec<TempGuide>, p: DVec2, d: DVec2, kind: GuideKind, at: DVec2| {
@@ -2023,13 +2443,17 @@ pub fn temp_guides(refs: &[Reference], from: Option<DVec3>, step: f64) -> Vec<Te
         match *r {
             Reference::Point { p, kind } => {
                 let p = p.truncate();
-                line(&mut out, p, DVec2::X, GuideKind::Horizontal, p);
-                line(&mut out, p, DVec2::Y, GuideKind::Vertical, p);
-                for a in &angles {
-                    let d = DVec2::from_angle(a.to_radians());
-                    line(&mut out, p, d, GuideKind::Angle(*a), p);
+                if otrack {
+                    line(&mut out, p, DVec2::X, GuideKind::Horizontal, p);
+                    line(&mut out, p, DVec2::Y, GuideKind::Vertical, p);
                 }
-                if let (SnapKind::Center, Some(f)) = (kind, from) {
+                if otrack && polar {
+                    for a in &angles {
+                        let d = DVec2::from_angle(a.to_radians());
+                        line(&mut out, p, d, GuideKind::Angle(*a), p);
+                    }
+                }
+                if let (SnapKind::Center, Some(f), true) = (kind, from, extras) {
                     // radial guides about a centre: the circle through the
                     // start point and the line out through it
                     line(&mut out, p, f - p, GuideKind::Radial, p);
@@ -2039,12 +2463,20 @@ pub fn temp_guides(refs: &[Reference], from: Option<DVec3>, step: f64) -> Vec<Te
             Reference::Edge { a, b, arc: None } => {
                 let (a, b) = (a.truncate(), b.truncate());
                 let d = b - a;
-                line(&mut out, a, d, GuideKind::Extension, a);
-                line(&mut out, a, d.perp(), GuideKind::Perpendicular, a);
-                line(&mut out, b, d.perp(), GuideKind::Perpendicular, b);
+                if cfg.extension {
+                    line(&mut out, a, d, GuideKind::Extension, a);
+                }
+                if extras {
+                    line(&mut out, a, d.perp(), GuideKind::Perpendicular, a);
+                    line(&mut out, b, d.perp(), GuideKind::Perpendicular, b);
+                }
                 if let Some(f) = from {
-                    line(&mut out, f, d, GuideKind::Parallel, f);
-                    line(&mut out, f, d.perp(), GuideKind::Perpendicular, f);
+                    if cfg.parallel {
+                        line(&mut out, f, d, GuideKind::Parallel, f);
+                    }
+                    if extras {
+                        line(&mut out, f, d.perp(), GuideKind::Perpendicular, f);
+                    }
                 }
             }
             Reference::Edge {
@@ -2053,6 +2485,9 @@ pub fn temp_guides(refs: &[Reference], from: Option<DVec3>, step: f64) -> Vec<Te
                 arc: Some((c, r)),
             } => {
                 let (a, b, c) = (a.truncate(), b.truncate(), c.truncate());
+                if !extras {
+                    continue;
+                }
                 circle(&mut out, c, r, c);
                 line(&mut out, c, a - c, GuideKind::Radial, c);
                 line(&mut out, c, b - c, GuideKind::Radial, c);
@@ -2073,7 +2508,7 @@ pub fn temp_guides(refs: &[Reference], from: Option<DVec3>, step: f64) -> Vec<Te
         }
     }
     // angled guides through the start point too: polar tracking
-    if let Some(f) = from {
+    if let (Some(f), true) = (from, polar) {
         for a in &angles {
             line(
                 &mut out,

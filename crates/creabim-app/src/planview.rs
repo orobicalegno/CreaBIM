@@ -447,6 +447,12 @@ pub struct PlanState {
     /// this point on screen instead of opening egui's.
     pub web_menus: bool,
     pub menu_request: Option<egui::Pos2>,
+    /// Where Shift + right-click asked for AutoCAD's object snap menu.
+    pub osnap_menu_request: Option<egui::Pos2>,
+    /// The one object snap the next pick uses (AutoCAD's override).
+    pub snap_once: Option<snaps::SnapKind>,
+    /// The override was used by a click: it goes before the next frame.
+    pub snap_once_spent: bool,
     /// Which snaps are on, in every pane and the 3D view.
     pub snap: snaps::SnapSettings,
     /// The grid system the Grid tool puts new lines in.
@@ -674,10 +680,13 @@ impl Default for PlanState {
             spotlight_ghost: false,
             chain: (None, vec![]),
             rested: (None, vec![]),
+            osnap_menu_request: None,
+            snap_once: None,
+            snap_once_spent: false,
             rest: None,
             refs: HashMap::new(),
             ref_rest: None,
-            guide_step: 45.0,
+            guide_step: 90.0,
             hover_guide: None,
             dim_axis: None,
             dim_chain: false,
@@ -1338,8 +1347,20 @@ pub fn show(
     }
 
     let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+    // an object snap override lasts one pick, as AutoCAD's
+    if state.snap_once_spent {
+        state.snap_once = None;
+        state.snap_once_spent = false;
+    }
+    let base = match state.snap_once {
+        Some(k) => state.snap.only(k),
+        None => state.snap,
+    };
+    if state.snap_once.is_some() && response.clicked() {
+        state.snap_once_spent = true;
+    }
     // holding Alt picks free of snaps
-    let snap_cfg = state.snap.live(alt);
+    let snap_cfg = base.live(alt);
     // the Align tool in a 3D view works on the model's faces
     let align_under = match (kind, tool) {
         (PaneKind::Axonometric, Tool::Align) => {
@@ -1403,7 +1424,7 @@ pub fn show(
     let guides = if guided {
         let refs = state.refs.get(&view).map_or(&[][..], |r| r.as_slice());
         let _p = crate::app::Perf::new("plan snaps: guides");
-        snaps::temp_guides(refs, guide_from, state.guide_step)
+        snaps::temp_guides(refs, guide_from, state.guide_step, &snap_cfg)
     } else {
         vec![]
     };
@@ -2565,7 +2586,17 @@ pub fn show(
         }
     }
 
-    // Shift+right-click places the pivot cursor
+    // Shift + right-click: AutoCAD's object snap menu, in plans and
+    // sections; Ctrl + Shift + right-click places the pivot cursor
+    let ctrl = ui.input(|i| i.modifiers.command);
+    if response.secondary_clicked()
+        && shift
+        && !ctrl
+        && matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
+    {
+        state.osnap_menu_request = response.interact_pointer_pos();
+        return None;
+    }
     if let (Some(space), true, true, Some(p)) = (
         space,
         response.secondary_clicked(),
@@ -5430,6 +5461,10 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
     let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)) else {
         return;
     };
+    // AutoSnap's magnet: the crosshairs lock onto the snap marker
+    let p = crate::snaps::last_mark()
+        .filter(|m| m.distance(p) < 2.5 * crate::snaps::aperture() && rect.contains(*m))
+        .unwrap_or(p);
     // over a menu or a window above the pane, the pointer stays as it is
     if ui
         .ctx()
@@ -5449,13 +5484,8 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
         Color32::from_gray(35)
     };
     let stroke = Stroke::new(1.0, ink);
-    let top = ui
-        .ctx()
-        .layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            ui.id().with("crosshair"),
-        ))
-        .with_clip_rect(rect);
+    // on the view's own layer: over the drawing, under windows above it
+    let top = ui.painter().with_clip_rect(rect);
     let p = egui::pos2(p.x.round() + 0.5, p.y.round() + 0.5);
     let half = if size >= 100.0 {
         rect.width().max(rect.height())
@@ -7889,7 +7919,13 @@ mod tests {
         )
         .unwrap();
         let ctx = egui::Context::default();
-        let mut state = PlanState::default();
+        let mut state = PlanState {
+            snap: snaps::SnapSettings {
+                apparent: false,
+                ..snaps::SnapSettings::ALL
+            },
+            ..PlanState::default()
+        };
         state.cameras.insert(view, (DVec2::new(33.0, 0.5), 100.0));
         let mut sel = crate::selection::Selection::default();
         sel.only(id);

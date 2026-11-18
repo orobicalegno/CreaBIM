@@ -55,6 +55,8 @@ pub(super) struct Shell {
     /// The tool the tools row last showed its tab for: a tool picked by
     /// its key, off the tab shown, brings its own tab.
     tab_tool: Option<Tool>,
+    /// AutoCAD's Drafting Settings window is open.
+    pub drafting_settings: bool,
 }
 
 impl Default for Shell {
@@ -76,6 +78,7 @@ impl Default for Shell {
             help: Default::default(),
             bar: None,
             tab_tool: None,
+            drafting_settings: false,
         }
     }
 }
@@ -701,29 +704,28 @@ impl CreaBimApp {
             "snaps" => {
                 let mut s = self.plan.snap;
                 let mut items = vec![
-                    Item::new("snap.on", "Snapping")
+                    Item::new("snap.on", "Object snap")
                         .key("F3")
                         .checked(s.on)
                         .keep_open()
-                        .hint("Hold Alt while picking to suspend snaps for a moment"),
-                    Item::Separator,
-                    Item::new("snap.all", "Turn all on").keep_open(),
-                    Item::new("snap.none", "Turn all off").keep_open(),
+                        .hint("OSNAP: hold Alt while picking to suspend snaps for a moment"),
                     Item::Separator,
                 ];
-                const ICONS: [&str; 12] = [
+                const ICONS: [&str; 14] = [
                     "snap-endpoint",
                     "snap-midpoint",
-                    "snap-intersection",
-                    "snap-perpendicular",
-                    "snap-nearest",
                     "snap-centre",
+                    "snap-centre",
+                    "snap-nearest",
                     "snap-quadrant",
-                    "hash",
-                    "slash",
-                    "snap-axis",
+                    "snap-intersection",
                     "snap-track",
-                    "ruler",
+                    "square",
+                    "snap-perpendicular",
+                    "snap-centre",
+                    "snap-nearest",
+                    "snap-intersection",
+                    "slash",
                 ];
                 for (i, (label, v)) in s.switches().into_iter().enumerate() {
                     items.push(
@@ -735,11 +737,19 @@ impl CreaBimApp {
                     );
                 }
                 items.push(Item::Separator);
-                items.push(Item::sub(
-                    format!("Grid snap: {}", self.plan.snap.step_label()),
-                    self.step_items(),
-                ));
-                // every edge at its even parts (MU34 B1)
+                items.push(Item::new("snap.all", "Select all").keep_open());
+                items.push(Item::new("snap.none", "Clear all").keep_open());
+                items.push(Item::Separator);
+                let mut extras = vec![];
+                for (i, (label, v)) in s.extras().into_iter().enumerate() {
+                    extras.push(
+                        Item::new(format!("snapx:{i}"), label)
+                            .checked(*v)
+                            .keep_open(),
+                    );
+                }
+                items.push(Item::sub("Volumen's own snaps", extras).icon("hash"));
+                // every edge at its even parts (MU34 B1): the nodes
                 let now = crate::snaps::divisions();
                 let mut div = vec![Item::new("snap.div:0", "Off").checked(now == 0)];
                 for n in [3u8, 4, 5, 6, 8, 10] {
@@ -749,12 +759,51 @@ impl CreaBimApp {
                 }
                 items.push(Item::sub(
                     if now == 0 {
-                        "Divisions: off".to_string()
+                        "Nodes on edges: off".to_string()
                     } else {
-                        format!("Divisions: {now}")
+                        format!("Nodes on edges: {now} parts")
                     },
                     div,
                 ));
+                items.push(Item::Separator);
+                items.push(
+                    Item::new("osnap.settings", "Object snap settings…")
+                        .icon("settings")
+                        .hint("DSETTINGS: the object snaps, polar tracking and AutoSnap's marker"),
+                );
+                items
+            }
+            "polar" => {
+                let mut items = vec![
+                    Item::new("snap.polar", "Polar tracking")
+                        .key("F10")
+                        .checked(self.plan.snap.axis)
+                        .keep_open(),
+                    Item::Separator,
+                    Item::Header("Increment angle".into()),
+                ];
+                for a in [90.0, 45.0, 30.0, 22.5, 18.0, 15.0, 10.0, 5.0] {
+                    items.push(
+                        Item::new(format!("polar.angle:{a}"), format!("{a}°")).checked(
+                            self.plan.snap.axis && (self.plan.guide_step - a).abs() < 1e-6,
+                        ),
+                    );
+                }
+                items.push(Item::Separator);
+                items.push(Item::new("osnap.settings", "Tracking settings…").icon("settings"));
+                items
+            }
+            // Shift + right-click in a drawing: one snap for the next point
+            "osnapmenu" => {
+                let mut s = self.plan.snap;
+                let mut items = vec![Item::Header("Object snap for the next point".into())];
+                for (i, (label, _)) in s.switches().into_iter().enumerate() {
+                    items.push(Item::new(format!("osnap.once:{i}"), label));
+                }
+                items.push(Item::Separator);
+                items.push(Item::new("osnap.once:none", "None"));
+                items.push(Item::Separator);
+                items.push(Item::new("osnap.settings", "Osnap settings…").icon("settings"));
                 items
             }
             key => self
@@ -1523,7 +1572,85 @@ impl CreaBimApp {
                     );
                 }
             }
-            "snap.on" => self.plan.snap.on = !self.plan.snap.on,
+            "snap.on" => {
+                self.plan.snap.on = !self.plan.snap.on;
+                self.status = format!(
+                    "<Osnap {}> F3 turns object snaps {}.",
+                    if self.plan.snap.on { "on" } else { "off" },
+                    if self.plan.snap.on { "off" } else { "on" },
+                );
+            }
+            // AutoCAD's Ortho and Polar turn each other off
+            "snap.ortho" => {
+                let s = &mut self.plan.snap;
+                s.ortho = !s.ortho;
+                if s.ortho {
+                    s.axis = false;
+                }
+                self.status = format!("<Ortho {}> (F8)", if s.ortho { "on" } else { "off" });
+            }
+            "snap.polar" => {
+                let s = &mut self.plan.snap;
+                s.axis = !s.axis;
+                if s.axis {
+                    s.ortho = false;
+                }
+                self.status = format!(
+                    "<Polar {}> (F10): every {}° from the last point.",
+                    if s.axis { "on" } else { "off" },
+                    self.plan.guide_step
+                );
+            }
+            "snap.otrack" => {
+                let s = &mut self.plan.snap;
+                s.references = !s.references;
+                self.status = format!(
+                    "<Object snap tracking {}> (F11): rest on a snap point to track from it.",
+                    if s.references { "on" } else { "off" }
+                );
+            }
+            "snap.grid" => {
+                let s = &mut self.plan.snap;
+                s.increment = !s.increment;
+                self.status = format!(
+                    "<Snap {}> (F9){}",
+                    if s.increment { "on" } else { "off" },
+                    if s.increment {
+                        format!(": points land every {}.", s.step_label())
+                    } else {
+                        String::new()
+                    }
+                );
+            }
+            "polar.angle" => {
+                if let Ok(a) = arg.parse::<f64>() {
+                    self.plan.guide_step = a;
+                    self.plan.snap.axis = true;
+                    self.plan.snap.ortho = false;
+                    self.status = format!("Polar tracking every {a}° (F10).");
+                }
+            }
+            "snapx" => {
+                if let Some((_, v)) = index.and_then(|i| self.plan.snap.extras().into_iter().nth(i)) {
+                    *v = !*v;
+                }
+            }
+            "osnap.settings" => self.shell.drafting_settings = true,
+            "osnap.once" => {
+                let kinds = crate::snaps::SnapSettings::SWITCH_KINDS;
+                let kind = match arg {
+                    "none" => Some(crate::snaps::SnapKind::Grid),
+                    _ => index.and_then(|i| kinds.get(i).copied()),
+                };
+                if let Some(k) = kind {
+                    self.plan.snap_once = Some(k);
+                    self.status = if k == crate::snaps::SnapKind::Grid {
+                        "No object snap for the next point.".into()
+                    } else {
+                        format!("Only {} for the next point.", k.label().to_lowercase())
+                    };
+                }
+            }
             "step.off" => {
                 self.plan.snap.increment = false;
                 self.status =
@@ -4020,6 +4147,7 @@ impl CreaBimApp {
             0 => "None".to_string(),
             n => format!("{n} of {total}"),
         };
+        let _ = &mut s;
         let workplane = match &self.workplane {
             Some((_, name)) => name.clone(),
             None => "Level".into(),
@@ -4033,11 +4161,24 @@ impl CreaBimApp {
             // what each mouse button does here, as Blender's status bar (MU39)
             "mouse": self.mouse_hints(),
             "controls": [
-                {"kind": "toggle", "id": "snap.on", "label": "Snap", "on": self.plan.snap.on, "icon": "magnet",
-                 "hint": "Object snaps on or off (F3). Hold Alt while picking to suspend them."},
-                {"kind": "menu", "key": "snaps", "label": "", "value": snaps, "hint": "Which snaps are on"},
-                {"kind": "menu", "key": "step", "label": "Grid snap", "value": self.plan.snap.step_label(),
-                 "hint": "Off: points and drags go exactly where the pointer is. On (Alt+S): they land on a grid in space. Also: distance marks while dragging."},
+                // AutoCAD's status bar: each mode a button, with its menu
+                {"kind": "toggle", "id": "view.grid", "label": "GRID", "on": self.shell.settings.plan_grid,
+                 "hint": "The grid behind drawings (F7)"},
+                {"kind": "toggle", "id": "snap.grid", "label": "SNAP", "on": self.plan.snap.increment,
+                 "hint": "Snap mode (F9): points land on a grid of the spacing set"},
+                {"kind": "menu", "key": "step", "label": "", "value": self.plan.snap.spacing_label(),
+                 "hint": "The snap spacing, and distance marks while dragging"},
+                {"kind": "toggle", "id": "snap.ortho", "label": "ORTHO", "on": self.plan.snap.ortho,
+                 "hint": "Ortho mode (F8): from the last point only along X or Y"},
+                {"kind": "toggle", "id": "snap.polar", "label": "POLAR", "on": self.plan.snap.axis,
+                 "hint": "Polar tracking (F10): the angles of the increment from the last point"},
+                {"kind": "menu", "key": "polar", "label": "", "value": format!("{}°", self.plan.guide_step),
+                 "hint": "Polar tracking's increment angle"},
+                {"kind": "toggle", "id": "snap.on", "label": "OSNAP", "on": self.plan.snap.on,
+                 "hint": "Object snap (F3). Shift + right-click for one snap for the next point; hold Alt to pick free of snaps."},
+                {"kind": "menu", "key": "snaps", "label": "", "value": snaps, "hint": "Which object snaps are on"},
+                {"kind": "toggle", "id": "snap.otrack", "label": "OTRACK", "on": self.plan.snap.references,
+                 "hint": "Object snap tracking (F11): rest on a snap point a moment to track from it"},
                 {"kind": "sep"},
                 {"kind": "menu", "key": "workplane", "label": "Workplane", "value": workplane, "icon": "square-dashed",
                  "hint": "Where sketches and guides drawn in 3D go"},
@@ -4870,6 +5011,21 @@ impl CreaBimApp {
 
     /// Open the right-click menu a view asked for this frame.
     pub(super) fn open_view_menu(&mut self) {
+        if let (Some(pos), true) = (
+            self.plan.osnap_menu_request.take(),
+            self.shell.web.is_some(),
+        ) {
+            let n = self.menu_items("osnapmenu").len() as f32;
+            self.shell.popup = Some(Popup {
+                key: "osnapmenu".into(),
+                at: pos + egui::vec2(2.0, 2.0),
+                up: None,
+                above: Some(pos.y - 2.0),
+                size: egui::vec2(230.0, 12.0 + 28.0 * n),
+                lead: 0.0,
+            });
+            return;
+        }
         let Some(pos) = self.plan.menu_request.take() else {
             return;
         };

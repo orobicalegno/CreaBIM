@@ -35,6 +35,6 @@ Divided parts remember how they were divided for the rest of the session, so Div
 
 For **Copies**, open Divide on the element first, then `Shift`+click what goes in each part. A sketch has to be extruded first, or draw a [guide](guides) along it.
 
-> **Tip:** **Divisions** in the [snaps](snaps) list snaps to the even parts of any edge (its thirds, quarters, fifths…) without changing anything.
+> **Tip:** **Nodes on edges** in the [snaps](snaps) menu snaps to the even parts of any edge (its thirds, quarters, fifths…) without changing anything.
 
 To cut an element along a line of your own instead, use [Split](edit#split).

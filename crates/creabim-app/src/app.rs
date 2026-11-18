@@ -59,6 +59,8 @@ mod mastersui;
 mod materials;
 #[path = "objectsui.rs"]
 mod objectsui;
+#[path = "osnapui.rs"]
+mod osnapui;
 #[path = "profilesui.rs"]
 mod profilesui;
 #[path = "reportui.rs"]
@@ -386,6 +388,12 @@ impl CreaBimApp {
         // are kept
         app.plan.snap.increment = false;
         app.plan.temp_dims_off = settings.temp_dims_off;
+        if let Some(s) = settings.osnap {
+            app.plan.snap = s;
+        }
+        if settings.polar_angle > 0.0 {
+            app.plan.guide_step = settings.polar_angle;
+        }
         app.plan.snap.marks = settings.distance_marks;
         if settings.snap_spacing_um > 0 {
             app.plan.snap.step_um = settings.snap_spacing_um;
@@ -1982,12 +1990,20 @@ impl CreaBimApp {
             self.run_action(ctx, "help");
         }
         if ctx.input(|i| i.key_pressed(egui::Key::F3)) {
-            self.plan.snap.on = !self.plan.snap.on;
-            self.status = format!(
-                "Snaps {}. F3 turns them {}.",
-                if self.plan.snap.on { "on" } else { "off" },
-                if self.plan.snap.on { "off" } else { "on" },
-            );
+            self.run_action(ctx, "snap.on");
+        }
+        // AutoCAD's drafting keys: F7 grid, F8 Ortho, F9 snap, F10 Polar,
+        // F11 object snap tracking
+        for (key, act) in [
+            (egui::Key::F7, "view.grid"),
+            (egui::Key::F8, "snap.ortho"),
+            (egui::Key::F9, "snap.grid"),
+            (egui::Key::F10, "snap.polar"),
+            (egui::Key::F11, "snap.otrack"),
+        ] {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)) {
+                self.run_action(ctx, act);
+            }
         }
         // Shift+G: guides on and off everywhere; Alt+Z: X-ray in 3D
         let (guides_key, xray_key) = ctx.input(|i| {
@@ -5230,7 +5246,7 @@ fn guides_3d(
             kind: SnapKind::Endpoint,
         })
         .collect();
-    let mut g = snaps::temp_guides(&refs, from, step);
+    let mut g = snaps::temp_guides(&refs, from, step, cfg);
     snaps::lift(&mut g, z);
     g
 }
@@ -7142,7 +7158,7 @@ impl CreaBimApp {
             }
             ui.separator();
             ui.label("Pivot:").on_hover_text(
-                "What R and S turn and scale about. Shift+right-click places the pivot cursor.",
+                "What R and S turn and scale about. Shift+right-click (in plans Ctrl+Shift+right-click) places the pivot cursor.",
             );
             egui::ComboBox::from_id_salt("pivot")
                 .icon(crate::props::combo_icon)
@@ -11579,6 +11595,24 @@ impl eframe::App for CreaBimApp {
             self.shell.settings.plan_grid,
             self.shell.settings.axis_lines,
         );
+        crate::snaps::begin_marks();
+        crate::snaps::set_autosnap(
+            self.shell.settings.marker_size,
+            self.shell.settings.snap_tooltip,
+            self.shell.settings.aperture,
+        );
+        // the object snaps and tracking as set, kept for the next session
+        let kept = crate::snaps::SnapSettings {
+            increment: false,
+            ..self.plan.snap
+        };
+        if self.shell.settings.osnap != Some(kept)
+            || self.shell.settings.polar_angle != self.plan.guide_step
+        {
+            self.shell.settings.osnap = Some(kept);
+            self.shell.settings.polar_angle = self.plan.guide_step;
+            self.shell.settings.store();
+        }
         if ink != crate::theme::interaction() {
             crate::theme::set_interaction(ink);
             self.geometry_key = None;
@@ -11959,6 +11993,7 @@ impl eframe::App for CreaBimApp {
         self.import_report_window(&ctx);
         self.help_window(&ctx);
         self.report_window(&ctx);
+        self.drafting_settings_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus
         self.plan.web_menus = false;

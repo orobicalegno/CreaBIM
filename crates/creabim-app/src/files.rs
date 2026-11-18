@@ -215,6 +215,16 @@ pub struct Settings {
     /// The grid snap's and the distance marks' spacing, micrometres. Grid
     /// snap itself always starts off.
     pub snap_spacing_um: u32,
+    /// The object snaps, Ortho, Polar and OTRACK as last set (AutoCAD keeps
+    /// OSMODE between sessions); none, AutoCAD's defaults.
+    pub osnap: Option<crate::snaps::SnapSettings>,
+    /// The polar tracking increment, degrees (POLARANG).
+    pub polar_angle: f64,
+    /// AutoSnap: the marker's half size and the aperture, pixels, and
+    /// whether the snap's name shows by the marker.
+    pub marker_size: u8,
+    pub aperture: u8,
+    pub snap_tooltip: bool,
     /// Where Move, Rotate, Scale and the like show their bar: a slim pill
     /// at the top of the view, or a small palette by the pointer (MU38).
     pub edit_bar: String,
@@ -268,6 +278,11 @@ impl Default for Settings {
             grips: Default::default(),
             distance_marks: false,
             snap_spacing_um: 50_000,
+            osnap: None,
+            polar_angle: 90.0,
+            marker_size: 6,
+            aperture: 10,
+            snap_tooltip: true,
             edit_bar: "top".into(),
             axis_lines: true,
             plan_grid: true,

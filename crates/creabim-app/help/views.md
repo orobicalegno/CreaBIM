@@ -54,6 +54,15 @@ A plan's *Properties* has a *Graphics* group:
 - The pen, colour, pattern and hatch of each category are **object styles** of the project's style pack, and a view can override them: see [Graphic styles](graphic-styles).
 - *View range*: what levels a plan draws, and the roof or site plan seen from above: see [View range](view-range).
 
+### North arrow, grid and axes
+
+- **North arrow**: *⋯ › North arrow* in a plan's header places a small, plain north arrow in the middle of what the plan shows. Drag it where it goes. It points to the project's true north (*Project information*), unless it is given an angle of its own in *Properties*, where its size (paper millimetres) is set too. It shows on the sheets the plan is placed on.
+- **Grid behind drawings** (`F7`) and **X and Y axes**: on and off in *⋯* in a view's header, or in *View › Every view*.
+
+### The crosshairs
+
+In plans and sections the pointer is AutoCAD's crosshairs: two lines right across the view, with the square pickbox while selecting. Near a snap they lock onto it. *Settings › Interface › 2D cursor* turns them off or sets how long they are (100% runs right across the view).
+
 ## Ordering the browser
 
 Drag a view up or down in its group. The group then keeps your order (it says *Your order*); its sort button puts it back in automatic order (plans by level).

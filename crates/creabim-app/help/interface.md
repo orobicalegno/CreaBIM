@@ -76,7 +76,7 @@ Drag the panel's left edge to make it as wide as you like; in a narrow panel, ro
 
 ## The status bar (bottom)
 
-It starts with what each mouse button does over the view in use, and changes while `Shift`, `Ctrl` or `Alt` is held. Then what to do next, in words; a message cut short slides to show the rest when you point at it. Then the **Snap** switch and the list of [snaps](snaps), **Grid snap** (`Alt+S`), the **Workplane**, the **Pivot** for rotating and scaling, the **Units** menu (see [Units and number formats](units)) and the number of elements in the project.
+It starts with what each mouse button does over the view in use, and changes while `Shift`, `Ctrl` or `Alt` is held. Then what to do next, in words; a message cut short slides to show the rest when you point at it. Then the drafting buttons as in AutoCAD: **GRID**, **SNAP**, **ORTHO**, **POLAR**, **OSNAP** and **OTRACK** (see [Snaps](snaps)), the **Workplane**, the **Pivot** for rotating and scaling, the **Units** menu (see [Units and number formats](units)) and the number of elements in the project.
 
 ## The Help panel
 
