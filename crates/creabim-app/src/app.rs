@@ -9008,6 +9008,13 @@ impl CreaBimApp {
                             label = "Window panes"
                         }
                     }
+                    let kind = o.kind;
+                    if kind != creabim_core::OpeningKind::Hole {
+                        let l = wallsui::frame_drawing_fields(ui, kind, &mut o.frame);
+                        if !l.is_empty() {
+                            label = l;
+                        }
+                    }
                 }
                 ElementKind::View(v) if matches!(v.kind, ViewKind::Schedule { .. }) => {
                     if let ViewKind::Schedule { category, by_type } = &mut v.kind {

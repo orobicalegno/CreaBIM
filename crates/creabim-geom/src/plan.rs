@@ -640,6 +640,8 @@ pub enum PlanItem {
         rgb: Option<[f32; 3]>,
         /// Semibold.
         bold: bool,
+        /// Radians counter-clockwise; 0 is level.
+        angle: f64,
     },
     /// A dimension from `a` to `b`, its line `offset` to the left. A
     /// horizontal or vertical one measures from `a` to `b` square across,
@@ -2188,6 +2190,16 @@ fn opening_symbol(
         })
     };
     let boxes = opening_boxes(o, w, shift);
+    // a window that says how it opens: its leaves, and how they open
+    let leaves = o.kind == OpeningKind::Window
+        && f.frame
+            .operation
+            .is_some_and(|op| op != creabim_core::Operation::Fixed);
+    if z > 0.0 && z < c.v1 - c.v0 {
+        for (a, b) in crate::opening::window_symbol(o, w, shift) {
+            line(&mut out, at(c.u0 + a.x, a.y), at(c.u0 + b.x, b.y));
+        }
+    }
     for b in &boxes {
         let (u0, u1) = (c.u0 + b.lo.x, c.u0 + b.hi.x);
         let cut = b.lo.z < z && z < b.hi.z;
@@ -2195,6 +2207,12 @@ fn opening_symbol(
             // the sill member shows below the cut
             Part::Frame if cut || (o.kind == OpeningKind::Window && b.lo.z <= 1e-9) => {
                 rect(&mut out, u0, u1, b.lo.y, b.hi.y)
+            }
+            // a leaf's glass reads as a double line, its two panes
+            Part::Glass if cut && leaves => {
+                for s in [b.lo.y, b.hi.y] {
+                    line(&mut out, at(u0, s), at(u1, s));
+                }
             }
             Part::Glass if cut => {
                 let s = (b.lo.y + b.hi.y) / 2.0;

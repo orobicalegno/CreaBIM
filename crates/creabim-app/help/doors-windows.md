@@ -17,6 +17,24 @@ Select one, then:
 - drag its jamb handles to widen it, or its head and sill handles to change its height, in a plan or in 3D;
 - pick a material, and its frame: *Frame width* and *Frame depth*, and for windows *Panes across* and *Panes up*.
 
+## How a window opens, and what plans draw
+
+**Opens**, in a window's *Properties* or its type's, says how it opens. The window gets real leaves in 3D, each a frame round its own glass, and plans draw the symbol for it:
+
+- **Casement, one leaf**: the leaf drawn open square to the wall, on the inside, and the quarter circle its edge sweeps. It hangs on the jamb at the wall's start; *Flip › Hand* hangs it on the other one.
+- **Casement, two leaves**: both leaves drawn open, each with its arc. **First leaf** sets the share of the width of the leaf at the wall's start: 50 % is two the same.
+- **Pivot (bilico)**: a low tent over the inside, from each jamb up to the middle.
+- **Sliding**: two leaves on two tracks, lapping at the middle, and an arrow the way the inner one slides. *Flip › Hand* swaps which leaf slides.
+- **Fixed**: glass in the frame, nothing opens.
+
+*Glass in the frame (as before)* draws the window as it was, with its panes. A leaf's glass shows in plan as a double line.
+
+**Subframe** puts a subframe (falsotelaio) round the frame, this wide seen from the front: the frame is built inside it, and plans and 3D show both. 0 is none.
+
+**Size in plans** writes the opening's size beside it, as Italian drawings do: a line square to the wall through its middle, the width over the height on the inside, and the sill's height on the outside, all in centimetres (a sill on the floor reads 000). The text runs along the line, read from the top down on walls that run across the drawing.
+
+These settings are part of *Frame and panes*, so a door or window type passes them to every door or window of the type.
+
 ## Where the frame stands in the wall
 
 By default a door's or window's frame stands in the middle of the wall's thickness. **Frame at** in its *Properties* puts it against a face of any of the wall's layers instead. The list has every layer from the exterior in, each with its two faces:

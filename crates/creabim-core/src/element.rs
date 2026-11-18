@@ -1564,6 +1564,61 @@ pub struct OpeningFrame {
     /// Window panes side by side and one above the other, split by bars.
     pub panes_across: u32,
     pub panes_up: u32,
+    /// How a window opens: its leaves, and the symbol plans draw for it.
+    /// None draws the glass in its frame, as before there were leaves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<Operation>,
+    /// A subframe (falsotelaio) round the frame, this wide seen from the
+    /// front; 0 is none.
+    #[serde(skip_serializing_if = "is_zero_f")]
+    pub subframe: f64,
+    /// Plans write the opening's size beside it: width over height, and
+    /// the sill's height on the other side of the wall.
+    #[serde(skip_serializing_if = "is_false")]
+    pub label: bool,
+}
+
+/// How a window opens.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Operation {
+    /// Glass set in the frame: nothing opens.
+    Fixed,
+    /// One side-hung leaf (hinged at the wall's start side unless the
+    /// opening's hand is flipped).
+    Casement,
+    /// Two side-hung leaves meeting between the jambs, the first (at the
+    /// wall's start side) `first` of the width: 0.5 is two the same.
+    DoubleCasement { first: f64 },
+    /// One leaf turning on a level axis across its middle (bilico).
+    Pivot,
+    /// Two leaves sliding on two tracks; the one on the inner track slides
+    /// over the other.
+    Sliding,
+}
+
+impl Operation {
+    pub const ALL: [Operation; 5] = [
+        Operation::Fixed,
+        Operation::Casement,
+        Operation::DoubleCasement { first: 0.5 },
+        Operation::Pivot,
+        Operation::Sliding,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Operation::Fixed => "Fixed",
+            Operation::Casement => "Casement, one leaf",
+            Operation::DoubleCasement { .. } => "Casement, two leaves",
+            Operation::Pivot => "Pivot (bilico)",
+            Operation::Sliding => "Sliding",
+        }
+    }
+
+    /// Is it the same kind, whatever its settings?
+    pub fn same(self, other: Operation) -> bool {
+        std::mem::discriminant(&self) == std::mem::discriminant(&other)
+    }
 }
 
 impl Default for OpeningFrame {
@@ -1573,6 +1628,9 @@ impl Default for OpeningFrame {
             depth: 0.1,
             panes_across: 1,
             panes_up: 1,
+            operation: None,
+            subframe: 0.0,
+            label: false,
         }
     }
 }
@@ -1585,12 +1643,23 @@ impl OpeningFrame {
     /// The frame kept to what fits an opening `w` × `h` in a wall `t` thick:
     /// members no wider than a third of the opening, at least one pane.
     pub fn fitted(&self, w: f64, h: f64, t: f64) -> Self {
+        // a subframe takes no more than a sixth of the opening
+        let sub = self.subframe.clamp(0.0, w.min(h) / 6.0);
+        let (w, h) = (w - 2.0 * sub, h - 2.0 * sub);
         let fw = self.width.clamp(0.01, (w.min(h) / 3.0).max(0.01));
         Self {
             width: fw,
             depth: self.depth.clamp(0.02, t.max(0.02)),
             panes_across: self.panes_across.clamp(1, 12),
             panes_up: self.panes_up.clamp(1, 12),
+            operation: self.operation.map(|o| match o {
+                Operation::DoubleCasement { first } => Operation::DoubleCasement {
+                    first: first.clamp(0.1, 0.9),
+                },
+                o => o,
+            }),
+            subframe: sub,
+            label: self.label,
         }
     }
 }

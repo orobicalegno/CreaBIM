@@ -84,9 +84,9 @@ pub use element::{
 };
 pub use element::{
     Cut, Dimension, Element, ElementKind, FreeMesh, Grid, GridGroup, Guide, Hatch, HostPoint,
-    Level, LevelHead, Material, Opening, OpeningFrame, OpeningKind, ScheduleCategory, Sheet,
-    SheetTitle, Sketch, Slab, Source, Tag, Underlay, View, ViewKind, ViewStyle, Viewport, Wall,
-    Workplane,
+    Level, LevelHead, Material, Opening, OpeningFrame, OpeningKind, Operation, ScheduleCategory,
+    Sheet, SheetTitle, Sketch, Slab, Source, Tag, Underlay, View, ViewKind, ViewStyle, Viewport,
+    Wall, Workplane,
 };
 pub use footing::{Footing, FootingKind};
 pub use graphics::{LineWeights, PlanGraphics};

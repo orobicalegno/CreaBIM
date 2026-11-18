@@ -295,6 +295,7 @@ pub fn draw_looks(canvas: &mut dyn Canvas, drawing: &PlanView, map: &PaperMap, l
                 align,
                 rgb,
                 bold,
+                angle,
                 ..
             } => {
                 if rgb.is_some() || *bold {
@@ -304,9 +305,9 @@ pub fn draw_looks(canvas: &mut dyn Canvas, drawing: &PlanView, map: &PaperMap, l
                         bold: *bold,
                         ..TextLook::default()
                     };
-                    canvas.styled_text(to(*at), text, *align, 0.0, &look);
+                    canvas.styled_text(to(*at), text, *align, *angle, &look);
                 } else {
-                    canvas.text(to(*at), *size, text, *align)
+                    canvas.text_angle(to(*at), *size, text, *align, *angle)
                 }
             }
             PlanItem::Dimension {

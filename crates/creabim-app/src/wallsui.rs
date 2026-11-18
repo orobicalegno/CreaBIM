@@ -249,6 +249,72 @@ pub(super) fn wall_fields(
     label
 }
 
+/// How a door or window is drawn: a window's way of opening (and the
+/// share of its first leaf), the subframe round it, and whether plans
+/// write its size. Shared by an opening's and a type's Properties.
+/// Returns the edit's name when one changed.
+pub(super) fn frame_drawing_fields(
+    ui: &mut egui::Ui,
+    kind: OpeningKind,
+    f: &mut creabim_core::OpeningFrame,
+) -> &'static str {
+    use creabim_core::Operation;
+    let mut label = "";
+    if kind == OpeningKind::Window {
+        let name =
+            |op: Option<Operation>| op.map_or("Glass in the frame (as before)", |o| o.label());
+        let mut op = f.operation;
+        crate::props::Combo::new("Opens")
+            .selected_text(name(op))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut op, None, name(None));
+                for o in Operation::ALL {
+                    // a kind keeps its own settings when picked again
+                    let pick = match (f.operation, o) {
+                        (Some(cur), o) if cur.same(o) => Some(cur),
+                        _ => Some(o),
+                    };
+                    if ui
+                        .selectable_label(op.is_some_and(|c| c.same(o)), o.label())
+                        .clicked()
+                    {
+                        op = pick;
+                    }
+                }
+            })
+            .response
+            .on_hover_text("How the window opens: its leaves in 3D and the symbol plans draw for it. A casement's hinge side and a sliding leaf's way follow the Hand flip.");
+        if op != f.operation {
+            f.operation = op;
+            label = "Window opening";
+        }
+        if let Some(Operation::DoubleCasement { first }) = &mut f.operation {
+            let mut pc = *first * 100.0;
+            if crate::props::row(ui, "First leaf", |ui| {
+                crate::props::fill(
+                    ui,
+                    egui::DragValue::new(&mut pc).range(10.0..=90.0).suffix(" %").speed(1.0),
+                )
+                .on_hover_text("The share of the width of the leaf at the wall's start side; 50 % is two the same.")
+                .changed()
+            }) {
+                *first = (pc / 100.0).clamp(0.1, 0.9);
+                label = "Window leaves";
+            }
+        }
+    }
+    if num(ui, "Subframe", &mut f.subframe, 0.0, 0.3) {
+        label = "Subframe";
+    }
+    if crate::props::switch(ui, &mut f.label, "Size in plans")
+        .on_hover_text("Plans write the opening's size beside it, in centimetres: width over height on the inside, the sill's height on the outside.")
+        .changed()
+    {
+        label = "Size in plans";
+    }
+    label
+}
+
 /// A door's hand and swing, or a window's facing. Returns the edit's name.
 pub(super) fn opening_fields(ui: &mut egui::Ui, model: &Model, o: &mut Opening) -> &'static str {
     let mut label = "";

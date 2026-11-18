@@ -811,6 +811,84 @@ pub fn sheet_notes(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
         .collect()
 }
 
+/// How a size is written beside an opening: whole centimetres, and a
+/// height of nothing as 000.
+fn centimetres(m: f64) -> String {
+    let cm = (m * 100.0).round() as i64;
+    if cm == 0 {
+        "000".into()
+    } else {
+        cm.to_string()
+    }
+}
+
+/// The size of opening `o` written beside it in a plan of `level`, as
+/// Italian drawings write it: a line square to the wall through the
+/// opening's middle, on the inside the width over the height, on the
+/// outside the sill's height, all in centimetres along the line. `mm` is
+/// drawing units per paper millimetre.
+pub fn opening_label(
+    model: &Model,
+    id: ElementId,
+    o: &creabim_core::Opening,
+    level: ElementId,
+    mm: f64,
+) -> Vec<PlanItem> {
+    let Some(ElementKind::Wall(w)) = model.get(o.host).map(|e| &e.kind) else {
+        return vec![];
+    };
+    if w.level != level || o.kind == OpeningKind::Hole || w.curtain.is_some() {
+        return vec![];
+    }
+    let u = (o.offset + o.width / 2.0).clamp(0.0, w.length());
+    let c = w.place(u, 0.0);
+    let t = w.thickness / 2.0;
+    // a window faces out, a door opens in: the outside is the side a
+    // window faces and the other side of a door
+    let left = (w.place(u, 1.0) - c).normalize_or(DVec2::Y);
+    let faces = if o.faces_left(w) { left } else { -left };
+    let outside = if o.kind == OpeningKind::Door {
+        -faces
+    } else {
+        faces
+    };
+    let inside = -outside;
+    let size = 2.5;
+    let mut out = vec![PlanItem::Line {
+        id,
+        pen: crate::plan::Pen::Fine,
+        a: c + outside * (t + 1.5 * mm),
+        b: c + inside * (t + 12.0 * mm),
+    }];
+    // the text runs along the line, kept readable: upright, or read from
+    // the top down where the line stands up the drawing
+    let mut a = inside.to_angle();
+    if a >= std::f64::consts::FRAC_PI_2 - 1e-9 {
+        a -= std::f64::consts::PI;
+    } else if a < -std::f64::consts::FRAC_PI_2 - 1e-9 {
+        a += std::f64::consts::PI;
+    }
+    let up = DVec2::from_angle(a).perp();
+    let gap = (size / 2.0 + 0.6) * mm;
+    let text = |at: DVec2, s: String| PlanItem::Text {
+        id,
+        at,
+        text: s,
+        size,
+        align: crate::paper::Anchor::Middle,
+        mm,
+        rgb: None,
+        bold: false,
+        angle: a,
+    };
+    let m_in = c + inside * (t + 6.5 * mm);
+    out.push(text(m_in + up * gap, centimetres(o.width)));
+    out.push(text(m_in - up * gap, centimetres(o.height)));
+    let m_out = c + outside * (t * 0.5).max(3.0 * mm);
+    out.push(text(m_out - up * gap, centimetres(o.sill)));
+    out
+}
+
 /// The linework and detail components drawn on the sheet itself, in
 /// paper millimetres.
 pub fn sheet_linework(model: &Model, sheet: ElementId) -> Vec<PlanItem> {
@@ -847,6 +925,12 @@ pub fn annotations(model: &Model, view_id: ElementId, view: &View) -> Vec<PlanIt
                     look,
                     &drafting,
                 ));
+            }
+            // a door's or window's size, where its type or itself says so
+            ElementKind::Opening(o) if o.frame.label => {
+                if let ViewKind::Plan { level, .. } = view.kind {
+                    out.extend(opening_label(model, e.id, o, level, view.scale / 1000.0));
+                }
             }
             ElementKind::View(v) => {
                 if let Some(c) = v.callout.filter(|c| c.parent == view_id) {
@@ -1318,6 +1402,76 @@ mod tests {
 
     fn named(m: &Model, name: &str) -> ElementId {
         m.iter().find(|e| e.name == name).unwrap().id
+    }
+
+    #[test]
+    fn an_opening_writes_its_size_across_its_wall() {
+        use creabim_core::{Element, Level, Opening, OpeningFrame, Transaction};
+        let mut doc = creabim_core::Document::new();
+        let lv = Element::new(
+            "L0",
+            ElementKind::Level(Level {
+                elevation: 0.0,
+                height: 3.0,
+            }),
+        );
+        let level = lv.id;
+        // a wall along x, its outside to the south (its right)
+        let wall = Element::new(
+            "W",
+            ElementKind::Wall(Wall::new(
+                level,
+                DVec2::ZERO,
+                DVec2::new(6.0, 0.0),
+                0.3,
+                3.0,
+            )),
+        );
+        let host = wall.id;
+        let window = |sill: f64| Opening {
+            host,
+            kind: OpeningKind::Window,
+            offset: 2.0,
+            sill,
+            width: 1.4,
+            height: 1.2,
+            material: None,
+            frame: OpeningFrame {
+                label: true,
+                ..Default::default()
+            },
+            flip_hand: false,
+            flip_facing: false,
+            wrap: None,
+            frame_at: None,
+        };
+        let o = window(1.0);
+        doc.commit(Transaction::new("setup").insert(lv).insert(wall))
+            .unwrap();
+        let items = opening_label(doc.model(), ElementId::new(), &o, level, 0.1);
+        let texts: Vec<(String, DVec2, f64)> = items
+            .iter()
+            .filter_map(|i| match i {
+                PlanItem::Text {
+                    text, at, angle, ..
+                } => Some((text.clone(), *at, *angle)),
+                _ => None,
+            })
+            .collect();
+        let names: Vec<&str> = texts.iter().map(|t| t.0.as_str()).collect();
+        assert_eq!(names, ["140", "120", "100"]);
+        // the size inside (north), the sill outside (south), along the
+        // line, read from the top down
+        assert!(texts[0].1.y > 0.15 && texts[1].1.y > 0.15 && texts[2].1.y < 0.0);
+        assert!((texts[0].2 + std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        // the width "above" the line as the text reads, the height below
+        assert!(texts[0].1.x > 2.7 && texts[1].1.x < 2.7);
+        // a sill on the floor reads 000; another level has no label
+        let low = opening_label(doc.model(), ElementId::new(), &window(0.0), level, 0.1);
+        assert!(low
+            .iter()
+            .any(|i| matches!(i, PlanItem::Text { text, .. } if text == "000")));
+        assert!(opening_label(doc.model(), ElementId::new(), &o, ElementId::new(), 0.1).is_empty());
     }
 
     #[test]

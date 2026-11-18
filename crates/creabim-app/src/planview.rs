@@ -5794,6 +5794,39 @@ pub fn draw_item_with(
             align,
             rgb,
             bold,
+            angle,
+            ..
+        } if angle.abs() > 1e-9 => {
+            // turned text: laid out along its angle
+            let px = text_px(*size);
+            let colour = match rgb {
+                Some([r, g, b]) => {
+                    Color32::from_rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+                }
+                None => ink,
+            };
+            let look = TextLook {
+                bold: *bold,
+                ..TextLook::default()
+            };
+            crate::annotate::text(
+                painter,
+                xf.to_screen(*at),
+                text,
+                px,
+                colour,
+                *angle,
+                *align,
+                &look,
+            );
+        }
+        PlanItem::Text {
+            at,
+            text,
+            size,
+            align,
+            rgb,
+            bold,
             ..
         } => {
             let px = text_px(*size);
