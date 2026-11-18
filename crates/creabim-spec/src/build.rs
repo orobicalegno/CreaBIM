@@ -576,6 +576,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
                 None => None,
             },
             wraps: None,
+            wrap_thickness: None,
         });
     }
     if !ok {
@@ -590,6 +591,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
         layers,
         description: a.description.clone().unwrap_or_default(),
         wrap_openings: Default::default(),
+        wrap_returns: Default::default(),
     };
     c.insert(
         &a.id,

@@ -155,11 +155,14 @@ fn layers_wrap_into_the_jambs_of_openings_in_plan() {
     // the wall's assembly wraps on both faces
     let e = doc.model().get(wall).unwrap();
     let (asm, _) = assembly_of(doc.model(), e).unwrap();
+    let asm_id = asm.id;
     let mut wrapped = asm.clone();
     if let ElementKind::Assembly(a) = &mut wrapped.kind {
         a.wrap_openings = WrapSides::Both;
+        // back into the wall first: the opening keeps its size
+        a.wrap_returns = creabim_core::ReturnSide::IntoWall;
     }
-    let tx = Transaction::new("Wrap").replace(asm.clone(), wrapped);
+    let tx = Transaction::new("Wrap").replace(asm.clone(), wrapped.clone());
     doc.commit(tx).unwrap();
     let wraps = fills(doc.model());
     // each jamb gains the returns of the finishes on both faces
@@ -182,6 +185,22 @@ fn layers_wrap_into_the_jambs_of_openings_in_plan() {
             .sum()
     };
     assert!((area(&wraps) - area(&square)).abs() < 1e-6);
+    // into the opening: the structure stays and the finishes run on into
+    // it, so the wall's cut area grows by their returns
+    let before = doc.model().get(asm_id).unwrap().clone();
+    let mut inward = before.clone();
+    if let ElementKind::Assembly(a) = &mut inward.kind {
+        a.wrap_returns = creabim_core::ReturnSide::IntoOpening;
+    }
+    doc.commit(Transaction::new("Into the opening").replace(before, inward))
+        .unwrap();
+    let inside = fills(doc.model());
+    assert!(
+        area(&inside) > area(&square) + 1e-4,
+        "{} {}",
+        area(&inside),
+        area(&square)
+    );
     // the 3D view lines those reveals with the layers themselves
     let scene = build_scene(doc.model());
     assert!(scene.iter().any(|i| i.id == wall && i.layer.is_some()));

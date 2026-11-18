@@ -1593,6 +1593,7 @@ mod tests {
                 ],
                 description: String::new(),
                 wrap_openings: Default::default(),
+                wrap_returns: Default::default(),
             }),
         );
         let aid = a.id;

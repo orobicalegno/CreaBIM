@@ -27,11 +27,13 @@ Layered walls join layer by layer: L corners are mitred, and in a T the core run
 
 ## Doors and windows in layered walls
 
-By default every layer stops square at a door or window. To have layers turn into the reveal and run to the frame, as plaster and render do on site, open the wall's assembly and set **Wrap at openings** to *Exterior*, *Interior* or *Both*: the faces of the wall the layers turn in from.
+By default every layer stops square at a door or window. To have layers turn into the reveal and run to the frame, as plaster, render and external insulation do on site, open the wall's assembly and set **Wrap at openings** to *Exterior*, *Interior* or *Both*: the faces of the wall the layers turn in from.
 
-- Each layer has a **Wraps** tick. Finishes wrap unless you untick them; any other layer wraps when you tick it.
-- A layer that wraps lines the jambs, the head and the sill from its own place in the wall to the face of the frame. Where several wrap, the outermost lies against the opening and the next one behind it.
-- The layers they cover stop short by the thickness of the returns, so the opening keeps its size. A bare hole has no frame: its returns stop at the core.
+- Each layer has a **Wraps** tick. Finishes wrap unless you untick them; any other layer, such as the insulation, wraps when you tick it. Leave the structure unticked.
+- Beside the tick, the layer's **return thickness**: how thick it is where it turns into the reveal. External insulation often turns in at 2 or 3 cm however thick it is on the face. Left as it is, the return is as thick as the layer.
+- **Returns** says where they go:
+  - *Into the opening (structure stays)*, the usual choice: the opening is the hole in the structure, which stays exactly as it is. The layers that wrap run on into the opening and turn over the structure's jamb to the frame, or to its [subframe](doors-windows#how-a-window-opens-and-what-plans-draw), which is their stop. The innermost lies against the structure, each next one over it, and the outermost is the reveal's face. Give the subframe the width of the returns (3 cm of insulation and 2 of render: 5 cm) and they finish flush with it.
+  - *Into the wall (opening keeps its size)*: the returns go back into the wall, the layers they pass stop short by their thickness, and the opening keeps its size.
 - One door or window can differ from its wall: set **Layers wrap** in its *Properties*.
 
 Plans, sections and the 3D view all show the wrapped layers, and the layer solids written to IFC include them. The take-off still measures each layer without its returns.

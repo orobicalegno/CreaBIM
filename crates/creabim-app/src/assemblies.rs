@@ -290,18 +290,38 @@ pub(super) fn layer_table(
                     label = "Layer thickness";
                 }
                 if wall {
-                    let mut wraps = l.wraps_openings();
-                    if ui
-                        .add_enabled(wrapping, egui::Checkbox::new(&mut wraps, "Wraps"))
-                        .on_hover_text("At doors and windows, the layer turns into the reveal and runs to the frame, on the faces chosen under Wrap at openings.")
-                        .on_disabled_hover_text("Choose a face under Wrap at openings first.")
-                        .changed()
-                    {
-                        // its function's own answer isn't kept: a finish wraps
-                        let by_function = l.function == LayerFunction::Finish;
-                        l.wraps = (wraps != by_function).then_some(wraps);
-                        label = "Layer wraps at openings";
-                    }
+                    crate::props::flow(ui, |ui| {
+                        let mut wraps = l.wraps_openings();
+                        if ui
+                            .add_enabled(wrapping, egui::Checkbox::new(&mut wraps, "Wraps"))
+                            .on_hover_text("At doors and windows, the layer turns into the reveal and runs to the frame or subframe, on the faces chosen under Wrap at openings.")
+                            .on_disabled_hover_text("Choose a face under Wrap at openings first.")
+                            .changed()
+                        {
+                            // its function's own answer isn't kept: a finish wraps
+                            let by_function = l.function == LayerFunction::Finish;
+                            l.wraps = (wraps != by_function).then_some(wraps);
+                            label = "Layer wraps at openings";
+                        }
+                        // how thick it turns in: its own, or less
+                        if wrapping && wraps {
+                            let mut t = l.wrap_thickness.unwrap_or(l.thickness);
+                            if ui
+                                .add(
+                                    crate::units::drag(&mut t)
+                                        .speed(0.001)
+                                        .range(assembly::MIN_LAYER..=l.thickness.max(assembly::MIN_LAYER)),
+                                )
+                                .on_hover_text("How thick the layer is where it turns into the reveal: insulation often turns in thinner than it is on the face.")
+                                .changed()
+                            {
+                                let t = t.max(assembly::MIN_LAYER);
+                                l.wrap_thickness =
+                                    ((t - l.thickness).abs() > 1e-9).then_some(t);
+                                label = "Layer return thickness";
+                            }
+                        }
+                    });
                 }
                 crate::props::flow(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -361,8 +381,29 @@ pub(super) fn layer_table(
                     }
                 })
                 .response
-                .on_hover_text("At doors and windows, the layers ticked Wraps turn into the reveals from these faces of the wall and run to the frame; the layers they cover stop short. A door or window can go its own way in its Properties.");
+                .on_hover_text("At doors and windows, the layers ticked Wraps turn into the reveals from these faces of the wall and run to the frame or subframe. A door or window can go its own way in its Properties.");
         });
+        if wrapping {
+            crate::props::flow(ui, |ui| {
+                ui.label("Returns");
+                egui::ComboBox::from_id_salt(("returns", id))
+                    .icon(crate::props::combo_icon)
+                    .width(if compact { 150.0 } else { 220.0 })
+                    .selected_text(edited.wrap_returns.label())
+                    .show_ui(ui, |ui| {
+                        for r in assembly::ReturnSide::ALL {
+                            if ui
+                                .selectable_value(&mut edited.wrap_returns, r, r.label())
+                                .changed()
+                            {
+                                label = "Wrap returns";
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Into the opening: the opening is the structure's, which stays as it is; the layers that wrap run on into it and turn to the frame or subframe, their stop. Into the wall: the opening keeps its size, and the layers the returns pass stop short of it.");
+            });
+        }
     }
     crate::props::flow(ui, |ui| {
         if ui

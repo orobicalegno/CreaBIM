@@ -118,6 +118,10 @@ pub struct Layer {
     /// takes its function's: finishes do, the rest stop square.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wraps: Option<bool>,
+    /// How thick it is where it turns into a reveal; `None` is as thick
+    /// as the layer. A wall's insulation often turns in much thinner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap_thickness: Option<f64>,
 }
 
 impl Layer {
@@ -128,6 +132,7 @@ impl Layer {
             thickness,
             priority: None,
             wraps: None,
+            wrap_thickness: None,
         }
     }
 
@@ -202,6 +207,38 @@ pub struct Assembly {
     /// to line the reveals up to the frame (walls only).
     #[serde(default, skip_serializing_if = "WrapSides::is_none")]
     pub wrap_openings: WrapSides,
+    /// Where the returns go: into the opening, the structure left as it
+    /// is, or back into the wall, the opening kept its size.
+    #[serde(default, skip_serializing_if = "ReturnSide::is_default")]
+    pub wrap_returns: ReturnSide,
+}
+
+/// Where a wall's layers turn when they wrap into a reveal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ReturnSide {
+    /// Into the opening: the opening is the structure's, which stays as it
+    /// is, and the layers that wrap run on past it and turn to the frame
+    /// or subframe, their stop. The clear opening is smaller by them.
+    #[default]
+    IntoOpening,
+    /// Back into the wall: the opening keeps its size, and the layers the
+    /// returns pass stop short of it by their thickness.
+    IntoWall,
+}
+
+impl ReturnSide {
+    pub const ALL: [ReturnSide; 2] = [ReturnSide::IntoOpening, ReturnSide::IntoWall];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ReturnSide::IntoOpening => "Into the opening (structure stays)",
+            ReturnSide::IntoWall => "Into the wall (opening keeps its size)",
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        *self == ReturnSide::default()
+    }
 }
 
 /// Which faces of a wall its layers turn in from at a door or window, to
@@ -263,8 +300,11 @@ pub struct WrapReturn {
 struct WrapZone {
     face: f64,
     stop: f64,
-    /// Outermost first, each with the depth of its layer's inner face.
-    returns: Vec<(WrapReturn, f64)>,
+    /// Outermost first, each with the depth of its layer's inner face and
+    /// its layer's span across the wall.
+    returns: Vec<(WrapReturn, f64, (f64, f64))>,
+    /// The returns are inside the opening ([`ReturnSide::IntoOpening`]).
+    into_opening: bool,
 }
 
 /// How a wall's layers wrap at one opening ([`opening_wrap`]). Across
@@ -282,16 +322,27 @@ impl OpeningWrap {
 
     /// How far back from the opening's edge the wall's own material stops
     /// at `s` across the wall: the thickness of the returns passing there.
+    ///
+    /// Where the returns go into the opening it is negative inside a layer
+    /// that wraps (the layer runs on into the opening to meet its return)
+    /// and nothing anywhere else: the structure stays as it is.
     pub fn inset_at(&self, s: f64) -> f64 {
         self.zones
             .iter()
             .filter(|z| (s - z.face) * (s - z.stop) < 0.0)
             .map(|z| {
+                if z.into_opening {
+                    return z
+                        .returns
+                        .iter()
+                        .find(|(_, _, (s0, s1))| s > *s0 - 1e-9 && s < *s1 + 1e-9)
+                        .map_or(0.0, |(r, _, _)| r.inset);
+                }
                 let depth = (s - z.face).abs();
                 z.returns
                     .iter()
-                    .filter(|(_, d)| *d <= depth + 1e-9)
-                    .map(|(r, _)| r.thickness)
+                    .filter(|(_, d, _)| *d <= depth + 1e-9)
+                    .map(|(r, _, _)| r.thickness)
                     .sum::<f64>()
             })
             .sum()
@@ -302,13 +353,16 @@ impl OpeningWrap {
         self.zones
             .iter()
             .flat_map(|z| &z.returns)
-            .find(|(r, _)| r.layer == layer)
-            .map(|(r, _)| *r)
+            .find(|(r, _, _)| r.layer == layer)
+            .map(|(r, _, _)| *r)
     }
 
     /// Every return, for drawing.
     pub fn returns(&self) -> impl Iterator<Item = WrapReturn> + '_ {
-        self.zones.iter().flat_map(|z| &z.returns).map(|(r, _)| *r)
+        self.zones
+            .iter()
+            .flat_map(|z| &z.returns)
+            .map(|(r, _, _)| *r)
     }
 
     /// Where across the wall the returns stop: the frame's faces.
@@ -424,7 +478,10 @@ pub fn opening_wrap(
             if !a.layers[b.index].wraps_openings() || b.function == LayerFunction::AirGap {
                 continue;
             }
-            let thickness = b.s1 - b.s0;
+            // as thick as the layer, or as its own return thickness says
+            let thickness = a.layers[b.index]
+                .wrap_thickness
+                .map_or(b.s1 - b.s0, |t| t.clamp(MIN_LAYER, 1.0));
             returns.push((
                 WrapReturn {
                     layer: b.index,
@@ -434,14 +491,26 @@ pub fn opening_wrap(
                     to: inner.max(stop),
                 },
                 depth,
+                (b.s0, b.s1),
             ));
             inset += thickness;
+        }
+        let into_opening = a.wrap_returns == ReturnSide::IntoOpening;
+        if into_opening {
+            // inside the opening, the innermost against the structure and
+            // each next one over it: the outermost is the reveal's face
+            let mut cum: f64 = returns.iter().map(|r| r.0.thickness).sum();
+            for (r, _, _) in &mut returns {
+                r.inset = -cum;
+                cum -= r.thickness;
+            }
         }
         if !returns.is_empty() {
             zones.push(WrapZone {
                 face,
                 stop,
                 returns,
+                into_opening,
             });
         }
     }
@@ -458,6 +527,7 @@ impl Assembly {
             layers,
             description: String::new(),
             wrap_openings: WrapSides::None,
+            wrap_returns: ReturnSide::IntoOpening,
         }
     }
 

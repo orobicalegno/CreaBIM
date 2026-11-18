@@ -66,7 +66,7 @@ pub use annotation::{
 };
 pub use assembly::{
     assembly_of, frame_shift, frame_shift_in, opening_wrap, Assembly, AssemblyUse, Layer,
-    LayerFunction, OpeningWrap, WrapReturn, WrapSides,
+    LayerFunction, OpeningWrap, ReturnSide, WrapReturn, WrapSides,
 };
 pub use constraint::{Constraint, SolveError};
 pub use cropbox::{CropBox, CropScope};

@@ -449,6 +449,78 @@ mod tests {
     }
 
     #[test]
+    fn layers_that_wrap_into_the_opening_leave_the_structure_as_it_is() {
+        use creabim_core::{opening_wrap, Assembly, AssemblyUse, Layer, LayerFunction, WrapSides};
+        // 200 block, 100 insulation turning in 30 thick, 20 render, the
+        // outside to the wall's right; a window in a 60 mm frame
+        let mut insulation = Layer::new(LayerFunction::Insulation, None, 0.10);
+        insulation.wraps = Some(true);
+        insulation.wrap_thickness = Some(0.03);
+        let mut a = Assembly::new(
+            AssemblyUse::Wall,
+            vec![
+                Layer::new(LayerFunction::Finish, None, 0.02),
+                insulation,
+                Layer::new(LayerFunction::Structure, None, 0.20),
+            ],
+        );
+        a.wrap_openings = WrapSides::Exterior;
+        let mut w = wall();
+        w.thickness = 0.32;
+        let o = opening(1.0, 0.9, 1.2, 1.3);
+        let volumes = |a: &Assembly| -> Vec<f64> {
+            let cuts = [WrappedCut {
+                cut: Cut::of(&o, &w).unwrap(),
+                wrap: opening_wrap(a, &w, &o, 0.06, 0.0),
+            }];
+            creabim_core::assembly::wall_bands(a, &w)
+                .iter()
+                .map(|b| {
+                    wall_layer_mesh_wrapped(
+                        &w,
+                        0.0,
+                        &cuts,
+                        &WallEnds::default(),
+                        None,
+                        (b.s0, b.s1),
+                        Some(b.index),
+                        b.core,
+                        [0.0; 2],
+                        [0.0; 2],
+                    )
+                    .volume()
+                })
+                .collect()
+        };
+        let face = 5.0 * 3.0 - 1.2 * 1.3;
+        let near = |x: f64, y: f64| assert!((x - y).abs() < 1e-6, "{x} {y}");
+        let v = volumes(&a);
+        // the block is the structure: just as it was, the opening's size
+        near(v[2], face * 0.20);
+        // the insulation runs on 30 mm into the opening, round its jambs,
+        // head and sill, and turns in 30 thick from its inner face (the
+        // block's face, 40 mm out from the middle) to the frame's outer
+        // face (30 mm out): a ring 30 deep, 10 across, besides its own
+        // 100 across
+        let ring = |by: f64| (1.2 * 1.3) - (1.2 - 2.0 * by) * (1.3 - 2.0 * by);
+        near(v[1], face * 0.10 + ring(0.03) * 0.10 + ring(0.03) * 0.01);
+        // the render, outermost, over it all: 20 more into the opening,
+        // turning in from its own inner face (140 out) to the frame
+        near(
+            v[0],
+            face * 0.02 + ring(0.05) * 0.02 + (ring(0.05) - ring(0.03)) * 0.11,
+        );
+        // a layer left unticked stays square, the render too
+        let mut plain = a.clone();
+        plain.layers[1].wraps = Some(false);
+        plain.layers[0].wraps = Some(false);
+        let p = volumes(&plain);
+        near(p[0], face * 0.02);
+        near(p[1], face * 0.10);
+        near(p[2], face * 0.20);
+    }
+
+    #[test]
     fn layers_that_wrap_line_the_reveals_and_the_rest_stop_short() {
         use creabim_core::{opening_wrap, Assembly, AssemblyUse, Layer, LayerFunction, WrapSides};
         // 20 render, 160 block, 20 plaster; a window with a 60 mm frame
@@ -460,6 +532,8 @@ mod tests {
                 Layer::new(LayerFunction::Finish, None, 0.02),
             ],
         );
+        // the returns go back into the wall: the opening keeps its size
+        a.wrap_returns = creabim_core::ReturnSide::IntoWall;
         let w = wall();
         let o = opening(1.0, 0.9, 1.2, 1.3);
         let layers = |a: &Assembly, o: &Opening| -> Vec<f64> {
