@@ -787,19 +787,20 @@ impl CreaBimApp {
                                         crate::props::row(ui, "Mouse", |ui| {
                                             let label = |k: &str| match k {
                                                 "classic" => "Classic: left drag orbits",
+                                                "archicad" => "Archicad: middle pans, Shift + middle orbits",
                                                 _ => "CreaBIM: middle orbits, left boxes",
                                             };
                                             egui::ComboBox::from_id_salt("settings.navigation").icon(crate::props::combo_icon)
                                                 .selected_text(label(&navigation))
                                                 .width(ui.available_width())
                                                 .show_ui(ui, |ui| {
-                                                    for k in ["creabim", "classic"] {
+                                                    for k in ["creabim", "archicad", "classic"] {
                                                         ui.selectable_value(&mut navigation, k.to_string(), label(k));
                                                     }
                                                 });
                                         });
                                         ui.label(
-                                            egui::RichText::new("CreaBIM (recommended): left click selects, a left drag on empty space draws a box, a middle drag orbits (Alt + left drag without one), a right drag or Shift + middle pans, a right click opens the menu, the wheel zooms. Classic: a left drag orbits in 3D.")
+                                            egui::RichText::new("CreaBIM (recommended): left click selects, a left drag on empty space draws a box, a middle drag orbits (Alt + left drag without one), a right drag or Shift + middle pans, a right click opens the menu, the wheel zooms. Archicad: a middle drag pans, Shift + middle orbits, a middle double-click frames everything. Classic: a left drag orbits in 3D. Every way orbits about the point of the model the drag starts on, and the wheel zooms toward the point under the pointer.")
                                                 .weak()
                                                 .small(),
                                         );

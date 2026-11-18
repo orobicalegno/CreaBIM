@@ -289,6 +289,14 @@ pub struct CreaBimApp {
     drafting: drafting::DraftingUi,
     /// Orbit about the selection rather than the middle of the view.
     orbit_selection: bool,
+    /// Where a 3D drag started on the model: what orbiting turns about and
+    /// panning holds under the pointer, as Archicad does.
+    nav_anchor: Option<GVec3>,
+    /// The 3D view is orbiting about `nav_anchor` this frame (its mark shows).
+    nav_orbiting: bool,
+    /// Exploring the model on foot in the 3D view (F5): W A S D walk, a
+    /// drag looks round.
+    walking: bool,
     /// Where the 3D view was drawn last frame, for its navigation buttons.
     rect_3d: Option<Rect>,
     /// Where the 2D pane was drawn last frame, and whether the pointer was
@@ -491,6 +499,9 @@ impl CreaBimApp {
             import_report: None,
             drafting: Default::default(),
             orbit_selection: false,
+            nav_anchor: None,
+            nav_orbiting: false,
+            walking: false,
             rect_3d: None,
             rect_2d: None,
             last_in_2d: false,
@@ -977,9 +988,62 @@ impl CreaBimApp {
             return;
         }
         let d = GVec2::new(d.x, d.y);
+        // on foot, a drag turns the head
+        if self.walking {
+            self.camera.look_round(d);
+            return;
+        }
         match self.selection_bounds().filter(|_| self.orbit_selection) {
             Some((lo, hi)) => self.camera.orbit_around((lo + hi) / 2.0, d),
-            None => self.camera.orbit(d),
+            // about the point of the model the drag started on
+            None => match self.nav_anchor {
+                Some(at) => {
+                    self.nav_orbiting = true;
+                    self.camera.orbit_around(at, d);
+                }
+                None => self.camera.orbit(d),
+            },
+        }
+    }
+
+    /// Where the pointer at `p` meets the model in the 3D view drawn in
+    /// `rect`, if it does.
+    fn hit_3d(&self, p: egui::Pos2, rect: Rect) -> Option<GVec3> {
+        let (o, d) = self.ray_3d(p, rect);
+        pick::pick(&self.scene, o, d).map(|h| o + d * h.t)
+    }
+
+    /// The pointer's ray in the 3D view drawn in `rect`.
+    fn ray_3d(&self, p: egui::Pos2, rect: Rect) -> (GVec3, GVec3) {
+        let ndc = GVec2::new(
+            (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+            1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
+        );
+        self.camera.ray(ndc, rect.width() / rect.height().max(1.0))
+    }
+
+    /// What a drag starting at `p` turns about and holds: the model under
+    /// it, or where its ray reaches the depth of the view's target.
+    fn anchor_3d(&self, p: egui::Pos2, rect: Rect) -> GVec3 {
+        self.hit_3d(p, rect).unwrap_or_else(|| {
+            let (o, d) = self.ray_3d(p, rect);
+            let eye = self.camera.eye();
+            let fwd = (self.camera.target - eye).normalize_or_zero();
+            let depth = self.camera.depth_of(self.camera.target).max(1.0);
+            o + d * (depth / d.dot(fwd).max(0.05))
+        })
+    }
+
+    /// Walking toggled (F5): stand at the eye in perspective, or step back
+    /// out to orbiting.
+    pub(super) fn toggle_walk(&mut self) {
+        self.walking = !self.walking;
+        if self.walking {
+            self.camera.ortho = false;
+            self.camera.stand();
+            self.status = "Exploring: W A S D or the arrows walk, Q and E go down and up, Shift is faster, a middle or right drag looks round, the wheel steps ahead. F5 or Esc stops.".into();
+        } else {
+            self.status = "Back to orbiting.".into();
         }
     }
 
@@ -1720,6 +1784,35 @@ impl CreaBimApp {
                 !cmd && i.key_pressed(egui::Key::E),
             )
         });
+        // F5 explores on foot; while exploring the walking keys are its own
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F5)) {
+            self.toggle_walk();
+        }
+        if self.walking {
+            let stop = ctx.input_mut(|i| {
+                use egui::Key as K;
+                for k in [
+                    K::W,
+                    K::A,
+                    K::S,
+                    K::D,
+                    K::Q,
+                    K::E,
+                    K::ArrowUp,
+                    K::ArrowDown,
+                    K::ArrowLeft,
+                    K::ArrowRight,
+                ] {
+                    for m in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+                        i.consume_key(m, k);
+                    }
+                }
+                i.consume_key(egui::Modifiers::NONE, K::Escape)
+            });
+            if stop {
+                self.toggle_walk();
+            }
+        }
         // F1: the guide's page about what you are doing
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             self.run_action(ctx, "help");
@@ -2930,24 +3023,64 @@ impl CreaBimApp {
             ui.ctx().request_repaint();
         }
         // the mouse (MU19): right drag pans, and so does Shift + middle;
-        // middle drag orbits (Classic: middle pans too)
-        let classic = self.shell.settings.navigation == "classic";
+        // middle drag orbits (Classic: middle pans too). Archicad: middle
+        // drag pans, Shift + middle orbits, a middle double-click frames
+        // all. Every way orbits about the model under the pointer and
+        // pans holding it there.
+        let scheme = self.shell.settings.navigation.clone();
+        let classic = scheme == "classic";
+        let archicad = scheme == "archicad";
         let shift_now = ui.input(|i| i.modifiers.shift);
         // Ctrl + middle drag zooms, up in and down out, as Blender (MU39)
         let ctrl_now = ui.input(|i| i.modifiers.command);
+        self.nav_orbiting = false;
+        if response.drag_started() {
+            if let Some(p) = ui.input(|i| i.pointer.press_origin()) {
+                self.nav_anchor = Some(self.anchor_3d(p, rect));
+            }
+        } else if !response.dragged() {
+            self.nav_anchor = None;
+        }
         let mid = response.dragged_by(egui::PointerButton::Middle);
         if mid && ctrl_now {
             self.camera.zoom(-response.drag_delta().y / 60.0);
         } else {
-            if response.dragged_by(egui::PointerButton::Secondary)
-                || (mid && (classic || shift_now))
-            {
+            let pan = response.dragged_by(egui::PointerButton::Secondary)
+                || (mid
+                    && if archicad {
+                        !shift_now
+                    } else {
+                        classic || shift_now
+                    });
+            let orbit = mid
+                && if archicad {
+                    shift_now
+                } else {
+                    !classic && !shift_now
+                };
+            // on foot a middle or right drag turns the head
+            let (pan, orbit) = if self.walking {
+                (
+                    false,
+                    mid || response.dragged_by(egui::PointerButton::Secondary),
+                )
+            } else {
+                (pan, orbit)
+            };
+            if pan {
                 let d = response.drag_delta();
-                self.camera.pan(GVec2::new(d.x, d.y), rect.height());
+                let depth = self
+                    .nav_anchor
+                    .map_or(self.camera.distance, |a| self.camera.depth_of(a));
+                self.camera
+                    .pan_at(GVec2::new(d.x, d.y), rect.height(), depth);
             }
-            if !classic && mid && !shift_now {
+            if orbit {
                 self.orbit_3d(response.drag_delta());
             }
+        }
+        if archicad && response.double_clicked_by(egui::PointerButton::Middle) {
+            self.frame_pane(false);
         }
         if response.hovered() {
             // two fingers on a touchpad pan; a wheel and a pinch zoom (MU24)
@@ -2957,16 +3090,49 @@ impl CreaBimApp {
             }
             if scroll != 0.0 {
                 let aspect = rect.width() / rect.height().max(1.0);
-                match response.hover_pos() {
-                    Some(p) => {
-                        let ndc = GVec2::new(
-                            (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
-                            1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
-                        );
-                        self.camera.zoom_at(scroll / 50.0, ndc, aspect);
+                if self.walking {
+                    // on foot the wheel steps ahead
+                    self.camera.walk(scroll / 50.0 * 0.3, 0.0, 0.0);
+                } else {
+                    match response.hover_pos() {
+                        // toward the model under the pointer: it stays put, and
+                        // zooming never stops short of it
+                        Some(p) => match self.hit_3d(p, rect) {
+                            Some(at) => self.camera.zoom_toward(at, scroll / 50.0),
+                            None => {
+                                let ndc = GVec2::new(
+                                    (p.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+                                    1.0 - (p.y - rect.top()) / rect.height().max(1.0) * 2.0,
+                                );
+                                self.camera.zoom_at(scroll / 50.0, ndc, aspect);
+                            }
+                        },
+                        None => self.camera.zoom(scroll / 50.0),
                     }
-                    None => self.camera.zoom(scroll / 50.0),
                 }
+            }
+        }
+        // on foot: walk while the keys are held
+        if self.walking {
+            let (dt, keys) = ui.input(|i| {
+                use egui::Key as K;
+                let down = |a: K, b: K| (i.key_down(a) || i.key_down(b)) as i32 as f32;
+                (
+                    i.stable_dt.min(0.1),
+                    (
+                        down(K::W, K::ArrowUp) - down(K::S, K::ArrowDown),
+                        down(K::D, K::ArrowRight) - down(K::A, K::ArrowLeft),
+                        (i.key_down(K::E) as i32 - i.key_down(K::Q) as i32) as f32,
+                        i.modifiers.shift,
+                    ),
+                )
+            });
+            let (ahead, side, rise, fast) = keys;
+            if ahead != 0.0 || side != 0.0 || rise != 0.0 {
+                // a brisk walk, a run with Shift
+                let speed = if fast { 4.5 } else { 1.5 } * dt;
+                self.camera.walk(ahead * speed, side * speed, rise * speed);
+                ui.ctx().request_repaint();
             }
         }
         let aspect = rect.width() / rect.height().max(1.0);
@@ -3025,6 +3191,16 @@ impl CreaBimApp {
                 rect.top() + (1.0 - n.y) / 2.0 * rect.height(),
             ))
         };
+        // the point orbiting turns about, while it does
+        if let (true, Some(at)) = (self.nav_orbiting, self.nav_anchor) {
+            if let Some(p) = project(at.as_dvec3()) {
+                let ink = crate::theme::interaction();
+                painter.circle_stroke(p, 7.0, egui::Stroke::new(1.5, ink));
+                for d in [Vec2::X, Vec2::Y] {
+                    painter.line_segment([p - d * 11.0, p + d * 11.0], egui::Stroke::new(1.0, ink));
+                }
+            }
+        }
         let ray = |p: egui::Pos2| {
             let ndc = GVec2::new(
                 (p.x - rect.left()) / rect.width() * 2.0 - 1.0,

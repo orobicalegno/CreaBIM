@@ -1200,6 +1200,10 @@ impl CreaBimApp {
             Item::new("nav.ortho", "Orthographic")
                 .checked(self.camera.ortho)
                 .hint("Parallel projection, without perspective"),
+            Item::new("nav.walk", "Explore on foot")
+                .key("F5")
+                .checked(self.walking)
+                .hint("Walk through the model: W A S D or the arrows, Q and E down and up, Shift faster, a middle or right drag looks round"),
             Item::Separator,
             Item::Header("Look from".into()),
         ];
@@ -1796,6 +1800,7 @@ impl CreaBimApp {
             }
             "nav.orbitsel" => self.orbit_selection = !self.orbit_selection,
             "nav.ortho" => self.camera.ortho = !self.camera.ortho,
+            "nav.walk" => self.toggle_walk(),
             "nav.zoomin" => self.camera.zoom(2.0),
             "nav.zoomout" => self.camera.zoom(-2.0),
             "nav.look" => {

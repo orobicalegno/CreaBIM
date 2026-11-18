@@ -81,6 +81,15 @@ impl Default for OrbitCamera {
     }
 }
 
+/// The camera comes no closer to its target than this.
+const MIN_DISTANCE: f32 = 0.05;
+
+/// Zooming toward a point stops this far from it.
+const MIN_REACH: f32 = 0.15;
+
+/// While walking, the target is this far ahead of the eye.
+const WALK_AHEAD: f32 = 1.0;
+
 /// Orbiting stops at straight down and straight up.
 const PITCH_MAX: f32 = std::f32::consts::FRAC_PI_2;
 
@@ -195,7 +204,76 @@ impl OrbitCamera {
     }
 
     pub fn zoom(&mut self, steps: f32) {
-        self.distance = (self.distance * (1.0 - steps * 0.1).clamp(0.5, 1.5)).clamp(0.5, 1500.0);
+        self.distance =
+            (self.distance * (1.0 - steps * 0.1).clamp(0.5, 1.5)).clamp(MIN_DISTANCE, 1500.0);
+    }
+
+    /// Zoom toward (or away from) `point`, a point of the model under the
+    /// pointer: the whole camera moves along the line to it, so it stays
+    /// where it is on screen, and the orbit target comes along, so zooming
+    /// never stops short of what is pointed at. Closer than a hand's width
+    /// it stops.
+    pub fn zoom_toward(&mut self, point: Vec3, steps: f32) {
+        let f = (1.0 - steps * 0.1).clamp(0.5, 1.5);
+        let eye = self.eye();
+        let reach = eye.distance(point);
+        if f < 1.0 && reach * f < MIN_REACH {
+            return;
+        }
+        self.target = point + (self.target - point) * f;
+        self.distance = (self.distance * f).clamp(MIN_DISTANCE, 1500.0);
+    }
+
+    /// The depth of `point` in front of the camera, along the view.
+    pub fn depth_of(&self, point: Vec3) -> f32 {
+        let eye = self.eye();
+        (point - eye).dot((self.target - eye).normalize_or_zero())
+    }
+
+    /// Pan so what was grabbed `depth` in front of the camera moves with
+    /// the pointer: near things as much as the pointer, far ones too.
+    pub fn pan_at(&mut self, delta: Vec2, viewport_height: f32, depth: f32) {
+        let eye = self.eye();
+        let fwd = (self.target - eye).normalize();
+        let right = fwd.cross(self.up()).normalize_or_zero();
+        let up = right.cross(fwd);
+        // an orthographic view shows every depth the same size
+        let depth = if self.ortho {
+            self.distance
+        } else {
+            depth.max(MIN_REACH)
+        };
+        let k = 2.0 * depth * (self.fov_y / 2.0).tan() / viewport_height.max(1.0);
+        self.target += (-right * delta.x + up * delta.y) * k;
+    }
+
+    /// Turn the head, the eye staying where it is: walking, looking round.
+    pub fn look_round(&mut self, delta: Vec2) {
+        let eye = self.eye();
+        self.orbit_around(eye, -delta * 0.6);
+        // the pivot is the eye: put it back exactly where it was
+        let moved = self.eye() - eye;
+        self.target -= moved;
+    }
+
+    /// Walk: `ahead` forward and `side` to the right along the ground,
+    /// `rise` up, in metres; the view keeps its direction.
+    pub fn walk(&mut self, ahead: f32, side: f32, rise: f32) {
+        let (yaw, _) = self.view_angles();
+        // the camera looks from the eye toward the target: opposite its yaw
+        let fwd = -Vec3::new(yaw.cos(), yaw.sin(), 0.0);
+        let right = fwd.cross(Vec3::Z).normalize_or_zero();
+        self.target += fwd * ahead + right * side + Vec3::Z * rise;
+    }
+
+    /// Stand at the eye, looking the way the view looks, with the target a
+    /// short way ahead: how walking starts, so turning the head turns
+    /// about the eye and not a far point.
+    pub fn stand(&mut self) {
+        let eye = self.eye();
+        let fwd = (self.target - eye).normalize_or(Vec3::X);
+        self.distance = WALK_AHEAD;
+        self.target = eye + fwd * WALK_AHEAD;
     }
 
     /// Zoom toward the point under the pointer (`ndc`, in normalised
@@ -228,6 +306,66 @@ impl OrbitCamera {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zooming_toward_a_point_keeps_it_still_and_never_sticks() {
+        let mut c = OrbitCamera::default();
+        let aspect = 1.5;
+        // a point well off the target, under the pointer
+        let (o, d) = c.ray(Vec2::new(0.4, -0.2), aspect);
+        let point = o + d * 9.0;
+        let screen = |c: &OrbitCamera| c.view_proj(aspect).project_point3(point).truncate();
+        let before = screen(&c);
+        for _ in 0..60 {
+            c.zoom_toward(point, 1.0);
+            assert!((screen(&c) - before).length() < 1e-3, "{:?}", screen(&c));
+        }
+        // it got right up to it: no stop half a metre from the target
+        assert!(c.eye().distance(point) < 0.3, "{}", c.eye().distance(point));
+        // and backs away again
+        for _ in 0..5 {
+            c.zoom_toward(point, -3.0);
+        }
+        assert!(c.eye().distance(point) > 0.5, "{}", c.eye().distance(point));
+    }
+
+    #[test]
+    fn panning_moves_what_was_grabbed_with_the_pointer() {
+        let mut c = OrbitCamera::default();
+        let aspect = 1.0;
+        let h = 800.0;
+        let (o, d) = c.ray(Vec2::ZERO, aspect);
+        // grabbed 4 m in front of the eye, nearer than the target
+        let grabbed = o + d * 4.0;
+        let depth = c.depth_of(grabbed);
+        let before = c.view_proj(aspect).project_point3(grabbed).truncate();
+        // 100 pixels right
+        c.pan_at(Vec2::new(100.0, 0.0), h, depth);
+        let after = c.view_proj(aspect).project_point3(grabbed).truncate();
+        // 100 px of 800 is a quarter of the NDC height of 2
+        assert!(
+            ((after.x - before.x) - 0.25).abs() < 1e-3,
+            "{after:?} {before:?}"
+        );
+    }
+
+    #[test]
+    fn walking_moves_the_eye_and_looking_round_keeps_it() {
+        let mut c = OrbitCamera::default();
+        c.stand();
+        let eye = c.eye();
+        c.look_round(Vec2::new(40.0, 10.0));
+        assert!(c.eye().distance(eye) < 1e-4);
+        // forward along the ground, whatever the head's tilt
+        let before = c.eye();
+        c.walk(2.0, 0.0, 0.0);
+        let step = c.eye() - before;
+        assert!((step.length() - 2.0).abs() < 1e-4 && step.z.abs() < 1e-5);
+        let fwd = c.target - c.eye();
+        assert!(Vec2::new(step.x, step.y).dot(Vec2::new(fwd.x, fwd.y)) > 0.0);
+        c.walk(0.0, 0.0, 0.5);
+        assert!((c.eye().z - before.z - 0.5).abs() < 1e-4);
+    }
 
     #[test]
     fn orbiting_round_a_pivot_keeps_it_on_screen() {
