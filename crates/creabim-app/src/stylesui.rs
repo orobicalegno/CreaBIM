@@ -1139,6 +1139,57 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
             *pick = pack.patterns.len() - 1;
             changed = true;
         }
+        // Volumen's library: concrete, sand, gravel, earth, brick…
+        ui.menu_button("From the library", |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    for lib in styles::library_patterns() {
+                        let picked = ui
+                            .horizontal(|ui| {
+                                pattern_preview(ui, &lib, 100.0);
+                                ui.button(&lib.name).clicked()
+                            })
+                            .inner;
+                        if picked {
+                            let mut p = lib.clone();
+                            if pack.patterns.iter().any(|x| x.name == p.name) {
+                                p.name = format!("{} copy", p.name);
+                            }
+                            pack.patterns.push(p);
+                            *pick = pack.patterns.len() - 1;
+                            changed = true;
+                            ui.close();
+                        }
+                    }
+                });
+        });
+        // AutoCAD's own: any .pat file, acadiso.pat with all its patterns
+        if ui
+            .button("Import .pat…")
+            .on_hover_text("Read every pattern of an AutoCAD .pat file (acadiso.pat, or any other): sizes in millimetres")
+            .clicked()
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Import hatch patterns")
+                .add_filter("AutoCAD hatch patterns", &["pat", "PAT"])
+                .pick_file()
+            {
+                if let Ok(text) = std::fs::read_to_string(&path)
+                    .or_else(|_| std::fs::read(&path).map(|b| b.iter().map(|c| *c as char).collect()))
+                {
+                    for mut p in styles::parse_pat(&text) {
+                        if pack.patterns.iter().any(|x| x.name == p.name) {
+                            continue;
+                        }
+                        p.name = p.name.clone();
+                        pack.patterns.push(p);
+                        changed = true;
+                    }
+                    *pick = pack.patterns.len().saturating_sub(1);
+                }
+            }
+        }
         ui.menu_button("Copy a built-in", |ui| {
             for h in creabim_core::Hatch::ALL {
                 if ui.button(h.label()).clicked() {
@@ -1246,7 +1297,11 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
                             .collect();
                         changed = true;
                     }
-                    if ui.small_button("✕").clicked() {
+                    if ui
+                        .small_button("x")
+                        .on_hover_text("Take this line family away")
+                        .clicked()
+                    {
                         remove = Some(j);
                     }
                 });
@@ -1266,6 +1321,7 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
                 },
                 offset: 0.0,
                 shift: 0.0,
+                phase: 0.0,
                 dashes: vec![],
                 along_longest: false,
             });

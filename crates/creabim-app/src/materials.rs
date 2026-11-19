@@ -176,7 +176,12 @@ fn shade(m: &Material, n: [f32; 3]) -> [f32; 3] {
 }
 
 /// The fields of a material. Returns the undo label of what changed, or "".
-pub(super) fn material_fields(ui: &mut egui::Ui, m: &mut Material) -> &'static str {
+/// `patterns` are the style pack's own hatch patterns, by name.
+pub(super) fn material_fields(
+    ui: &mut egui::Ui,
+    m: &mut Material,
+    patterns: &[String],
+) -> &'static str {
     let mut label = "";
     egui::Grid::new(ui.id().with("material_fields"))
         .num_columns(2)
@@ -241,6 +246,31 @@ pub(super) fn material_fields(ui: &mut egui::Ui, m: &mut Material) -> &'static s
                             label = "Material hatch";
                         }
                     }
+                });
+            ui.end_row();
+
+            // a pattern of the style pack's own, over the built-in one
+            ui.label("Pattern");
+            egui::ComboBox::from_id_salt("mat_pattern")
+                .icon(crate::props::combo_icon)
+                .selected_text(m.pattern.clone().unwrap_or_else(|| "As the cut hatch".into()))
+                .width(ui.available_width().min(170.0))
+                .truncate()
+                .show_ui(ui, |ui| {
+                    if ui.selectable_value(&mut m.pattern, None, "As the cut hatch").changed() {
+                        label = "Material pattern";
+                    }
+                    for p in patterns {
+                        if ui.selectable_value(&mut m.pattern, Some(p.clone()), p).changed() {
+                            label = "Material pattern";
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(if patterns.is_empty() {
+                    "Add patterns in File › Graphic styles › Patterns (from the library, or a .pat file) to choose them here"
+                } else {
+                    "One of the style pack's patterns for its cut faces; As the cut hatch uses the built-in one"
                 });
             ui.end_row();
 
@@ -758,7 +788,12 @@ impl CreaBimApp {
                 });
                 ui.add_space(8.0);
                 let mut edited = m.clone();
-                let label = material_fields(ui, &mut edited);
+                let pats: Vec<String> = creabim_core::styles::active_pack(self.doc.model())
+                    .patterns
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect();
+                let label = material_fields(ui, &mut edited, &pats);
                 if !label.is_empty() {
                     asks.push(Ask::Edit(id, label, edited));
                 }

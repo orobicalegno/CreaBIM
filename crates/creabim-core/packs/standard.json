@@ -1,6 +1,6 @@
 {
   "name": "Standard",
-  "description": "CreaBIM's own look: black linework with a clear weight hierarchy, grey poch\u00e9 and the usual hatches. Heavier pens at 1:75 and larger.",
+  "description": "Volumen's own look: black linework with a clear weight hierarchy, grey poch\u00e9 and the usual hatches. Heavier pens at 1:75 and larger.",
   "pens": [
     {
       "up_to": 75.0,

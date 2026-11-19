@@ -269,6 +269,10 @@ pub struct HatchLine {
     /// for staggered coursing.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub shift: f64,
+    /// Where the dashes start along the first line (a .pat line's origin
+    /// along it).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub phase: f64,
     /// Dash, gap, dash, gap…; a dash of 0 is a dot. None is solid.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dashes: Vec<f64>,
@@ -319,6 +323,7 @@ pub fn builtin_pattern(h: Hatch) -> HatchPattern {
         spacing,
         offset,
         shift: 0.0,
+        phase: 0.0,
         dashes: vec![],
         along_longest: false,
     };
@@ -1388,5 +1393,206 @@ mod tests {
             serde_json::from_str(r#"{"hatch":"Brick","color":[1,0,0]}"#).unwrap();
         assert_eq!(m.pattern, None);
         assert!(!serde_json::to_string(&m).unwrap().contains("pattern"));
+    }
+}
+
+/// Hatch patterns read from AutoCAD's `.pat` format: `*NAME, description`,
+/// then a line per family, `angle, x, y, dx, dy [, dash, gap…]` (a
+/// negative length a gap, 0 a dot). Sizes are taken as paper millimetres
+/// (acadiso.pat's), the background as none.
+pub fn parse_pat(text: &str) -> Vec<HatchPattern> {
+    let mut out: Vec<HatchPattern> = vec![];
+    for raw in text.lines() {
+        let line = raw.split(';').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(head) = line.strip_prefix('*') {
+            let name = head.split(',').next().unwrap_or("").trim().to_string();
+            out.push(HatchPattern {
+                name,
+                units: PatternUnits::Paper,
+                fill: None,
+                lines: vec![],
+                tile: None,
+            });
+            continue;
+        }
+        let Some(p) = out.last_mut() else { continue };
+        let nums: Vec<f64> = line
+            .split(',')
+            .filter_map(|t| t.trim().parse::<f64>().ok())
+            .collect();
+        if nums.len() < 5 {
+            continue;
+        }
+        let (angle, ox, oy, mut dx, mut dy) = (nums[0], nums[1], nums[2], nums[3], nums[4]);
+        if dy.abs() < 1e-9 {
+            continue;
+        }
+        if dy < 0.0 {
+            dy = -dy;
+            dx = -dx;
+        }
+        let a = angle.to_radians();
+        let (dir, nrm) = (
+            glam::DVec2::from_angle(a),
+            glam::DVec2::from_angle(a).perp(),
+        );
+        let o = glam::DVec2::new(ox, oy);
+        let (dashes, lead) = pat_dashes(&nums[5..]);
+        p.lines.push(HatchLine {
+            angle,
+            spacing: dy,
+            offset: o.dot(nrm),
+            shift: dx,
+            phase: o.dot(dir) + lead,
+            dashes,
+            along_longest: false,
+        });
+    }
+    out.retain(|p| !p.name.is_empty() && !p.lines.is_empty());
+    out
+}
+
+/// A .pat line's signed lengths as dash, gap, dash, gap…, and how far a
+/// leading gap moves the start.
+fn pat_dashes(signed: &[f64]) -> (Vec<f64>, f64) {
+    if signed.is_empty() {
+        return (vec![], 0.0);
+    }
+    let mut v: Vec<f64> = signed.to_vec();
+    // a leading gap goes to the end: the dashes start that much later
+    let mut lead = 0.0;
+    while v.first().is_some_and(|d| *d < 0.0) && v.iter().any(|d| *d >= 0.0) {
+        let g = v.remove(0);
+        lead += g.abs();
+        v.push(g);
+    }
+    let mut out: Vec<f64> = vec![];
+    for d in v {
+        let want_dash = out.len() % 2 == 0;
+        match (d >= 0.0, want_dash) {
+            (true, true) | (false, false) => out.push(d.abs()),
+            // two dashes running on: no gap between
+            (true, false) => {
+                out.push(0.0);
+                out.push(d);
+            }
+            // two gaps: one longer gap
+            (false, true) => {
+                if let Some(last) = out.last_mut() {
+                    *last += d.abs();
+                }
+            }
+        }
+    }
+    if out.len() % 2 == 1 {
+        out.push(0.0);
+    }
+    (out, -lead)
+}
+
+/// Volumen's library of architectural hatch patterns, in .pat terms
+/// (paper millimetres): concrete, sand, gravel, earth, brick courses,
+/// blockwork, stone, timber, tiles, plasterboard, steel and others.
+pub const PATTERN_LIBRARY: &str = "
+*Cemento, Concrete: dots and small strokes
+45, 0,0, 1.6,2.3, 0,-2.2
+135, 0.8,0.4, 1.9,3.1, 0.6,-3.7
+15, 1.3,0.9, 2.7,2.9, 0.4,-4.1
+70, 0.4,1.7, 2.1,3.4, 0,-1.8,0,-2.9
+*Calcestruzzo armato, Reinforced concrete: concrete with hatch
+45, 0,0, 0,3.2
+45, 0,0, 1.6,2.3, 0,-2.2
+135, 0.8,0.4, 1.9,3.1, 0.6,-3.7
+*Sabbia, Sand and render: fine dots
+0, 0,0, 0.55,0.9, 0,-1.1
+0, 0.3,0.45, 0.8,1.3, 0,-1.7
+37, 0.1,0.2, 0.9,1.6, 0,-2.3
+*Ghiaia, Gravel: short strokes every way
+0, 0,0, 1.4,2.6, 1.0,-2.6
+60, 0.7,0.5, 1.9,2.8, 0.9,-3.1
+120, 1.2,1.1, 2.3,3.0, 0.8,-3.4
+30, 0.3,1.8, 1.7,3.3, 0,-2.4
+*Terreno, Earth: groups of lines across
+0, 0,0, 3,3, 3,-3
+0, 0,0.6, 3,3, 3,-3
+0, 0,1.2, 3,3, 3,-3
+90, 0,3, 3,3, 3,-3
+90, 0.6,3, 3,3, 3,-3
+90, 1.2,3, 3,3, 3,-3
+*Mattoni, Brick courses
+0, 0,0, 0,2
+90, 0,0, 2,2, 2,-2
+*Mattoni sezione, Brick in section: double diagonals
+45, 0,0, 0,2.4
+45, 0,0.5, 0,2.4
+*Blocchi, Concrete blockwork
+0, 0,0, 0,4
+90, 0,0, 4,4, 4,-4
+45, 0,0, 1.4,1.4, 0,-1.98
+*Pietra, Stone: irregular courses
+0, 0,0, 0,3.4
+90, 0,0, 3.4,3.4, 3.4,-3.4
+90, 1.7,3.4, 3.4,6.8, 3.4,-10.2
+15, 0.5,0.9, 4.1,3.4, 1.2,-5.8
+*Legno, Timber in section: rings
+0, 0,0, 0,0.9, 6,-0.7,2,-0.6
+0, 0.4,0.45, 0,0.9, 4.5,-1.1,3.1,-0.5
+*Piastrelle, Tiles: a square grid
+0, 0,0, 0,5
+90, 0,0, 0,5
+*Cartongesso, Plasterboard: fine dots
+45, 0,0, 0.6,0.6, 0,-0.85
+*Acciaio, Steel: close double diagonals
+45, 0,0, 0,1.2
+45, 0,0.3, 0,1.2
+*Isolante rigido, Rigid insulation: a lattice
+45, 0,0, 0,2.5
+135, 0,0, 0,2.5
+0, 0,0, 0,5
+*Diagonali, General: diagonal lines
+45, 0,0, 0,3.175
+*Incrociato, General: crossed lines
+45, 0,0, 0,3.175
+135, 0,0, 0,3.175
+*Erba, Grass
+90, 0,0, 3,3, 1,-5
+75, 0.3,0, 3,3, 0.9,-5.1
+105, -0.3,0, 3,3, 0.9,-5.1
+*Acqua, Water
+0, 0,0, 4,2.4, 3,-5
+0, 2,1.2, 4,2.4, 1.5,-6.5
+";
+
+/// The library's patterns, ready to add to a pack.
+pub fn library_patterns() -> Vec<HatchPattern> {
+    parse_pat(PATTERN_LIBRARY)
+}
+
+#[cfg(test)]
+mod pat_tests {
+    use super::*;
+
+    #[test]
+    fn a_pat_file_reads_as_patterns() {
+        let pats = parse_pat(
+            "; a comment\n*MINE, two families\n45, 0,0, 0,3.175\n0, 0,0, 1,2, 3,-1,0,-1\n*EMPTY\n",
+        );
+        assert_eq!(pats.len(), 1, "a pattern with no lines is left out");
+        let p = &pats[0];
+        assert_eq!(p.name, "MINE");
+        assert_eq!(p.lines.len(), 2);
+        assert_eq!(p.lines[0].spacing, 3.175);
+        assert_eq!(p.lines[1].shift, 1.0);
+        assert_eq!(p.lines[1].dashes, vec![3.0, 1.0, 0.0, 1.0]);
+        // a leading gap moves the start along the line
+        let (d, lead) = pat_dashes(&[-1.0, 2.0, -0.5]);
+        assert_eq!(d, vec![2.0, 1.5]);
+        assert_eq!(lead, -1.0);
+        let lib = library_patterns();
+        assert!(lib.len() >= 15, "{}", lib.len());
+        assert!(lib.iter().any(|p| p.name == "Cemento"));
     }
 }

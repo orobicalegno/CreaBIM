@@ -55,7 +55,16 @@ A hatch pattern is one or more families of parallel lines (an angle, a spacing, 
 - *on paper (mm)*: the pattern is the same size at any scale, like fixed-size dots.
 - *true size (m)*: the pattern is drawn to the model's size, like brick coursing or tiles.
 
-A material's cut faces take the pattern its *Hatch* names (*Brick*, *Concrete*…). A pack pattern with the same name replaces that built-in for every material using it. A material can also name any pattern of the pack.
+The list starts empty: it holds the pack's own patterns. To get some:
+
+- **From the library**: Volumen's architectural patterns, each with its preview: *Cemento*, *Calcestruzzo armato*, *Sabbia*, *Ghiaia*, *Terreno*, *Mattoni*, *Mattoni sezione*, *Blocchi*, *Pietra*, *Legno*, *Piastrelle*, *Cartongesso*, *Acciaio*, *Isolante rigido*, *Diagonali*, *Incrociato*, *Erba*, *Acqua*.
+- **Import .pat…**: every pattern of an AutoCAD `.pat` file, such as `acadiso.pat` from your AutoCAD (in its *Support* folder), or any other. Sizes are read as millimetres on paper.
+- **Copy a built-in**: one of the patterns materials use by default, to change it.
+- **New pattern**: one line family to start from.
+
+In a family's *Dashes*, type dash, gap, dash, gap… separated by spaces (`2 1` dashed, `4 1 0 1` dash and dot, `0 1` dots; empty is solid). *Stagger* slides each line's dashes along from the one before.
+
+A material's cut faces take the pattern its *Cut hatch* names (*Brick*, *Concrete*…). A pack pattern with the same name replaces that built-in for every material using it. A material can also take any pattern of the pack: pick it in *Pattern*, under *Cut hatch* in the material's editor.
 
 ## View templates
 

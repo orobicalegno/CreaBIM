@@ -530,6 +530,7 @@ pub fn pattern_lines(p: &HatchPattern, polygon: &[DVec2], k: f64) -> Vec<(DVec2,
             spacing,
             l.offset * unit,
             l.shift * unit,
+            l.phase * unit,
             &dashes,
             dot,
             &mut out,
@@ -578,6 +579,7 @@ fn family(
     spacing: f64,
     offset: f64,
     shift: f64,
+    phase0: f64,
     dashes: &[f64],
     dot: f64,
     out: &mut Vec<(DVec2, DVec2)>,
@@ -617,7 +619,7 @@ fn family(
                 return false;
             }
             // dashes start at x = shift * k, so rows stagger
-            let phase = (k as f64 * shift).rem_euclid(period);
+            let phase = (phase0 + k as f64 * shift).rem_euclid(period);
             let mut x = ((x0 - phase) / period).floor() * period + phase;
             while x < *x1 {
                 let mut u = x;
@@ -749,6 +751,7 @@ mod tests {
             spacing: 0.1,
             offset: 0.0,
             shift: 0.0,
+            phase: 0.0,
             dashes: vec![],
             along_longest: false,
         }];
@@ -773,6 +776,7 @@ mod tests {
             spacing: 0.5,
             offset: 0.25,
             shift: 0.0,
+            phase: 0.0,
             dashes: vec![0.1, 0.1],
             along_longest: false,
         }];
