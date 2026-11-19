@@ -580,6 +580,7 @@ impl CreaBimApp {
         let mut edit_bar = self.shell.settings.edit_bar.clone();
         let mut axis_lines = self.shell.settings.axis_lines;
         let mut crosshair = self.shell.settings.crosshair;
+        let mut command_line = self.shell.settings.command_line;
         let mut cursor_size = self.shell.settings.cursor_size;
         let mut interaction = self.shell.settings.interaction.clone();
         let mut edge_w = self.shell.settings.edit_edge_width;
@@ -779,6 +780,9 @@ impl CreaBimApp {
                                         crate::props::row(ui, "Vertex size", |ui| {
                                             ui.add(egui::Slider::new(&mut vert_s, 2.0..=10.0).step_by(1.0).suffix(" px"))
                                         });
+                                        crate::props::section(ui, "Command line");
+                                        ui.checkbox(&mut command_line, "AutoCAD's command line")
+                                            .on_hover_text("Typing in a drawing goes to the command line: L, C, TR, M and the other aliases, points as x,y, @dx,dy or @distance<angle. Off, single keys are shortcuts again.");
                                         crate::props::section(ui, "2D cursor");
                                         ui.checkbox(&mut crosshair, "Crosshairs, as in AutoCAD")
                                             .on_hover_text("In plans and sections the pointer is two lines right across the view, with the pickbox square while selecting.");

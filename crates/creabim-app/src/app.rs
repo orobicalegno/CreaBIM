@@ -31,6 +31,8 @@ pub(crate) mod appmenu;
 mod areasui;
 #[path = "assemblies.rs"]
 mod assemblies;
+#[path = "cmdline.rs"]
+pub(crate) mod cmdline;
 #[path = "cropui.rs"]
 mod cropui;
 #[path = "divideui.rs"]
@@ -148,6 +150,8 @@ pub struct CreaBimApp {
     profiles: profilesui::ProfilesUi,
     masters: mastersui::MastersUi,
     log_ui: reportui::LogUi,
+    /// AutoCAD's command line.
+    cmd: cmdline::CmdLine,
     /// Report a problem asked for: the themed window is open; whether to
     /// put the project in.
     report_ask: Option<bool>,
@@ -432,6 +436,7 @@ impl CreaBimApp {
             profiles: Default::default(),
             masters: Default::default(),
             log_ui: Default::default(),
+            cmd: Default::default(),
             report_ask: None,
             close_ask: false,
             close_state: Default::default(),
@@ -11687,6 +11692,7 @@ impl eframe::App for CreaBimApp {
         crate::snaps::set_current_marks(live.marks_len());
         {
             let _p = Perf::new("frame: prompts and keys");
+            self.cmd_keys(&ctx);
             self.step_prompt(&ctx);
             self.workspace_prompt(&ctx);
             self.area_keys(&ctx);
@@ -12002,6 +12008,7 @@ impl eframe::App for CreaBimApp {
         self.report_window(&ctx);
         self.drafting_settings_window(&ctx);
         self.layer_manager_window(&ctx);
+        self.cmdline_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus
         self.plan.web_menus = false;

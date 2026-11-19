@@ -236,6 +236,9 @@ pub struct Settings {
     pub plan_grid: bool,
     /// AutoCAD's crosshairs in plans and sections, in place of the pointer.
     pub crosshair: bool,
+    /// AutoCAD's command line over the drawings, and typing in a drawing
+    /// going to it.
+    pub command_line: bool,
     /// How long their lines are, per cent of the view (CURSORSIZE; 100
     /// runs right across it).
     pub cursor_size: f32,
@@ -287,6 +290,7 @@ impl Default for Settings {
             axis_lines: true,
             plan_grid: true,
             crosshair: true,
+            command_line: true,
             cursor_size: 100.0,
             interaction: "orange".into(),
             edit_edge_width: 1.0,
