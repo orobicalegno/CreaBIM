@@ -483,6 +483,7 @@ impl CreaBimApp {
             "menu:Materials" => self.materials_menu(),
             "menu:Help" => self.help_menu(),
             "menu:Create" => self.create_menu(),
+            "menu:Disegna" => self.draw_menu(),
             "tab:schedules" => schedule_items(),
             "tab:ifc" => vec![
                 Item::new("open", "Open an IFC file…").icon("folder-open"),
@@ -992,6 +993,89 @@ impl CreaBimApp {
 
     /// Everything that can be placed or made, by kind, as in the tool
     /// palette, with the views and sheets the File menu can also make.
+    /// Disegna: AutoCAD's drawing and editing commands, in Italian, each
+    /// with its alias; they run on the command line.
+    fn draw_menu(&self) -> Vec<Item> {
+        let c = |cmd: &str, label: &str, key: &'static str, icon: &'static str| {
+            Item::new(format!("cmdline:{cmd}"), label)
+                .key(key)
+                .icon(icon)
+        };
+        vec![
+            Item::Header("Disegno".into()),
+            c("LINE", "Linea", "L", "slash"),
+            c("PLINE", "Polilinea", "PL", "spline"),
+            c("XLINE", "Linea di costruzione", "XL", "guides"),
+            Item::sub(
+                "Cerchio",
+                vec![
+                    c("CIRCLE", "Centro, raggio", "C", "circle"),
+                    c("CIRCLE 2P", "2 punti", "", "circle"),
+                    c("CIRCLE 3P", "3 punti", "", "circle"),
+                ],
+            )
+            .icon("circle"),
+            Item::sub(
+                "Arco",
+                vec![
+                    c("ARC", "3 punti", "A", "arc-length"),
+                    c("ARC C", "Inizio, centro, fine", "", "arc-length"),
+                ],
+            )
+            .icon("arc-length"),
+            c("RECTANG", "Rettangolo", "REC", "rectangle-horizontal"),
+            c("POLYGON", "Poligono", "POL", "diamond"),
+            c("ELLIPSE", "Ellisse", "EL", "ellipse"),
+            c("SPLINE", "Spline", "SPL", "spline"),
+            c("HATCH", "Tratteggio", "H", "hash"),
+            c("TEXT", "Testo", "T", "text-tool"),
+            Item::sub(
+                "Quota",
+                vec![
+                    c("DIMLINEAR", "Lineare", "DLI", "dimension"),
+                    c("DIMANGULAR", "Angolare", "DAN", "angle"),
+                    c("DIMRADIUS", "Raggio", "DRA", "radius"),
+                    c("DIMDIAMETER", "Diametro", "DDI", "diameter"),
+                ],
+            )
+            .icon("ruler"),
+            c("BLOCK", "Crea blocco", "B", "box"),
+            c("NORTH", "Nord", "", "north-arrow"),
+            Item::Separator,
+            Item::Header("Modifica".into()),
+            c("ERASE", "Cancella", "E", "trash-2"),
+            c("MOVE", "Sposta", "M", "move"),
+            c("COPY", "Copia", "CO", "copy"),
+            c("ROTATE", "Ruota", "RO", "rotate-cw"),
+            c("MIRROR", "Specchio", "MI", "flip-horizontal-2"),
+            c("SCALE", "Scala", "SC", "scaling"),
+            c("TRIM", "Taglia", "TR", "scissors"),
+            c("EXTEND", "Estendi", "EX", "arrow-right"),
+            c("FILLET", "Raccordo", "F", "corner-down-right"),
+            c("CHAMFER", "Cima", "CHA", "corner-down-right"),
+            c("OFFSET", "Offset", "O", "offset"),
+            Item::sub(
+                "Serie",
+                vec![
+                    c("ARRAY", "Rettangolare", "AR", "grid-3x3"),
+                    c("ARRAYPOLAR", "Polare", "", "rotate-cw"),
+                ],
+            )
+            .icon("grid-3x3"),
+            c("EXPLODE", "Esplodi", "X", "box"),
+            Item::Separator,
+            Item::Header("Strumenti".into()),
+            c("DIST", "Distanza", "DI", "ruler"),
+            c("AREA", "Area", "AA", "square"),
+            c("ID", "Coordinate di un punto", "ID", "crosshair"),
+            c("LAYER", "Layer", "LA", "layers"),
+            c("OSNAP", "Impostazioni snap", "OS", "settings"),
+            Item::new("cmdline:toggle", "Riga di comando")
+                .checked(self.shell.settings.command_line)
+                .hint("On, typing in a drawing goes to the command line, as in AutoCAD"),
+        ]
+    }
+
     fn create_menu(&self) -> Vec<Item> {
         let mut items = vec![];
         for (group, title) in [
@@ -1642,6 +1726,26 @@ impl CreaBimApp {
                 }
             }
             "osnap.settings" => self.shell.drafting_settings = true,
+            // a command from the Disegna menu, as if typed
+            "cmdline" => {
+                if arg == "toggle" {
+                    let s = &mut self.shell.settings;
+                    s.command_line = !s.command_line;
+                    s.store();
+                    self.status = if self.shell.settings.command_line {
+                        "Command line on: type a command, such as L, C or TR, in a drawing.".into()
+                    } else {
+                        "Command line off: single keys are shortcuts again.".into()
+                    };
+                } else {
+                    // "CIRCLE 3P": the command, then its option
+                    let (c, option) = arg.split_once(' ').unwrap_or((arg, ""));
+                    self.cmd_start(ctx, c);
+                    if !option.is_empty() {
+                        self.cmd_enter(ctx, option);
+                    }
+                }
+            }
             "layers.manager" => self.shell.layer_manager = !self.shell.layer_manager,
             "osnap.once" => {
                 let kinds = crate::snaps::SnapSettings::SWITCH_KINDS;
@@ -3724,7 +3828,7 @@ impl CreaBimApp {
         json!({
             "theme": self.theme(),
             "popup": self.popup_key(),
-            "menus": (["File", "Edit", "View", "Create", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
+            "menus": (["File", "Edit", "View", "Create", "Disegna", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
             "quick": quick,
             // the selection count is in the status bar, where it belongs
             "doc": {
@@ -4955,6 +5059,7 @@ impl CreaBimApp {
             // the Create menu lists every tool: its sections side by side
             let columns = match p.key.as_str() {
                 "menu:Create" => 3,
+                "menu:Disegna" => 3,
                 _ => 1,
             };
             (

@@ -449,6 +449,18 @@ pub struct PlanState {
     pub menu_request: Option<egui::Pos2>,
     /// Where Shift + right-click asked for AutoCAD's object snap menu.
     pub osnap_menu_request: Option<egui::Pos2>,
+    /// A point typed on the command line, for this view's tool to take as
+    /// a click there (drawing coordinates), exactly, with no snap.
+    pub forced_point: Option<(ElementId, DVec2)>,
+    /// The last point clicked or typed (AutoCAD's LASTPOINT), for @.
+    pub last_point: Option<(ElementId, DVec2)>,
+    /// Where the pointer is in a view, for a distance typed alone.
+    pub cursor_at: Option<(ElementId, DVec2)>,
+    /// Enter on an empty command line: finish the shape being drawn.
+    pub cmd_finish: bool,
+    /// A command collecting points of its own (DIST, ID, CIRCLE 3P…): the
+    /// view and the points so far. Clicks go here, not to the tool.
+    pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
     /// The one object snap the next pick uses (AutoCAD's override).
     pub snap_once: Option<snaps::SnapKind>,
     /// The override was used by a click: it goes before the next frame.
@@ -681,6 +693,11 @@ impl Default for PlanState {
             chain: (None, vec![]),
             rested: (None, vec![]),
             osnap_menu_request: None,
+            forced_point: None,
+            last_point: None,
+            cursor_at: None,
+            cmd_finish: false,
+            cmd_pick: None,
             snap_once: None,
             snap_once_spent: false,
             rest: None,
@@ -861,6 +878,14 @@ pub fn show(
         Sense::click_and_drag()
     };
     let response = ui.interact(rect, ui.id().with(("view", view)), sense);
+    // a point typed on the command line: this frame's click, exactly there
+    let forced = state
+        .forced_point
+        .filter(|(v, _)| *v == view)
+        .map(|(_, p)| p);
+    if forced.is_some() {
+        state.forced_point = None;
+    }
     let painter = ui.painter_at(rect);
     if let Some(bg) = style.background {
         painter.rect_filled(rect, 0.0, bg);
@@ -1589,7 +1614,7 @@ pub fn show(
             | Tool::RoomSeparator
     ) && matches!(kind, PaneKind::Plan { .. });
     let mut tracker_enter = false;
-    let hover_world = match (state.pending, pointer_world, line_tool) {
+    let hover_world_ = match (state.pending, pointer_world, line_tool) {
         (Some(a), Some(b), true) if response.hovered() => {
             if state.tracker.keys(ui.ctx()) == crate::tracker::Keys::Enter {
                 tracker_enter = true;
@@ -1603,6 +1628,11 @@ pub fn show(
             pointer_world
         }
     };
+
+    let hover_world = forced.or(hover_world_);
+    if let (Some(h), true) = (hover_world_, response.hovered()) {
+        state.cursor_at = Some((view, h));
+    }
 
     // the Slab tool's modes, and Line / Arc while clicking a slab outline
     if let PaneKind::Plan { level } = kind {
@@ -1643,10 +1673,19 @@ pub fn show(
                     here && !typing && i.key_pressed(egui::Key::Backspace),
                 )
             });
-            let click = match (response.clicked(), hover_world, response.hover_pos()) {
-                (true, Some(p), Some(h)) => Some((p, o.near_first(h, &project))),
+            let click = match (
+                forced,
+                response.clicked(),
+                hover_world,
+                response.hover_pos(),
+            ) {
+                (Some(p), ..) => Some((p, o.near_first(xf.to_screen(p), &project))),
+                (None, true, Some(p), Some(h)) => Some((p, o.near_first(h, &project))),
                 _ => None,
             };
+            if let Some((p, _)) = click {
+                state.last_point = Some((view, p));
+            }
             let right = response.secondary_clicked() && !shift;
             let double = response.double_clicked();
             let enter = enter || std::mem::take(&mut state.close_outline);
@@ -2624,8 +2663,12 @@ pub fn show(
     let esc =
         ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
     // a detail path that can be made is finished, never dropped
+    let finish = state.cmd_finish && state.details.view == Some(view);
+    if finish {
+        state.cmd_finish = false;
+    }
     if tool == Tool::Detail
-        && (esc || right)
+        && (esc || right || finish)
         && state.details.view == Some(view)
         && crate::detailtool::keep(doc, state, selection)
     {
@@ -2842,11 +2885,23 @@ pub fn show(
         }
         return None;
     }
-    if response.clicked() {
+    if response.clicked() || forced.is_some() {
         state.tracker.clear();
         let p = hover_world?;
-        let at = response.interact_pointer_pos().unwrap_or_default();
-        let raw = xf.to_world(at);
+        let at = match forced {
+            Some(f) => xf.to_screen(f),
+            None => response.interact_pointer_pos().unwrap_or_default(),
+        };
+        let raw = forced.unwrap_or_else(|| xf.to_world(at));
+        state.last_point = Some((view, p));
+        // a command collecting its own points takes the click
+        if let Some((v, pts)) = state.cmd_pick.as_mut() {
+            if v.is_none_or(|v| v == view) {
+                *v = Some(view);
+                pts.push(p);
+                return None;
+            }
+        }
         // what is pre-selected there (Tab may have moved past the first);
         // else linework first (edges, symbols), then what the view ray hits
         let hover_pick = state.hover.as_mut().and_then(|h| {

@@ -97,6 +97,7 @@ pub const PAGES: &[(&str, &str, &str)] = &[
     page!("Annotation", "spot-levels"),
     page!("Annotation", "notes"),
     page!("Annotation", "styles"),
+    page!("Drawing aids", "command-line"),
     page!("Drawing aids", "snaps"),
     page!("Drawing aids", "guides"),
     page!("Drawing aids", "units"),
