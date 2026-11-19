@@ -179,7 +179,7 @@ impl CreaBimApp {
             "UCSICON" => self.ask(name, "Enter an option [ON/OFF/ORigin/Noorigin] <ON>:", Wants::Word(super::cmdline::WordFor::UcsIcon)),
             "ZOOM" => self.ask(
                 name,
-                "[Extents/Window/Previous] <Extents>:",
+                "[All/Extents/Window/Previous] <Extents>:",
                 Wants::Points {
                     n: 0,
                     then: Finish::ZoomWindow,
@@ -324,6 +324,10 @@ impl CreaBimApp {
                 self.plan.cmd_pick = None;
                 self.zoom_extents();
             }
+            ("ZOOM", "A" | "ALL" | "TUTTO") => {
+                self.end_pick();
+                self.zoom_all();
+            }
             ("ZOOM", "W" | "WINDOW" | "FINESTRA") => {
                 self.cmd_pick_start(
                     "ZOOM",
@@ -337,7 +341,7 @@ impl CreaBimApp {
                 self.plan.cmd_pick = None;
                 match self.cmd.zoomed.pop() {
                     Some((v, cam)) => {
-                        self.plan.cameras.insert(v, cam);
+                        self.set_camera(v, cam);
                         self.say("ZOOM Previous.");
                     }
                     None => self.say("No previous view."),
@@ -346,6 +350,38 @@ impl CreaBimApp {
             _ => return false,
         }
         true
+    }
+
+    /// Show `cam` in every area that shows `v`.
+    fn set_camera(&mut self, v: ElementId, cam: (DVec2, f32)) {
+        self.plan.cameras.insert(v, cam);
+        for (k, c) in self.plan.area_cameras.iter_mut() {
+            if k.1 == v {
+                *c = cam;
+            }
+        }
+    }
+
+    /// ZOOM All: everything in the view and the origin, with room round it.
+    fn zoom_all(&mut self) {
+        let Some(v) = self.cmd_view() else { return };
+        let Some(d) = self.drawing_live(v) else {
+            return;
+        };
+        let mut lo = DVec2::ZERO;
+        let mut hi = DVec2::ZERO;
+        for it in &d.items {
+            if let Some((a, b)) = it.bounds() {
+                lo = lo.min(a);
+                hi = hi.max(b);
+            }
+        }
+        self.remember_zoom(v);
+        let size = ((hi - lo) * 1.2).max(DVec2::splat(1.0));
+        let pane = self.rect_2d.map_or(egui::vec2(800.0, 600.0), |r| r.size());
+        let scale = (pane.x as f64 / size.x).min(pane.y as f64 / size.y);
+        self.set_camera(v, ((lo + hi) / 2.0, scale as f32));
+        self.say("ZOOM All.");
     }
 
     fn remember_zoom(&mut self, v: ElementId) {
@@ -360,8 +396,10 @@ impl CreaBimApp {
     fn zoom_extents(&mut self) {
         let Some(v) = self.cmd_view() else { return };
         self.remember_zoom(v);
-        // the view fits its drawing again when its camera is gone
+        // the view fits its drawing again when its camera is gone: in
+        // every area that shows it (a docked area keeps its own camera)
         self.plan.cameras.remove(&v);
+        self.plan.area_cameras.retain(|(_, view), _| *view != v);
         self.say("ZOOM Extents.");
     }
 
@@ -480,8 +518,156 @@ impl CreaBimApp {
         }
     }
 
+    /// EXPLODE on the selection: a placed symbol back into its linework; a
+    /// polyline, rectangle or polygon into its lines; a DXF reference into
+    /// linework, its layers becoming drafting layers.
+    pub(super) fn explode_selection(&mut self) {
+        let model = self.doc.model();
+        let mut tx = Transaction::new("Explode");
+        let (mut parts, mut layers_new) = (0usize, Vec::<String>::new());
+        let mut table = creabim_core::detail::layers(model);
+        let mut touched = false;
+        for id in self.selection.all() {
+            let Some(e) = model.get(id) else { continue };
+            match &e.kind {
+                ElementKind::Detail(d) if matches!(d.kind, DetailKind::Symbol { .. }) => {
+                    if let Some(t) = creabim_core::detail::explode(model, id) {
+                        parts += t.ops.len().saturating_sub(1);
+                        tx.ops.extend(t.ops);
+                        touched = true;
+                    }
+                }
+                ElementKind::Detail(d) => {
+                    let Some((mut path, closed)) = d.draft_path() else {
+                        continue;
+                    };
+                    let shape = d.kind.as_draft().map(|k| k.0);
+                    // circles, ellipses, arcs and splines stay whole
+                    if !matches!(
+                        shape,
+                        Some(
+                            DraftShape::Line
+                                | DraftShape::Closed
+                                | DraftShape::Rectangle
+                                | DraftShape::Polygon { .. }
+                        )
+                    ) {
+                        continue;
+                    }
+                    if closed && !path.is_empty() {
+                        path.push(path[0]);
+                    }
+                    if path.len() < 3 {
+                        continue;
+                    }
+                    for w in path.windows(2) {
+                        let mut piece = d.clone();
+                        piece.kind = DetailKind::Draft {
+                            shape: DraftShape::Line,
+                            pen: d
+                                .kind
+                                .as_draft()
+                                .map_or(creabim_core::LinePen::Medium, |k| k.1),
+                        };
+                        piece.points = vec![w[0], w[1]];
+                        piece.fill = None;
+                        tx = tx.insert(Element::new("Line", ElementKind::Detail(piece)));
+                        parts += 1;
+                    }
+                    tx = tx.remove_cascade(model, id);
+                    touched = true;
+                }
+                ElementKind::Reference(r) => {
+                    let creabim_core::RefSource::Dxf { path } = &r.source else {
+                        continue;
+                    };
+                    let Some(view) = self
+                        .cmd_view()
+                        .filter(|v| r.shown_in.contains(v))
+                        .or_else(|| r.shown_in.first().copied())
+                    else {
+                        continue;
+                    };
+                    let items = match std::fs::read(path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|b| {
+                            let text = creabim_exchange::titleblock::dxf_text(&b);
+                            creabim_exchange::titleblock::dxf_items_layered(&text)
+                        }) {
+                        Ok(items) => items,
+                        Err(err) => {
+                            self.say(format!("EXPLODE: couldn't read {path}: {err}"));
+                            return;
+                        }
+                    };
+                    for (it, layer) in items {
+                        let creabim_core::titleblock::TitleItem::Line { points, .. } = it else {
+                            continue;
+                        };
+                        if points.len() < 2 {
+                            continue;
+                        }
+                        // the reference's own place, turn and size; mm to m
+                        let pts: Vec<DVec2> = points.iter().map(|p| r.place(*p / 1000.0)).collect();
+                        let closed = pts.len() > 3 && pts[0].distance(*pts.last().unwrap()) < 1e-9;
+                        let (shape, pts) = if closed {
+                            (DraftShape::Closed, pts[..pts.len() - 1].to_vec())
+                        } else {
+                            (DraftShape::Line, pts)
+                        };
+                        let mut d = self.new_piece(view, shape, pts);
+                        let name = if layer.trim().is_empty() {
+                            "0".to_string()
+                        } else {
+                            layer.trim().to_string()
+                        };
+                        if table.get(&name).is_none() && !layers_new.contains(&name) {
+                            layers_new.push(name.clone());
+                        }
+                        d.layer = Some(name);
+                        d.linetype = None;
+                        tx = tx.insert(Element::new("Line", ElementKind::Detail(d)));
+                        parts += 1;
+                    }
+                    tx = tx.remove_cascade(model, id);
+                    touched = true;
+                }
+                _ => {}
+            }
+        }
+        if !touched {
+            self.say("EXPLODE: nothing that explodes is selected (symbols, polylines, rectangles, polygons, DXF references).");
+            return;
+        }
+        if !layers_new.is_empty() {
+            for n in &layers_new {
+                table.layers.push(creabim_core::DraftLayer::named(n));
+            }
+            tx.ops
+                .extend(creabim_core::detail::set_layers(self.doc.model(), table).ops);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => {
+                self.selection.clear();
+                self.say(format!(
+                    "EXPLODE: {parts} pieces{}. Ctrl+Z puts it back.",
+                    if layers_new.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} drafting layers from the DXF", layers_new.len())
+                    }
+                ));
+            }
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
+        }
+    }
+
     /// JOIN and the like, on the selection.
     pub(super) fn cmd_selected(&mut self, what: &'static str) {
+        if what == "EXPLODE" {
+            self.explode_selection();
+            return;
+        }
         if what != "JOIN" {
             return;
         }
@@ -835,9 +1021,7 @@ impl CreaBimApp {
                 let size = (hi - lo).max(DVec2::splat(1e-3));
                 let pane = self.rect_2d.map_or(egui::vec2(800.0, 600.0), |r| r.size());
                 let scale = (pane.x as f64 / size.x).min(pane.y as f64 / size.y) * 0.95;
-                self.plan
-                    .cameras
-                    .insert(view, ((lo + hi) / 2.0, scale as f32));
+                self.set_camera(view, ((lo + hi) / 2.0, scale as f32));
                 self.say("ZOOM Window.");
             }
             (Finish::ZoomWindow, []) => self.zoom_extents(),

@@ -41,6 +41,9 @@ pub struct CmdLine {
     pub picks: Vec<DVec2>,
     /// The command a FROM or M2P interrupted, to go back to.
     pub resume: Option<Running>,
+    /// Esc was pressed with nothing typed: the tool in use ends once the
+    /// views have had it (AutoCAD's Esc ends any command).
+    pub esc: bool,
     /// Each view's camera before the last ZOOM, for ZOOM Previous.
     pub zoomed: Vec<(ElementId, (DVec2, f32))>,
 }
@@ -359,6 +362,9 @@ impl CreaBimApp {
     /// Typing in a drawing goes to the command line: the keys are taken
     /// before the views and the shortcuts see them.
     pub(super) fn cmd_keys(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.egui_wants_keyboard_input() {
+            self.cmd.esc = true;
+        }
         // a move, rotate or scale running takes its typed length itself
         if !self.shell.settings.command_line
             || ctx.egui_wants_keyboard_input()
@@ -1073,7 +1079,7 @@ impl CreaBimApp {
             }
             "ARRAY" => edit(self, ctx, D::Array),
             "ARRAYPOLAR" => edit(self, ctx, D::Polar),
-            "EXPLODE" => self.cmd_explode(),
+            "EXPLODE" => self.cmd_explode(ctx),
             "BLOCK" => self.make_symbol(),
             "UNDO" => self.run_command(ctx, Command::Undo, None),
             "REDO" => self.run_command(ctx, Command::Redo, None),
@@ -1124,21 +1130,18 @@ impl CreaBimApp {
     }
 
     /// EXPLODE: the symbols selected back into linework.
-    fn cmd_explode(&mut self) {
-        let ids: Vec<ElementId> = self.selection.all();
-        let mut done = 0;
-        for id in ids {
-            if let Some(tx) = creabim_core::detail::explode(self.doc.model(), id) {
-                if self.doc.commit(tx).is_ok() {
-                    done += 1;
-                }
-            }
+    /// EXPLODE: what is selected broken into its parts, as AutoCAD's.
+    fn cmd_explode(&mut self, ctx: &egui::Context) {
+        if self.selection.is_empty() {
+            self.pick_tool(ctx, Tool::Select);
+            self.ask(
+                "EXPLODE",
+                "Select objects, then Enter:",
+                Wants::SelectThen("EXPLODE"),
+            );
+            return;
         }
-        self.say(if done == 0 {
-            "EXPLODE: select placed symbols first.".to_string()
-        } else {
-            format!("EXPLODE: {done} symbols turned back into linework.")
-        });
+        self.explode_selection();
     }
 
     /// A command gathering points has them all (typed or clicked): it
@@ -1174,6 +1177,19 @@ impl CreaBimApp {
     /// said and the prompt with what is being typed.
     pub(super) fn cmdline_window(&mut self, ctx: &egui::Context) {
         self.cmd_tick();
+        // Esc ends the command: back to selecting, what is drawn kept
+        if std::mem::take(&mut self.cmd.esc)
+            && self.plan.modal.is_none()
+            && self.plan.tool != Tool::Select
+            && !ctx.egui_wants_keyboard_input()
+        {
+            crate::detailtool::keep(&mut self.doc, &mut self.plan, &mut self.selection);
+            self.plan.cmd_pick = None;
+            self.plan.cmd_preview = None;
+            self.cmd.running = None;
+            self.pick_tool(ctx, Tool::Select);
+            self.say("*Cancel*");
+        }
         if !self.shell.settings.command_line {
             return;
         }
@@ -1229,7 +1245,10 @@ impl CreaBimApp {
                         });
                     });
             });
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        // the caret blinks only while something is typed or asked for
+        if !self.cmd.text.is_empty() || self.cmd.running.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
     }
 }
 

@@ -1086,6 +1086,7 @@ impl CreaBimApp {
                 "Zoom",
                 vec![
                     c("ZOOM E", "Estensioni", "Z E", "maximize-2"),
+                    c("ZOOM A", "Tutto", "Z A", "maximize-2"),
                     c("ZOOM W", "Finestra", "Z W", "zoom-in"),
                     c("ZOOM P", "Precedente", "Z P", "zoom-out"),
                 ],

@@ -463,6 +463,9 @@ pub struct PlanState {
     pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
     /// What a command shows as it goes (a polyline with its arcs).
     pub cmd_preview: Option<(ElementId, Vec<DVec2>)>,
+    /// Until when the view counts as moving (a wheel turn, a pan): the
+    /// hatches wait till then.
+    pub nav_until: f64,
     /// The UCS plans work in, the ones before it (UCS Previous), and how
     /// far each plan view is turned (PLAN).
     pub ucs: Ucs,
@@ -712,6 +715,7 @@ impl Default for PlanState {
             cmd_finish: false,
             cmd_pick: None,
             cmd_preview: None,
+            nav_until: 0.0,
             ucs: Ucs::default(),
             ucs_prev: vec![],
             view_rot: HashMap::new(),
@@ -999,6 +1003,17 @@ pub fn show(
         (_, t) => t,
     };
     let mm = style.mm();
+    // a drawing tool takes its point as the button goes down, as AutoCAD
+    // does: a hand that moves a little while clicking loses no point
+    let pressed =
+        response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
+    let pick = if tool == Tool::Select
+        || !matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
+    {
+        response.clicked()
+    } else {
+        pressed
+    };
 
     // orbit a 3D view by dragging it
     if kind == PaneKind::Axonometric && response.dragged_by(egui::PointerButton::Primary) {
@@ -1049,6 +1064,9 @@ pub fn show(
     if response.hovered() {
         // a touchpad's two fingers pan; a wheel and a pinch zoom (MU24)
         let (pan, scroll) = wheel(ui);
+        if pan != Vec2::ZERO || scroll != 0.0 {
+            state.nav_until = ui.input(|i| i.time) + 0.18;
+        }
         center -=
             DVec2::from_angle(rot).rotate(DVec2::new(pan.x as f64, -pan.y as f64)) / scale as f64;
         if scroll != 0.0 {
@@ -1060,7 +1078,8 @@ pub fn show(
                     rot,
                 };
                 let before = xf.to_world(hover);
-                scale = (scale * (1.0 + scroll * 0.002)).clamp(2.0, 2000.0);
+                // about 15% a notch of the wheel, the same in and out
+                scale = (scale * 1.0035f32.powf(scroll)).clamp(2.0, 2000.0);
                 let xf = Xf {
                     rect,
                     center,
@@ -1106,6 +1125,19 @@ pub fn show(
         scale,
         rot,
     };
+    // panned or zoomed this frame, or a moment ago: the hatches wait
+    let now = ui.input(|i| i.time);
+    if response.dragged_by(egui::PointerButton::Middle)
+        || response.dragged_by(egui::PointerButton::Secondary)
+    {
+        state.nav_until = now + 0.18;
+    }
+    let moving = now < state.nav_until;
+    NAVIGATING.with(|n| n.set(moving));
+    if moving {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(200));
+    }
 
     if style.decorations && kind != PaneKind::Schedule {
         let (grid, axes) = plan_look();
@@ -1473,7 +1505,7 @@ pub fn show(
         Some(k) => state.snap.only(k),
         None => state.snap,
     };
-    if state.snap_once.is_some() && response.clicked() {
+    if state.snap_once.is_some() && pick {
         state.snap_once_spent = true;
     }
     // holding Alt picks free of snaps
@@ -1527,10 +1559,22 @@ pub fn show(
         .outline
         .as_ref()
         .and_then(|o| o.points.last().copied());
+    // the linework being drawn, and a command's own points, start lines
+    // too: ORTHO, POLAR and perpendicular work from their last point
+    let detail_last = (tool == Tool::Detail && state.details.view == Some(view))
+        .then(|| state.details.path.last().copied())
+        .flatten();
+    let pick_last = state
+        .cmd_pick
+        .as_ref()
+        .filter(|(v, _)| v.is_none_or(|v| v == view))
+        .and_then(|(_, p)| p.last().copied());
     let drawing_from = state
         .pending
         .or(sketch_last.map(from_pane))
         .or(last)
+        .or(detail_last)
+        .or(pick_last)
         .map(|a| a.extend(0.0));
     // temporary guide lines: from the points and edges rested on in the
     // drawing tools, and through where the line being drawn starts
@@ -1789,12 +1833,7 @@ pub fn show(
                     here && !typing && i.key_pressed(egui::Key::Backspace),
                 )
             });
-            let click = match (
-                forced,
-                response.clicked(),
-                hover_world,
-                response.hover_pos(),
-            ) {
+            let click = match (forced, pick, hover_world, response.hover_pos()) {
                 (Some(p), ..) => Some((p, o.near_first(xf.to_screen(p), &project))),
                 (None, true, Some(p), Some(h)) => Some((p, o.near_first(h, &project))),
                 _ => None,
@@ -2998,12 +3037,15 @@ pub fn show(
         }
         return None;
     }
-    if response.clicked() || forced.is_some() {
+    if pick || forced.is_some() {
         state.tracker.clear();
         let p = hover_world?;
         let at = match forced {
             Some(f) => xf.to_screen(f),
-            None => response.interact_pointer_pos().unwrap_or_default(),
+            None => response
+                .interact_pointer_pos()
+                .or(response.hover_pos())
+                .unwrap_or_default(),
         };
         let raw = forced.unwrap_or_else(|| xf.to_world(at));
         state.last_point = Some((view, p));
@@ -4865,7 +4907,11 @@ fn refresh_snaps(
         let _p = crate::app::Perf::new("plan snaps: build");
         let mut s = Snapper::from_drawing(&plan.items, &[]);
         s.add_underlay_centres(model, view);
-        add_reference_snaps(&mut s, state, model, view);
+        // a DXF's lines cross each other and the model's: those crossings
+        // snap too (they were found before the references came in)
+        if add_reference_snaps(&mut s, state, model, view) > 0 {
+            s.add_intersections();
+        }
         state.snaps.insert(view, (revision, vec![], s));
     }
     if let Some((_, ex, s)) = state.snaps.get_mut(&view) {
@@ -4884,7 +4930,7 @@ fn add_reference_snaps(
     state: &mut PlanState,
     model: &creabim_core::Model,
     view: ElementId,
-) {
+) -> usize {
     // a huge drawing is cut short rather than slowing every snap
     const MOST: usize = 20_000;
     let mut n = 0;
@@ -4901,7 +4947,7 @@ fn add_reference_snaps(
         for l in lines.iter() {
             for w in l.windows(2) {
                 if n >= MOST {
-                    return;
+                    return n;
                 }
                 s.add_segment(
                     r.place(w[0]).extend(0.0),
@@ -4913,6 +4959,7 @@ fn add_reference_snaps(
             }
         }
     }
+    n
 }
 
 /// The floor plans' ranges in a section (MU34 A1, MU36): a band per plan
@@ -5358,14 +5405,15 @@ pub(crate) fn wheel(ui: &egui::Ui) -> (egui::Vec2, f32) {
                     // a pinch and Ctrl+wheel are in zoom_delta already
                     continue;
                 }
-                let whole = |v: f32| (v - v.round()).abs() < 1e-3;
+                // a wheel's lines zoom, as AutoCAD's, even the fractional
+                // steps of a fine wheel; a touchpad's points (or a sideways
+                // scroll) pan
                 let touchpad = match unit {
                     egui::MouseWheelUnit::Point => true,
-                    egui::MouseWheelUnit::Line => {
-                        delta.x.abs() > 1e-3 || !whole(delta.y) || now - last < 0.4
-                    }
+                    egui::MouseWheelUnit::Line => delta.x.abs() > 1e-3 && delta.y.abs() < 1e-3,
                     egui::MouseWheelUnit::Page => false,
                 };
+                let _ = last;
                 if touchpad {
                     seen = Some(now);
                     pan += match unit {
@@ -5680,6 +5728,15 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
     }
 }
 
+thread_local! {
+    static NAVIGATING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Is the pane being drawn panned or zoomed right now?
+fn navigating() -> bool {
+    NAVIGATING.with(|n| n.get())
+}
+
 static PLAN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 static PLAN_AXES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -5940,7 +5997,9 @@ pub fn draw_item_with(
             fill_polygon(painter, xf, points, fill);
             // skip hatching once it would be too dense to read, or when
             // the view turns it off
-            if hatch * xf.scale as f64 > 3.0 && !o.hatch_off {
+            // while the view is panned or zoomed the hatches wait: the
+            // fills show, the lines come back as it stops
+            if hatch * xf.scale as f64 > 3.0 && !o.hatch_off && !navigating() {
                 let stroke = Stroke::new(0.6, grey(70));
                 for (a, b) in creabim_geom::plan::hatch_lines(*pattern, points, hatch) {
                     painter.line_segment([xf.to_screen(a), xf.to_screen(b)], stroke);

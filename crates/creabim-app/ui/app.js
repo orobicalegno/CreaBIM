@@ -1284,7 +1284,9 @@
     }
     // Anything else is a shortcut for the views.
     post({ t: "key", key: e.key, code: e.code, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey, repeat: e.repeat });
-    if (e.ctrlKey || e.metaKey || e.key === "F1" || e.key === "F3" || e.key === "Tab") e.preventDefault();
+    // the function keys are the drafting keys (F7 to F11): never the
+    // browser's (caret browsing, its menu, full screen)
+    if (e.ctrlKey || e.metaKey || /^F([1-9]|1[0-2])$/.test(e.key) || e.key === "Tab") e.preventDefault();
   });
 
   // A number field's value: lengths keep theirs (metres) beside the text.

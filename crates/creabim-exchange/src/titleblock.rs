@@ -275,22 +275,111 @@ pub fn dxf_items(text: &str) -> Result<Vec<TitleItem>, String> {
         }
     }
     let mut out = vec![];
-    dxf_draw(&entities, &[k, 0.0, 0.0, k, 0.0, 0.0], 0, &blocks, &mut out);
+    let mut layers = vec![];
+    dxf_draw(
+        &entities,
+        &[k, 0.0, 0.0, k, 0.0, 0.0],
+        0,
+        &blocks,
+        &mut out,
+        &mut layers,
+        "0",
+    );
     out.truncate(MAX_ITEMS);
     Ok(out)
 }
 
-/// Draw `ents` through `m` (drawing units to mm) into `out`.
+/// [`dxf_items`] with each item's layer: its entity's, or for what a
+/// block on layer 0 holds, the layer the block is inserted on (as AutoCAD
+/// draws it).
+pub fn dxf_items_layered(text: &str) -> Result<Vec<(TitleItem, String)>, String> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<Group> = lines
+        .chunks(2)
+        .filter(|c| c.len() == 2)
+        .filter_map(|c| Some((c[0].parse::<i64>().ok()?, c[1])))
+        .collect();
+    if pairs.is_empty() {
+        return Err("that is not a DXF file".into());
+    }
+    let mut k = 1.0;
+    for w in pairs.windows(2) {
+        if w[0] == (9, "$INSUNITS") {
+            k = dxf_unit(w[1].1.parse().unwrap_or(4));
+        }
+    }
+    let entities = dxf_section(&pairs, "ENTITIES").ok_or("the DXF file has no ENTITIES section")?;
+    let mut blocks = std::collections::HashMap::new();
+    let mut open: Option<(&str, DVec2, Vec<Ent>)> = None;
+    for e in dxf_section(&pairs, "BLOCKS").unwrap_or_default() {
+        match e.0 {
+            "BLOCK" => {
+                let name = e.1.iter().find(|q| q.0 == 2).map_or("", |q| q.1);
+                let num = |c: i64| {
+                    e.1.iter()
+                        .find(|q| q.0 == c)
+                        .and_then(|q| q.1.parse::<f64>().ok())
+                        .unwrap_or(0.0)
+                };
+                open = Some((name, DVec2::new(num(10), num(20)), vec![]));
+            }
+            "ENDBLK" => {
+                if let Some((name, base, ents)) = open.take() {
+                    blocks.insert(name, (base, ents));
+                }
+            }
+            _ => {
+                if let Some((_, _, ents)) = &mut open {
+                    ents.push(e);
+                }
+            }
+        }
+    }
+    let mut out = vec![];
+    let mut layers = vec![];
+    dxf_draw(
+        &entities,
+        &[k, 0.0, 0.0, k, 0.0, 0.0],
+        0,
+        &blocks,
+        &mut out,
+        &mut layers,
+        "0",
+    );
+    out.truncate(MAX_ITEMS);
+    layers.resize(out.len(), "0".to_string());
+    Ok(out.into_iter().zip(layers).collect())
+}
+
+/// Draw `ents` through `m` (drawing units to mm) into `out`, each item's
+/// layer in `layers`.
+#[allow(clippy::too_many_arguments)]
 fn dxf_draw(
     ents: &[Ent],
     m: &Affine,
     depth: usize,
     blocks: &std::collections::HashMap<&str, (DVec2, Vec<Ent>)>,
     out: &mut Vec<TitleItem>,
+    layers: &mut Vec<String>,
+    inherit: &str,
 ) {
     let num = |v: &str| v.trim().parse::<f64>().unwrap_or(0.0);
     let mut poly: Option<(Vec<DVec2>, bool, Affine)> = None;
+    // each item's layer: what the entity before it drew is its layer's
+    let mut layer = inherit.to_string();
     for &(name, g) in ents {
+        while layers.len() < out.len() {
+            layers.push(layer.clone());
+        }
+        // a polyline's vertices and end are on the polyline's layer
+        if !matches!(name, "VERTEX" | "SEQEND") {
+            let own = g.iter().find(|p| p.0 == 8).map_or("0", |p| p.1.trim());
+            layer = if own == "0" {
+                inherit.to_string()
+            } else {
+                own.to_string()
+            };
+        }
         if out.len() >= MAX_ITEMS {
             out.truncate(MAX_ITEMS);
             return;
@@ -463,7 +552,15 @@ fn dxf_draw(
                         }
                         let step = translate(DVec2::new(c as f64 * dx, r as f64 * dy));
                         let one = compose(&compose(&place, &step), &size);
-                        dxf_draw(inner, &compose(&mo, &one), depth + 1, blocks, out);
+                        dxf_draw(
+                            inner,
+                            &compose(&mo, &one),
+                            depth + 1,
+                            blocks,
+                            out,
+                            layers,
+                            &layer,
+                        );
                     }
                 }
             }
@@ -472,12 +569,15 @@ fn dxf_draw(
                 let block = g.iter().find(|q| q.0 == 2).map_or("", |q| q.1);
                 if let Some((_, inner)) = blocks.get(block) {
                     if depth < MAX_NESTING {
-                        dxf_draw(inner, m, depth + 1, blocks, out);
+                        dxf_draw(inner, m, depth + 1, blocks, out, layers, &layer);
                     }
                 }
             }
             _ => {}
         }
+    }
+    while layers.len() < out.len() {
+        layers.push(layer.clone());
     }
 }
 
