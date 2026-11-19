@@ -485,6 +485,7 @@ impl CreaBimApp {
             "menu:View" => self.view_menu(),
             "menu:Materials" => self.materials_menu(),
             "menu:Help" => self.help_menu(),
+            "menu:Window" => self.window_menu(),
             "menu:Create" => self.create_menu(),
             "menu:Disegna" => self.draw_menu(),
             "menu:Select" => self.select_bar_menu(),
@@ -1181,6 +1182,42 @@ impl CreaBimApp {
 
     /// Select, as its own menu: all, none, invert, the box's shape and how
     /// it combines, by type, similar.
+    /// The open projects, to pick the one shown (phase E).
+    fn window_menu(&self) -> Vec<Item> {
+        let mut items = vec![Item::Header("Open projects".into())];
+        for (i, (name, unsaved)) in self.open_projects().into_iter().enumerate() {
+            let label = if unsaved { format!("{name} *") } else { name };
+            items.push(
+                Item::new(format!("window:{i}"), label)
+                    .icon("file-text")
+                    .checked(i == 0),
+            );
+        }
+        items.push(Item::Separator);
+        items.push(
+            Item::new("window.next", "Next project")
+                .icon("arrow-right")
+                .key("Ctrl+Tab")
+                .hint("Show the next open project"),
+        );
+        items.push(Item::new("new.empty", "New project").icon("file-plus"));
+        items.push(Item::new("open", "Open…").icon("folder-open").key("Ctrl+O"));
+        items.push(Item::Separator);
+        items.push(
+            Item::new("window.close", "Close this project")
+                .icon("x")
+                .hint("Close the project shown; the others stay open"),
+        );
+        if self.unsaved() {
+            items.push(
+                Item::new("window.close:discard", "Close without saving")
+                    .icon("trash-2")
+                    .hint("Close the project shown and lose its unsaved changes"),
+            );
+        }
+        items
+    }
+
     fn select_bar_menu(&self) -> Vec<Item> {
         use crate::boxsel::Combine as C;
         let mut items = self.select_menu_items();
@@ -1668,6 +1705,22 @@ impl CreaBimApp {
             return;
         }
         match head {
+            "window" => {
+                if let Some(i) = index {
+                    self.switch_project(i);
+                }
+            }
+            "window.next" => self.next_project(),
+            "window.close" => {
+                if self.unsaved() && arg != "discard" {
+                    self.status = format!(
+                        "{} has unsaved changes: save it (Ctrl+S), or Window › Close without saving.",
+                        crate::app::openprojects::project_name(&self.path)
+                    );
+                } else if !self.close_project() {
+                    self.status = "It is the only open project: open or make another first, or quit.".into();
+                }
+            }
             "cmd" => {
                 if let Some(c) = Command::ALL.into_iter().find(|c| format!("{c:?}") == arg) {
                     self.run_command(ctx, c, None);
@@ -1969,43 +2022,43 @@ impl CreaBimApp {
                 }
             }
             "new.layered" => {
-                self.path = new_path("Layered walls");
                 self.load_model(creabim_core::sample::layered_house());
+                self.path = new_path("Layered walls");
                 self.status = "Loaded the layered sample house.".into();
             }
             "new.typed" => {
-                self.path = new_path("Wall types");
                 self.load_model(creabim_core::sample::typed_house());
+                self.path = new_path("Wall types");
                 self.status =
                     "Loaded the typed sample house: see Materials › Types… for its types.".into();
             }
             "new.furnished" => {
-                self.path = new_path("Furnished house");
                 self.load_model(creabim_core::sample::furnished_house());
+                self.path = new_path("Furnished house");
                 self.status =
                     "Loaded the furnished sample house: see Create › Catalogue… to place more."
                         .into();
             }
             "new.garden" => {
-                self.path = new_path("House in its garden");
                 self.load_model(creabim_core::garden::garden_house());
+                self.path = new_path("House in its garden");
                 self.status =
                     "Loaded the garden sample: see Create › Site and Create › Building elements."
                         .into();
             }
             "new.sample" => {
-                self.path = new_path("Starter house");
                 self.load_model(creabim_core::starter::starter_house());
+                self.path = new_path("Starter house");
                 self.status = STARTER_LOADED.into();
             }
             "new.simple" => {
-                self.path = new_path("Simple house");
                 self.load_model(sample_house());
+                self.path = new_path("Simple house");
                 self.status = "Loaded the simple sample house.".into();
             }
             "new.buried" => {
-                self.path = new_path("Beam in a wall");
                 self.load_model(creabim_core::sample::sample_with_buried_beam().0);
+                self.path = new_path("Beam in a wall");
                 self.status = "Loaded the sample house with a beam inside its south wall. Hover it in Section A and press Tab to reach the beam.".into();
             }
             "new.empty" => {
@@ -3992,7 +4045,7 @@ impl CreaBimApp {
         json!({
             "theme": self.theme(),
             "popup": self.popup_key(),
-            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
+            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Materials", "Window", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
             "quick": quick,
             // the selection count is in the status bar, where it belongs
             "doc": {
@@ -5356,7 +5409,7 @@ impl CreaBimApp {
     pub(super) fn classic_menu(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
         egui::MenuBar::new().ui(ui, |ui| {
-            for m in ["File", "Edit", "View", "Materials", "Help"] {
+            for m in ["File", "Edit", "View", "Materials", "Window", "Help"] {
                 let items = self.menu_items(&format!("menu:{m}"));
                 ui.menu_button(m, |ui| {
                     if let Some(id) = ui_model::show(ui, &items) {

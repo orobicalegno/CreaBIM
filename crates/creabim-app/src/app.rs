@@ -63,6 +63,8 @@ mod mastersui;
 mod materials;
 #[path = "objectsui.rs"]
 mod objectsui;
+#[path = "openprojects.rs"]
+mod openprojects;
 #[path = "osnapui.rs"]
 mod osnapui;
 #[path = "profilesui.rs"]
@@ -327,6 +329,11 @@ pub struct CreaBimApp {
     last_export_dir: Option<std::path::PathBuf>,
     /// The crop box whose elements clicks in the 3D view are picking.
     crop_pick: Option<ElementId>,
+    /// The other open projects, for the Window menu.
+    others: Vec<openprojects::OpenProject>,
+    /// Opening a project keeps the shown one open (off until the app has
+    /// started, and in tests).
+    multi: bool,
     /// The element outside a crop box the status bar last spoke of.
     outside_said: Option<ElementId>,
     /// The 3D extents the crop ghosts were measured from: the model's
@@ -414,6 +421,7 @@ impl CreaBimApp {
         app.load_model(creabim_core::starter::starter_house());
         app.status = STARTER_LOADED.into();
         // `creabim-app house.creabim` opens that file instead
+        app.multi = true;
         if let Some(path) = launch_file(std::env::args().skip(1)) {
             app.open_path(&path);
         }
@@ -534,6 +542,8 @@ impl CreaBimApp {
             boxed: None,
             last_export_dir: None,
             crop_pick: None,
+            others: Vec::new(),
+            multi: false,
             outside_said: None,
             outside_bounds: None,
             status: "Loaded the sample house. Orbit with the middle button (or Alt + left drag), pan with right drag, zoom with the wheel; a left drag selects with a box.".into(),
@@ -541,6 +551,7 @@ impl CreaBimApp {
     }
 
     fn load_model(&mut self, model: Model) {
+        self.keep_open();
         self.doc = Document::from_model(with_plan_views(model));
         self.selection.clear();
         self.hidden.clear();
@@ -615,6 +626,11 @@ impl CreaBimApp {
         }
         if !crate::files::is_project(path) {
             self.link_file(path);
+            return;
+        }
+        // already open: show it rather than opening it twice
+        if let Some(i) = self.open_index(path) {
+            self.switch_project(i);
             return;
         }
         match creabim_store::load(path) {
@@ -1996,6 +2012,10 @@ impl CreaBimApp {
             if stop {
                 self.toggle_walk();
             }
+        }
+        // Ctrl+Tab: the next open project (Window menu)
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Tab)) {
+            self.next_project();
         }
         // F2: the command history, as AutoCAD's text window
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
@@ -11611,7 +11631,13 @@ impl eframe::App for CreaBimApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let _perf = Perf::new("frame");
-        // never lose work to a close: unsaved changes ask first
+        // never lose work to a close: unsaved changes ask first, those of
+        // a project waiting in the Window menu too (shown to ask)
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && !self.unsaved() {
+            if let Some(i) = self.open_projects().iter().position(|(_, u)| *u) {
+                self.switch_project(i);
+            }
+        }
         if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && self.unsaved() {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);
