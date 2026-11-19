@@ -9952,7 +9952,12 @@ impl CreaBimApp {
                 }
                 ElementKind::Material(m) => {
                     materials::preview(ui, m, 72.0);
-                    label = materials::material_fields(ui, m);
+                    let pats: Vec<String> = creabim_core::styles::active_pack(self.doc.model())
+                        .patterns
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect();
+                    label = materials::material_fields(ui, m, &pats);
                     let users = creabim_core::library::users(self.doc.model(), id).len();
                     ui.label(egui::RichText::new(format!("Used by {users} elements.")).weak());
                     if ui.button("Open in the material browser").clicked() {
