@@ -1047,6 +1047,7 @@ impl CreaBimApp {
             .icon("ruler"),
             c("BLOCK", "Crea blocco", "B", "box"),
             c("NORTH", "Nord", "", "north-arrow"),
+            c("NORTHDIR", "Direzione del nord", "", "north-arrow"),
             Item::Separator,
             Item::Header("Modifica".into()),
             c("ERASE", "Cancella", "E", "trash-2"),
@@ -3277,6 +3278,13 @@ impl CreaBimApp {
                         )
                     })
                     .collect()));
+            }
+            // a filled region by a click inside a closed outline, too
+            if matches!(self.plan.details.kind, DetailKind::Region { .. }) {
+                options.push(json!({
+                    "kind": "button", "id": "cmdline:HATCH", "icon": "hash", "label": "Pick inside",
+                    "hint": "Fill the area round a point you click: closed linework or a room. Its hatch is the one chosen here",
+                }));
             }
             options.push(json!({
                 "kind": "button", "id": "detail.makesymbol", "icon": "copy", "label": "Make symbol",

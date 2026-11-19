@@ -1883,6 +1883,8 @@ impl CreaBimApp {
         self.plan.cancel();
         self.plan.tool = Tool::Select;
         self.plan.armed = Some(m);
+        // a copy hangs on the cursor at once, as AutoCAD's
+        self.plan.armed_follow = c == Command::Duplicate;
         self.status = match (m.0, self.selection.is_some()) {
             (Mode::Move, false) => {
                 "Move: click what to move (Shift+click adds more), then click the base point. Esc cancels.".into()
@@ -1991,6 +1993,10 @@ impl CreaBimApp {
             if stop {
                 self.toggle_walk();
             }
+        }
+        // F2: the command history, as AutoCAD's text window
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+            self.cmd.history = !self.cmd.history;
         }
         // F1: the guide's page about what you are doing
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
@@ -2528,7 +2534,9 @@ impl CreaBimApp {
             tx = tx.insert(c);
         }
         let r = self.doc.commit(tx);
-        if r.is_ok() {
+        let ok = r.is_ok();
+        if ok {
+            self.selection.clear();
             self.selection.extend(ids, false);
             self.face = None;
         }
@@ -2538,8 +2546,15 @@ impl CreaBimApp {
         };
         self.report(
             r,
-            format!("Pasted {n} elements in place. Press G to move them.{left}"),
+            format!("Pasted {n} elements: they follow the pointer, click where they go (Esc leaves them in place).{left}"),
         );
+        // what is pasted hangs on the cursor until a click places it
+        if ok {
+            self.plan.cancel();
+            self.plan.tool = Tool::Select;
+            self.plan.armed = Command::Move.modal();
+            self.plan.armed_follow = true;
+        }
     }
 
     /// Paste from text another window (or this one) put on the clipboard.
@@ -7040,7 +7055,12 @@ impl CreaBimApp {
                 )
             {
                 // the pickbox while selecting; a point is asked for otherwise
-                let pickbox = self.plan.tool == planview::Tool::Select && !self.plan.point_pick;
+                // the square while selecting; the ring while a command runs
+                let pickbox = self.plan.tool == planview::Tool::Select
+                    && !self.plan.point_pick
+                    && self.plan.modal.is_none()
+                    && self.plan.cmd_pick.is_none()
+                    && self.cmd.running.is_none();
                 // along the UCS, as the view is turned
                 let angle = if matches!(kind, planview::PaneKind::Plan { .. }) {
                     self.plan.ucs.angle - self.plan.view_rot.get(&view).copied().unwrap_or(0.0)
@@ -12030,6 +12050,7 @@ impl eframe::App for CreaBimApp {
         self.layer_manager_window(&ctx);
         self.ucs_manager_window(&ctx);
         self.cmdline_window(&ctx);
+        self.cmd_history_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus
         self.plan.web_menus = false;

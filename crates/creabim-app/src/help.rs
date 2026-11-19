@@ -497,6 +497,7 @@ pub const KEYS: &[Binding] = &[
     key(VIEWS, "Ctrl+PgUp", "The previous workspace"),
     key(VIEWS, "Ctrl+PgDn", "The next workspace"),
     key(VIEWS, "/", "Show the selection alone, and back"),
+    key(VIEWS, "F2", "The command history"),
     key(VIEWS, "F3", "Object snap (OSNAP) on or off"),
     key(VIEWS, "F7", "The grid behind drawings on or off"),
     key(VIEWS, "F8", "Ortho on or off"),

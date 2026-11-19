@@ -433,6 +433,9 @@ pub struct PlanState {
     /// A move, rotate or scale picked from a button or menu, started by the
     /// next view the pointer is over: (mode, copy first).
     pub armed: Option<(Mode, bool)>,
+    /// The armed move starts following the pointer at once (Duplicate,
+    /// Paste): the copy hangs on the cursor until a click places it.
+    pub armed_follow: bool,
     /// With [`Mode::Grip`] armed: the grip it drives (from the edge palette).
     pub armed_grip: Option<crate::handles::HandleKind>,
     /// With [`Mode::Offset`] armed: change the original, no copy (the edge
@@ -687,6 +690,7 @@ impl Default for PlanState {
             move_target: modal::Target::default(),
             cursor: None,
             armed: None,
+            armed_follow: false,
             armed_grip: None,
             in_place: false,
             commands: vec![],
@@ -720,7 +724,7 @@ impl Default for PlanState {
             ucs_prev: vec![],
             view_rot: HashMap::new(),
             ucs_icon: true,
-            ucs_icon_origin: true,
+            ucs_icon_origin: false,
             pline_arcs: vec![],
             snap_once: None,
             snap_once_spent: false,
@@ -1152,6 +1156,9 @@ pub fn show(
         }
         if is_plan && state.ucs_icon {
             draw_ucs_icon(&painter, &xf, state.ucs, state.ucs_icon_origin);
+            // the north beside it, to the project's true north
+            let north = doc.model().project_info().map_or(0.0, |(_, p)| p.true_north);
+            draw_north_icon(&painter, &xf, north);
         }
     }
     // a point asked for: a cross follows the pointer, a click gives it
@@ -4545,7 +4552,8 @@ fn keyboard_edits(
     }
     selection.active?;
     let keys = start_keys(ui.ctx());
-    let flow = if keys.is_some() {
+    let follow = state.armed.is_some() && state.armed_follow;
+    let flow = if keys.is_some() || follow {
         Flow::Keys
     } else {
         Flow::Tool
@@ -4571,6 +4579,7 @@ fn keyboard_edits(
     }
     let grab = response.hover_pos()?;
     state.armed = None;
+    state.armed_follow = false;
     let extras = (state.armed_grip.take(), std::mem::take(&mut state.in_place));
     state.cancel();
     let ids = selection.all();
@@ -5709,8 +5718,8 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
     } else {
         rect.width().max(rect.height()) * size.max(1.0) / 200.0
     };
-    // a gap round the pickbox, as AutoCAD leaves one
-    let gap = if pickbox { 5.0 } else { 0.0 };
+    // a gap round the pickbox, or the ring a command shows
+    let gap = 5.0;
     // along the UCS's X and Y as the screen shows them
     let ux = Vec2::new(angle.cos(), -angle.sin());
     let uy = Vec2::new(-ux.y, ux.x);
@@ -5725,6 +5734,9 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
             stroke,
             egui::StrokeKind::Middle,
         );
+    } else {
+        // a command is running: a small ring at the centre
+        top.circle_stroke(p, 4.0, stroke);
     }
 }
 
@@ -5814,6 +5826,40 @@ fn draw_metric_grid(painter: &egui::Painter, xf: &Xf, ucs: Ucs) {
         y += step;
         n += 1;
     }
+}
+
+/// A small north arrow in the lower left corner, beside the UCS icon,
+/// pointing to true north (degrees anticlockwise from the drawing's up),
+/// as the plan is turned.
+pub fn draw_north_icon(painter: &egui::Painter, xf: &Xf, true_north: f64) {
+    let base = xf.rect.left_bottom() + Vec2::new(96.0, -40.0);
+    let ink = Color32::from_rgb(60, 60, 60);
+    let north = DVec2::from_angle(true_north.to_radians()).rotate(DVec2::Y);
+    let v = xf.to_screen(north) - xf.to_screen(DVec2::ZERO);
+    let v = if v.length() > 1e-6 { v.normalized() } else { -Vec2::Y };
+    let side = Vec2::new(-v.y, v.x);
+    let r = 14.0;
+    painter.circle_stroke(base, r, Stroke::new(1.0, ink));
+    let tip = base + v * r;
+    let tail = base - v * r * 0.7;
+    // a half-filled arrowhead on a stem, and an N beyond its tip
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, base + side * 5.0, base],
+        ink,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::closed_line(
+        vec![tip, base + side * 5.0, base, base - side * 5.0],
+        Stroke::new(1.2, ink),
+    ));
+    painter.line_segment([base, tail], Stroke::new(1.2, ink));
+    painter.text(
+        tip + v * 9.0,
+        egui::Align2::CENTER_CENTER,
+        "N",
+        egui::FontId::proportional(11.0),
+        ink,
+    );
 }
 
 /// AutoCAD's UCS icon: two arrows, X and Y, along the UCS's axes, at its

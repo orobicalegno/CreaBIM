@@ -2000,7 +2000,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
     let k = match kind {
         // Extension and Parallel, drawn as AutoCAD's
         SnapKind::OnTempGuide => {
-            let s = Stroke::new(1.5, MARKER);
+            let s = Stroke::new(1.5, Color32::from_gray(20));
             for i in 0..3 {
                 let x = -6.0 + 4.5 * i as f32;
                 painter.line_segment([at + egui::vec2(x, 0.0), at + egui::vec2(x + 2.0, 0.0)], s);
@@ -2009,7 +2009,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
             return;
         }
         SnapKind::GuideCross => {
-            let s = Stroke::new(1.5, MARKER);
+            let s = Stroke::new(1.5, Color32::from_gray(20));
             painter.line_segment([at + egui::vec2(-5.0, 4.0), at + egui::vec2(1.0, -4.0)], s);
             painter.line_segment([at + egui::vec2(-1.0, 4.0), at + egui::vec2(5.0, -4.0)], s);
             return;
@@ -2017,6 +2017,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
         k => k,
     };
     let m = MARKER_PX.swap(5, std::sync::atomic::Ordering::Relaxed);
+    ICON_INK.with(|i| i.set(Some(Color32::from_gray(20))));
     marker(
         painter,
         Snap {
@@ -2027,6 +2028,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
         at,
         None,
     );
+    ICON_INK.with(|i| i.set(None));
     MARKER_PX.store(m, std::sync::atomic::Ordering::Relaxed);
     MARK.with(|c| c.set(keep));
 }
@@ -2038,6 +2040,10 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
 /// square in a square for Insertion, a right angle for Perpendicular, a
 /// circle with a bar on top for Tangent, an hourglass for Nearest, an X in
 /// a square for Apparent intersection.
+thread_local! {
+    static ICON_INK: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
+}
+
 fn marker(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) -> Option<Color32> {
     let c = match snap.kind {
         SnapKind::Aligned | SnapKind::AlignedCross => TRACK,
@@ -2045,6 +2051,8 @@ fn marker(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) -> Option
         SnapKind::Grid => return None,
         _ => MARKER,
     };
+    // the settings' icons are drawn in black
+    let c = ICON_INK.with(|i| i.get()).unwrap_or(c);
     let s = Stroke::new(2.0, c);
     let r = MARKER_PX.load(std::sync::atomic::Ordering::Relaxed) as f32;
     let v = egui::vec2;

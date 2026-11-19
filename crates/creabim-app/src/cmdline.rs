@@ -44,6 +44,8 @@ pub struct CmdLine {
     /// Esc was pressed with nothing typed: the tool in use ends once the
     /// views have had it (AutoCAD's Esc ends any command).
     pub esc: bool,
+    /// The text window (F2): everything the command line said.
+    pub history: bool,
     /// Each view's camera before the last ZOOM, for ZOOM Previous.
     pub zoomed: Vec<(ElementId, (DVec2, f32))>,
 }
@@ -110,6 +112,7 @@ pub enum Finish {
     FromBase,
     Mid2,
     ZoomWindow,
+    NorthPoints,
     Lengthen,
     Ucs,
     UcsObject,
@@ -145,6 +148,7 @@ pub enum NumberFor {
     MeasureLength,
     TtrRadius,
     UcsZ,
+    NorthAngle,
 }
 
 /// A command, by its name or one of its aliases: English and Italian
@@ -227,6 +231,7 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("SECTION", "SECTION SEZIONE"),
     ("GRID", "GRID GRIGLIA ASSI"),
     ("NORTH", "NORTH NORD"),
+    ("NORTHDIR", "NORTHDIR DIRNORD NORDVERO TRUENORTH"),
     ("UCS", "UCS SCU"),
     ("UCSMAN", "UCSMAN UC GESTSCU"),
     ("PLAN", "PLAN PIANTA"),
@@ -1170,6 +1175,34 @@ impl CreaBimApp {
             let pts = self.plan.cmd_pick.take().map(|p| p.1).unwrap_or_default();
             self.cmd.running = None;
             self.cmd_finish_points(then, &pts);
+        }
+    }
+
+    /// AutoCAD's text window (F2): every command and answer so far.
+    pub(super) fn cmd_history_window(&mut self, ctx: &egui::Context) {
+        if !self.cmd.history {
+            return;
+        }
+        let mut open = true;
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        egui::Window::new("Command history")
+            .open(&mut open)
+            .collapsible(false)
+            .constrain_to(area)
+            .default_pos(area.left_top() + egui::vec2(40.0, 40.0))
+            .default_size(egui::vec2(620.0, 360.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for l in &self.cmd.log {
+                            ui.label(egui::RichText::new(l).monospace());
+                        }
+                    });
+            });
+        if !open {
+            self.cmd.history = false;
         }
     }
 

@@ -175,6 +175,14 @@ impl CreaBimApp {
                 Finish::Ucs,
             ),
             "UCSMAN" => self.shell.ucs_manager = true,
+            "NORTHDIR" => {
+                let now = self.doc.model().project_info().map_or(0.0, |(_, p)| p.true_north);
+                self.ask(
+                    name,
+                    format!("Enter the angle of true north from the drawing's up, anticlockwise <{now}°>, or Enter to pick two points along it:"),
+                    Wants::Number(NumberFor::NorthAngle),
+                );
+            }
             "PLAN" => self.ask(name, "Enter an option [Current ucs/World/name of a saved UCS] <Current>:", Wants::Word(super::cmdline::WordFor::Plan)),
             "UCSICON" => self.ask(name, "Enter an option [ON/OFF/ORigin/Noorigin] <ON>:", Wants::Word(super::cmdline::WordFor::UcsIcon)),
             "ZOOM" => self.ask(
@@ -470,6 +478,13 @@ impl CreaBimApp {
                 );
                 self.say(format!("{name}: {n} points placed (Center snaps to them)."));
             }
+            NumberFor::NorthAngle => match v {
+                Some(a) => {
+                    self.cmd.running = None;
+                    self.set_true_north(a);
+                }
+                None => self.cmd_pick_start(name, "Specify a point, then a point towards north:", 2, Finish::NorthPoints),
+            },
             NumberFor::UcsZ => {
                 self.cmd.running = None;
                 let a = v.unwrap_or(90.0);
@@ -1027,6 +1042,13 @@ impl CreaBimApp {
             (Finish::ZoomWindow, []) => self.zoom_extents(),
             (Finish::Pline, _) => self.finish_pline(false),
             // UCS with no point: the world's (Enter); one point: its origin
+            (Finish::NorthPoints, [a, b, ..]) => {
+                let d = *b - *a;
+                // anticlockwise from the drawing's up
+                let deg = (d.y.atan2(d.x).to_degrees() - 90.0).rem_euclid(360.0);
+                let deg = if deg > 180.0 { deg - 360.0 } else { deg };
+                self.set_true_north((deg * 100.0).round() / 100.0);
+            }
             (Finish::Ucs, []) => self.set_ucs(crate::planview::Ucs::default(), "UCS: World."),
             (Finish::Ucs, _) => self.say("UCS set."),
             (Finish::UcsObject, [p, ..]) => self.ucs_object(view, *p),
@@ -1034,6 +1056,17 @@ impl CreaBimApp {
             _ => return false,
         }
         true
+    }
+
+    /// The project's true north, degrees anticlockwise from the drawing's up.
+    pub(super) fn set_true_north(&mut self, deg: f64) {
+        let mut info = self.doc.model().project_info().map(|(_, p)| p.clone()).unwrap_or_default();
+        info.true_north = deg;
+        let tx = creabim_core::set_project(self.doc.model(), info);
+        match self.doc.commit(tx) {
+            Ok(_) => self.say(format!("True north at {deg}° from the drawing's up: the north icon and the north arrows follow it.")),
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
+        }
     }
 
     fn end_pick(&mut self) {
