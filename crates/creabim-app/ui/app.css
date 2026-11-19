@@ -1240,3 +1240,8 @@ html[data-theme="blueprint"] .cs h2 .fn, html[data-theme="ink"] .cs h2 .fn { col
 @media (prefers-reduced-motion: reduce) {
   .cs, .cs * { animation: none !important; transition: none !important; }
 }
+
+/* The current layer in the tools row: its colour and its name. */
+.tool.combo { min-width: 150px; justify-content: flex-start; gap: 6px; padding: 0 6px 0 8px; border: 1px solid var(--border-2); }
+.tool.combo .v { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; font-size: 12.5px; }
+.tool.combo .swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid var(--border-2); flex: none; }

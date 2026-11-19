@@ -163,6 +163,7 @@ impl CreaBimApp {
         }
         let mut open = true;
         let table = creabim_core::detail::layers(self.doc.model());
+        let counts = creabim_core::detail::layer_counts(self.doc.model());
         let mut edit = None;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         egui::Window::new("Drafting layers")
@@ -175,7 +176,7 @@ impl CreaBimApp {
                 egui::ScrollArea::vertical()
                     .max_height((area.height() - 90.0).max(160.0))
                     .show(ui, |ui| {
-                        crate::detailtool::layer_tree(ui, &table, &mut edit);
+                        crate::detailtool::layer_tree(ui, &table, &counts, &mut edit);
                     });
                 ui.label(
                     egui::RichText::new(
@@ -192,6 +193,12 @@ impl CreaBimApp {
             Some(crate::detailtool::LayerEdit::Rename { old, new }) => Some(
                 creabim_core::detail::rename_layer(self.doc.model(), &old, &new),
             ),
+            Some(crate::detailtool::LayerEdit::Delete(name)) => {
+                Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
+            }
+            Some(crate::detailtool::LayerEdit::Merge { from, into }) => {
+                Some(creabim_core::detail::merge_layers(self.doc.model(), &from, &into))
+            }
             _ => None,
         };
         if let Some(tx) = tx.filter(|t| !t.ops.is_empty()) {

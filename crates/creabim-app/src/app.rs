@@ -10472,6 +10472,12 @@ impl CreaBimApp {
                                 &new,
                             ))
                         }
+                        Some(crate::detailtool::LayerEdit::Delete(name)) => {
+                            Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
+                        }
+                        Some(crate::detailtool::LayerEdit::Merge { from, into }) => {
+                            Some(creabim_core::detail::merge_layers(self.doc.model(), &from, &into))
+                        }
                         Some(crate::detailtool::LayerEdit::MakeSymbol) => {
                             self.make_symbol();
                             None
@@ -11648,6 +11654,7 @@ impl eframe::App for CreaBimApp {
             self.shell.settings.axis_lines,
         );
         crate::snaps::begin_marks();
+        self.drop_locked_from_selection();
         crate::snaps::set_autosnap(
             self.shell.settings.marker_size,
             self.shell.settings.snap_tooltip,

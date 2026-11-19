@@ -436,6 +436,10 @@ pub struct PlanState {
     /// The armed move starts following the pointer at once (Duplicate,
     /// Paste): the copy hangs on the cursor until a click places it.
     pub armed_follow: bool,
+    /// When the right button last went down, and a quick right-click to
+    /// act on (Enter, or the last command again).
+    pub right_down: f64,
+    pub right_quick: bool,
     /// With [`Mode::Grip`] armed: the grip it drives (from the edge palette).
     pub armed_grip: Option<crate::handles::HandleKind>,
     /// With [`Mode::Offset`] armed: change the original, no copy (the edge
@@ -691,6 +695,8 @@ impl Default for PlanState {
             cursor: None,
             armed: None,
             armed_follow: false,
+            right_down: 0.0,
+            right_quick: false,
             armed_grip: None,
             in_place: false,
             commands: vec![],
@@ -1011,6 +1017,10 @@ pub fn show(
     // does: a hand that moves a little while clicking loses no point
     let pressed =
         response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
+    // when the right button went down, for a quick click or a held one
+    if response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+        state.right_down = ui.input(|i| i.time);
+    }
     let pick = if tool == Tool::Select
         || !matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
     {
@@ -2819,6 +2829,12 @@ pub fn show(
         draw_cursor(&painter, xf.to_screen(model_to_pane(space, c)));
     }
     let right = response.secondary_clicked() && !shift;
+    // AutoCAD's time-sensitive right-click: held a moment, the menu; a
+    // quick click, Enter (or the last command again, with none running)
+    let held = right && ui.input(|i| i.time) - state.right_down >= 0.25;
+    if right && !held && tool != Tool::Detail {
+        state.right_quick = true;
+    }
     let esc =
         ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
     // a detail path that can be made is finished, never dropped
@@ -2836,7 +2852,7 @@ pub fn show(
     if esc {
         state.step_back();
     }
-    let menu = right && !state.step_back() && tool == Tool::Select;
+    let menu = held && !state.step_back() && tool == Tool::Select;
     if menu {
         // right-click on something not yet selected selects it first
         if let Some(p) = response.interact_pointer_pos() {
@@ -5832,7 +5848,7 @@ fn draw_metric_grid(painter: &egui::Painter, xf: &Xf, ucs: Ucs) {
 /// pointing to true north (degrees anticlockwise from the drawing's up),
 /// as the plan is turned.
 pub fn draw_north_icon(painter: &egui::Painter, xf: &Xf, true_north: f64) {
-    let base = xf.rect.left_bottom() + Vec2::new(96.0, -40.0);
+    let base = xf.rect.left_bottom() + Vec2::new(96.0, -108.0);
     let ink = Color32::from_rgb(60, 60, 60);
     let north = DVec2::from_angle(true_north.to_radians()).rotate(DVec2::Y);
     let v = xf.to_screen(north) - xf.to_screen(DVec2::ZERO);
@@ -5867,7 +5883,8 @@ pub fn draw_north_icon(painter: &egui::Painter, xf: &Xf, true_north: f64) {
 /// square at the corner when it is the world's.
 pub fn draw_ucs_icon(painter: &egui::Painter, xf: &Xf, ucs: Ucs, at_origin: bool) {
     let r = xf.rect;
-    let corner = r.left_bottom() + Vec2::new(28.0, -28.0);
+    // above the command line, which lies over the foot of the views
+    let corner = r.left_bottom() + Vec2::new(28.0, -96.0);
     let o = xf.to_screen(ucs.origin);
     let inside = r.shrink(30.0).contains(o);
     let base = if at_origin && inside { o } else { corner };

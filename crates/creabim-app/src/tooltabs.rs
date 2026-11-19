@@ -25,9 +25,11 @@ pub enum Entry {
     },
     /// A divider between groups.
     Sep,
+    /// The current drafting layer, to pick another (AutoCAD's Layers panel).
+    LayerCombo,
 }
 
-pub const TABS: [&str; 4] = ["Model", "Annotate", "View", "Manage"];
+pub const TABS: [&str; 5] = ["Home", "Model", "Annotate", "View", "Manage"];
 
 /// On every tab, before it.
 pub const ALWAYS: [Tool; 2] = [Tool::Select, Tool::Align];
@@ -42,7 +44,40 @@ pub fn entries(tab: usize) -> Vec<Entry> {
         hint,
     };
     match tab {
+        // Home, as AutoCAD's: the Layers panel, drawing and editing
         0 => vec![
+            Entry::LayerCombo,
+            act("layers.manager", "Layer properties", "layers", "LAYER: the drafting layers as a tree, with sub-layers, colours, pens, line types, locks"),
+            act("layer.fromsel", "Make the object's layer current", "check", "Make the layer of the selected linework the current one (LAYMCUR)"),
+            act("layer.tocurrent", "Change to current layer", "layers-2", "Put the selected linework on the current layer (LAYCUR)"),
+            act("layer.off", "Layer off", "eye-off", "Hide the layer of the selected linework (LAYOFF)"),
+            act("layer.lock", "Lock layer", "square-dashed", "Lock the layer of the selected linework (LAYLCK): it shows and snaps, it can't be picked"),
+            act("layer.allon", "All layers on", "eye", "Show every drafting layer again (LAYON) and unlock them all"),
+            Sep,
+            act("cmdline:LINE", "Line (L)", "slash", "LINE: lines through points"),
+            act("cmdline:PLINE", "Polyline (PL)", "spline", "PLINE: a polyline, with arcs (A)"),
+            act("cmdline:CIRCLE", "Circle (C)", "circle", "CIRCLE: centre and radius, 2P, 3P, TTR"),
+            act("cmdline:ARC", "Arc (A)", "arc-length", "ARC: three points, or start, centre, end"),
+            act("cmdline:RECTANG", "Rectangle (REC)", "rectangle-horizontal", "RECTANG: two corners"),
+            act("cmdline:HATCH", "Hatch (H)", "hash", "HATCH: click inside an area"),
+            act("cmdline:TEXT", "Text (T)", "text-tool", "TEXT: a note"),
+            Sep,
+            act("cmdline:MOVE", "Move (M)", "move", "MOVE"),
+            act("cmdline:COPY", "Copy (CO)", "copy", "COPY: the copy follows the cursor"),
+            act("cmdline:ROTATE", "Rotate (RO)", "rotate-cw", "ROTATE"),
+            act("cmdline:MIRROR", "Mirror (MI)", "flip-horizontal-2", "MIRROR"),
+            act("cmdline:SCALE", "Scale (SC)", "scaling", "SCALE"),
+            act("cmdline:STRETCH", "Stretch (S)", "move-3d", "STRETCH"),
+            act("cmdline:TRIM", "Trim (TR)", "scissors", "TRIM"),
+            act("cmdline:EXTEND", "Extend (EX)", "arrow-right", "EXTEND"),
+            act("cmdline:FILLET", "Fillet (F)", "corner-down-right", "FILLET"),
+            act("cmdline:OFFSET", "Offset (O)", "offset", "OFFSET"),
+            act("cmdline:EXPLODE", "Explode (X)", "box", "EXPLODE"),
+            act("cmdline:ERASE", "Erase (E)", "trash-2", "ERASE"),
+            Sep,
+            act("cmdline:DIMLINEAR", "Dimension (DLI)", "dimension", "DIMLINEAR"),
+        ],
+        1 => vec![
             T(Tool::Wall),
             act(
                 "tool.curtain",
@@ -86,7 +121,7 @@ pub fn entries(tab: usize) -> Vec<Entry> {
             T(Tool::Paving),
             T(Tool::Planting),
         ],
-        1 => vec![
+        2 => vec![
             T(Tool::Dimension),
             T(Tool::Angle),
             T(Tool::Radius),
@@ -119,7 +154,7 @@ pub fn entries(tab: usize) -> Vec<Entry> {
                 "How doors, windows and other elements are numbered; renumber, and check for marks used twice",
             ),
         ],
-        2 => vec![
+        3 => vec![
             // levels are what plans are cut from, so they sit with the
             // views that come from them (MU20)
             T(Tool::Level),
@@ -258,7 +293,7 @@ mod tests {
                     Entry::Act { icon, label, .. } | Entry::Menu { icon, label, .. } => {
                         (icon, label.to_string())
                     }
-                    Entry::Sep => continue,
+                    Entry::Sep | Entry::LayerCombo => continue,
                 };
                 if let Some((_, other)) = seen.iter().find(|(i, _)| *i == icon) {
                     panic!("{tab_name}: {name} and {other} both use the {icon} icon");
@@ -277,12 +312,12 @@ mod tests {
                 t.label()
             );
         }
-        assert_eq!(home_of(Tool::Wall), 0);
-        assert_eq!(home_of(Tool::Dimension), 1);
-        assert_eq!(home_of(Tool::Section), 2);
-        assert_eq!(home_of(Tool::Grid), 3);
+        assert_eq!(home_of(Tool::Wall), 1);
+        assert_eq!(home_of(Tool::Dimension), 2);
+        assert_eq!(home_of(Tool::Section), 3);
+        assert_eq!(home_of(Tool::Grid), 4);
         // the callout is on both of its tabs
-        assert!(holds(1, Tool::Callout) && holds(2, Tool::Callout));
+        assert!(holds(2, Tool::Callout) && holds(3, Tool::Callout));
         // Select is on every one
         assert!((0..TABS.len()).all(|t| holds(t, Tool::Select)));
     }

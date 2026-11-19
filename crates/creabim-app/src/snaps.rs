@@ -2033,6 +2033,10 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
     MARK.with(|c| c.set(keep));
 }
 
+thread_local! {
+    static ICON_INK: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
+}
+
 /// The marker of [`draw`] without its label; its colour, if it drew one.
 /// AutoCAD's glyphs: a square for Endpoint, a triangle for Midpoint, a
 /// circle for Center, a circle with a star for Geometric center, a circle
@@ -2040,10 +2044,6 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
 /// square in a square for Insertion, a right angle for Perpendicular, a
 /// circle with a bar on top for Tangent, an hourglass for Nearest, an X in
 /// a square for Apparent intersection.
-thread_local! {
-    static ICON_INK: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
-}
-
 fn marker(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) -> Option<Color32> {
     let c = match snap.kind {
         SnapKind::Aligned | SnapKind::AlignedCross => TRACK,

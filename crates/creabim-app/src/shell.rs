@@ -487,6 +487,32 @@ impl CreaBimApp {
             "menu:Help" => self.help_menu(),
             "menu:Create" => self.create_menu(),
             "menu:Disegna" => self.draw_menu(),
+            // the current layer, picked from the Home tab
+            "layers.current" => {
+                let table = creabim_core::detail::layers(self.doc.model());
+                let cur = self.plan.details.layer.clone();
+                let mut items = vec![Item::new("detail.layer:0", "0 (no layer)").checked(cur.is_none())];
+                for (i, depth) in table.tree() {
+                    let l = &table.layers[i];
+                    let mut tags = String::new();
+                    if l.hidden {
+                        tags.push_str("  · off");
+                    }
+                    if l.locked {
+                        tags.push_str("  · locked");
+                    }
+                    items.push(
+                        Item::new(
+                            format!("detail.layer:{}", i + 1),
+                            format!("{}{}{}", "    ".repeat(depth), l.name, tags),
+                        )
+                        .checked(cur.as_deref() == Some(l.name.as_str())),
+                    );
+                }
+                items.push(Item::Separator);
+                items.push(Item::new("layers.manager", "Layer properties…").icon("layers"));
+                items
+            }
             "tab:schedules" => schedule_items(),
             "tab:ifc" => vec![
                 Item::new("open", "Open an IFC file…").icon("folder-open"),
@@ -1265,7 +1291,7 @@ impl CreaBimApp {
                         &format!("{name} › {label} › "),
                         &mut out,
                     ),
-                    Entry::Tool(_) | Entry::Sep => {}
+                    Entry::Tool(_) | Entry::Sep | Entry::LayerCombo => {}
                 }
             }
         }
@@ -1796,6 +1822,9 @@ impl CreaBimApp {
                 }
             }
             "layers.manager" => self.shell.layer_manager = !self.shell.layer_manager,
+            "layer.fromsel" | "layer.tocurrent" | "layer.off" | "layer.lock" | "layer.allon" => {
+                self.layer_quick(head);
+            }
             "osnap.once" => {
                 let kinds = crate::snaps::SnapSettings::SWITCH_KINDS;
                 let kind = match arg {
@@ -3873,6 +3902,23 @@ impl CreaBimApp {
                     "open": self.popup_key().as_deref() == Some(key),
                 }),
                 Entry::Sep => json!({"kind": "sep"}),
+                Entry::LayerCombo => {
+                    let table = creabim_core::detail::layers(self.doc.model());
+                    let cur = self.plan.details.layer.clone();
+                    let colour = cur
+                        .as_deref()
+                        .and_then(|n| table.effective(n))
+                        .and_then(|l| l.color)
+                        .map(|[r, g, b]| format!("rgb({r},{g},{b})"))
+                        .unwrap_or_else(|| "#000".into());
+                    json!({
+                        "kind": "combo", "key": "layers.current",
+                        "value": cur.unwrap_or_else(|| "0 (no layer)".into()),
+                        "color": colour,
+                        "hint": "The current drafting layer: what you draw goes on it. Click to pick another",
+                        "open": self.popup_key().as_deref() == Some("layers.current"),
+                    })
+                }
             });
         }
         let tabs: Vec<Value> = crate::tooltabs::TABS

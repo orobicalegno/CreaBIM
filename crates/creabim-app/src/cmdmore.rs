@@ -1293,4 +1293,120 @@ impl CreaBimApp {
             },
         }
     }
+
+    /// Linework on a locked drafting layer can't be selected: it leaves the
+    /// selection as soon as it gets in.
+    pub(super) fn drop_locked_from_selection(&mut self) {
+        if self.selection.is_empty() {
+            return;
+        }
+        let table = creabim_core::detail::layers(self.doc.model());
+        if !table.layers.iter().any(|l| l.locked) {
+            return;
+        }
+        let locked: Vec<ElementId> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter(|id| match self.doc.model().get(*id).map(|e| &e.kind) {
+                Some(ElementKind::Detail(d)) => d
+                    .layer
+                    .as_deref()
+                    .and_then(|n| table.effective(n))
+                    .is_some_and(|l| l.locked),
+                _ => false,
+            })
+            .collect();
+        if locked.is_empty() {
+            return;
+        }
+        let keep: Vec<ElementId> = self.selection.all().into_iter().filter(|id| !locked.contains(id)).collect();
+        self.selection.clear();
+        self.selection.extend(keep, false);
+        self.status = "That is on a locked layer: unlock the layer to select it.".into();
+    }
+
+    /// The Home tab's layer buttons, as AutoCAD's LAYMCUR, LAYCUR, LAYOFF,
+    /// LAYLCK and LAYON.
+    pub(super) fn layer_quick(&mut self, what: &str) {
+        let model = self.doc.model();
+        let picked: Vec<(Element, DetailItem)> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter_map(|id| {
+                let e = model.get(id)?;
+                match &e.kind {
+                    ElementKind::Detail(d) => Some((e.clone(), d.clone())),
+                    _ => None,
+                }
+            })
+            .collect();
+        let first_layer = picked.iter().find_map(|(_, d)| d.layer.clone());
+        match what {
+            "layer.fromsel" => match first_layer {
+                Some(l) => {
+                    self.plan.details.layer = Some(l.clone());
+                    self.say(format!("Current layer: {l}."));
+                }
+                None => self.say("Select linework on a layer first."),
+            },
+            "layer.tocurrent" => {
+                if picked.is_empty() {
+                    self.say("Select linework first.");
+                    return;
+                }
+                let cur = self.plan.details.layer.clone();
+                let mut tx = Transaction::new("Change to current layer");
+                for (e, d) in &picked {
+                    let mut after = e.clone();
+                    let mut d = d.clone();
+                    d.layer = cur.clone();
+                    after.kind = ElementKind::Detail(d);
+                    tx = tx.replace(e.clone(), after);
+                }
+                match self.doc.commit(tx) {
+                    Ok(_) => self.say(format!(
+                        "{} pieces on {}.",
+                        picked.len(),
+                        cur.as_deref().unwrap_or("no layer")
+                    )),
+                    Err(e) => self.say(format!("Couldn't do that: {e}")),
+                }
+            }
+            "layer.off" | "layer.lock" => {
+                let Some(name) = first_layer else {
+                    self.say("Select linework on a layer first.");
+                    return;
+                };
+                let mut table = creabim_core::detail::layers(model);
+                if let Some(l) = table.layers.iter_mut().find(|l| l.name == name) {
+                    if what == "layer.off" {
+                        l.hidden = true;
+                    } else {
+                        l.locked = true;
+                    }
+                }
+                let tx = creabim_core::detail::set_layers(model, table);
+                if self.doc.commit(tx).is_ok() {
+                    self.selection.clear();
+                    self.say(format!(
+                        "Layer {name} {}.",
+                        if what == "layer.off" { "off" } else { "locked" }
+                    ));
+                }
+            }
+            _ => {
+                let mut table = creabim_core::detail::layers(model);
+                for l in &mut table.layers {
+                    l.hidden = false;
+                    l.locked = false;
+                }
+                let tx = creabim_core::detail::set_layers(model, table);
+                if self.doc.commit(tx).is_ok() {
+                    self.say("Every layer on and unlocked.");
+                }
+            }
+        }
+    }
 }

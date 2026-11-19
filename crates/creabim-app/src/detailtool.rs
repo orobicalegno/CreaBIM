@@ -67,6 +67,10 @@ pub enum LayerEdit {
     MakeSymbol,
     /// Turn this placed symbol back into linework.
     Explode,
+    /// Delete a layer and its linework.
+    Delete(String),
+    /// Merge a layer into another: its linework moves there.
+    Merge { from: String, into: String },
 }
 
 /// An edit of plain linework against other linework, CAD-style.
@@ -873,6 +877,29 @@ pub fn preview(
     }
 }
 
+/// A hatch's scale and angle, as AutoCAD's: rows in Properties.
+fn hatch_rows(ui: &mut egui::Ui, scale: &mut f64, angle: &mut f64, mut label: &'static str) -> &'static str {
+    crate::props::row(ui, "Hatch scale", |ui| {
+        if ui
+            .add(egui::DragValue::new(scale).speed(0.05).range(0.05..=100.0))
+            .on_hover_text("How many times its usual size the hatch is drawn")
+            .changed()
+        {
+            label = "Hatch scale";
+        }
+    });
+    crate::props::row(ui, "Hatch angle", |ui| {
+        if ui
+            .add(egui::DragValue::new(angle).speed(1.0).suffix("°"))
+            .on_hover_text("How far the hatch is turned, degrees anticlockwise")
+            .changed()
+        {
+            label = "Hatch angle";
+        }
+    });
+    label
+}
+
 /// A component's settings in Properties; returns the edit's name when one
 /// changed. Plain linework also shows the project's drafting `layers`,
 /// and puts a change to them in `layer_edit`.
@@ -930,11 +957,28 @@ pub fn detail_fields(
     if let DetailKind::Draft { shape, pen } = &mut d.kind {
         // plain linework: its shape is what its points mean
         let name = shape.label();
+        // ByLayer, or one of its own (thin, medium, thick…)
+        let layer_pen = d
+            .layer
+            .as_deref()
+            .and_then(|n| layers.effective(n))
+            .and_then(|l| l.pen);
+        let own = d.own_pen || layer_pen.is_none();
         crate::props::Combo::new("Pen")
-            .selected_text(pen.label())
+            .selected_text(if own {
+                pen.label().to_string()
+            } else {
+                format!("By layer ({})", layer_pen.map_or("", |p| p.label()))
+            })
             .show_ui(ui, |ui| {
+                if layer_pen.is_some() && ui.selectable_label(!own, "By layer").clicked() {
+                    d.own_pen = false;
+                    label = "Line pen";
+                }
                 for p in LinePen::ALL {
-                    if ui.selectable_value(pen, p, p.label()).changed() {
+                    if ui.selectable_label(own && *pen == p, p.label()).clicked() {
+                        *pen = p;
+                        d.own_pen = true;
                         label = "Line pen";
                     }
                 }
@@ -1017,6 +1061,9 @@ pub fn detail_fields(
                     }
                 });
         }
+        if fillable && d.fill.is_some() {
+            label = hatch_rows(ui, &mut d.hatch_scale, &mut d.hatch_angle, label);
+        }
         if let DraftShape::Line | DraftShape::Closed = shape {
             let mut closed = *shape == DraftShape::Closed;
             if d.points.len() >= 3
@@ -1051,7 +1098,7 @@ pub fn detail_fields(
         }
         // the project's layers, edited here: they are every view's
         if crate::props::subsection(ui, "draft.layers", "Drafting layers", false) {
-            layer_tree(ui, layers, layer_edit);
+            layer_tree(ui, layers, &std::collections::HashMap::new(), layer_edit);
         }
         return label;
     }
@@ -1115,6 +1162,7 @@ pub fn detail_fields(
                         }
                     }
                 });
+            label = hatch_rows(ui, &mut d.hatch_scale, &mut d.hatch_angle, label);
         }
         _ => {}
     }
@@ -1181,6 +1229,7 @@ pub fn join_fields(ui: &mut egui::Ui, model: &Model, j: &mut JoinRule) -> &'stat
 pub fn layer_tree(
     ui: &mut egui::Ui,
     layers: &creabim_core::DraftLayers,
+    counts: &std::collections::HashMap<String, usize>,
     layer_edit: &mut Option<LayerEdit>,
 ) {
     use creabim_core::{DraftLayer, LineType};
@@ -1321,14 +1370,88 @@ pub fn layer_tree(
             })
             .response
             .on_hover_text("Put this layer under another one, or make it a top-level layer");
+            // locked: it shows and snaps, it can't be picked
+            let mut locked = l.locked;
+            if ui
+                .toggle_value(&mut locked, if l.locked { "Locked" } else { "Lock" })
+                .on_hover_text("A locked layer's linework shows and snaps but can't be selected or changed")
+                .changed()
+            {
+                l.locked = locked;
+                changed = true;
+            }
+            // its pen: thin, medium or thick, for linework By layer
+            egui::ComboBox::from_id_salt(("draft.layer.pen", &name))
+                .icon(crate::props::combo_icon)
+                .width(70.0)
+                .selected_text(match l.pen {
+                    Some(creabim_core::LinePen::Light) => "Thin",
+                    Some(creabim_core::LinePen::Medium) => "Medium",
+                    Some(creabim_core::LinePen::Heavy) => "Thick",
+                    Some(p) => p.label(),
+                    None => "Pen",
+                })
+                .show_ui(ui, |ui| {
+                    for (p, t) in [
+                        (None, "As each line"),
+                        (Some(creabim_core::LinePen::Light), "Thin"),
+                        (Some(creabim_core::LinePen::Medium), "Medium"),
+                        (Some(creabim_core::LinePen::Heavy), "Thick"),
+                    ] {
+                        changed |= ui.selectable_value(&mut l.pen, p, t).changed();
+                    }
+                })
+                .response
+                .on_hover_text("The pen of its linework, unless a line has its own");
+            ui.menu_button("Merge…", |ui| {
+                ui.label(egui::RichText::new("Move its linework onto:").weak());
+                for (k, d) in layers.tree() {
+                    let other = &layers.layers[k].name;
+                    if *other == name {
+                        continue;
+                    }
+                    if ui.button(format!("{}{}", "    ".repeat(d), other)).clicked() {
+                        *layer_edit = Some(LayerEdit::Merge {
+                            from: name.clone(),
+                            into: other.clone(),
+                        });
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Merge this layer into another: its linework moves there, and it goes");
+            let n = counts.get(&name).copied().unwrap_or(0);
             if ui
                 .small_button("x")
-                .on_hover_text("Remove the layer. Its linework stays, on no layer; its sub-layers move up.")
+                .on_hover_text("Delete the layer. With linework on it, you are asked first: its linework goes too.")
                 .clicked()
             {
-                remove = Some(name.clone());
+                if n == 0 {
+                    remove = Some(name.clone());
+                } else {
+                    ui.data_mut(|m| m.insert_temp(egui::Id::new("draft.layer.ask"), name.clone()));
+                }
             }
         });
+        // deleting a layer with linework on it: asked first
+        let ask: Option<String> = ui.data(|m| m.get_temp(egui::Id::new("draft.layer.ask")));
+        if ask.as_deref() == Some(name.as_str()) {
+            let n = counts.get(&name).copied().unwrap_or(0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("Delete \"{name}\" and its {n} pieces of linework?"))
+                        .color(ui.visuals().warn_fg_color),
+                );
+                if ui.button("Delete").clicked() {
+                    *layer_edit = Some(LayerEdit::Delete(name.clone()));
+                    ui.data_mut(|m| m.remove::<String>(egui::Id::new("draft.layer.ask")));
+                }
+                if ui.button("Cancel").clicked() {
+                    ui.data_mut(|m| m.remove::<String>(egui::Id::new("draft.layer.ask")));
+                }
+            });
+        }
     }
     if fold_changed {
         ui.data_mut(|d| d.insert_temp(folded_id, folded));

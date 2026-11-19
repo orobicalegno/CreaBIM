@@ -182,6 +182,8 @@
     const tabs = (S.tabs || []).map((t) => `<button class="ttab ${t.on ? "on" : ""}" data-act="${esc(t.id)}">${esc(t.label)}</button>`).join("");
     const tools = S.tools.map((t) =>
       t.kind === "sep" ? `<span class="vsep"></span>` :
+      // the current layer, as AutoCAD's Layers panel: its colour, its name
+      t.kind === "combo" ? `<button class="tool combo ${t.open ? "on" : ""}" data-popup="${esc(t.key)}" title="${esc(t.hint)}"><span class="swatch" style="background:${esc(t.color || "transparent")}"></span><span class="v">${esc(t.value)}</span>${icon("chevron-down", "tchev")}</button>` :
       t.kind === "menu" ? `<button class="tool ${t.open ? "on" : ""}" data-popup="${esc(t.key)}" title="${esc(t.label + ": " + t.hint)}">${icon(t.icon)}${icon("chevron-down", "tchev")}</button>` :
       `<button class="tool ${t.active ? "on" : ""} ${t.off ? "off" : ""}" data-act="${esc(t.id)}" title="${esc(t.label + ": " + t.hint)}">${icon(t.icon)}</button>`).join("");
     const html =

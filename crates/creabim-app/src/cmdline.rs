@@ -1210,6 +1210,17 @@ impl CreaBimApp {
     /// said and the prompt with what is being typed.
     pub(super) fn cmdline_window(&mut self, ctx: &egui::Context) {
         self.cmd_tick();
+        // a quick right-click: Enter for what runs, else the last command
+        if std::mem::take(&mut self.plan.right_quick) && self.plan.modal.is_none() {
+            if self.cmd.running.is_some() || self.plan.outline.is_some() {
+                self.cmd_enter(ctx, "");
+            } else if self.plan.tool != Tool::Select {
+                // Enter ends a tool that draws nothing just now
+                self.cmd.esc = true;
+            } else if let Some(c) = self.cmd.last.clone() {
+                self.cmd_start(ctx, &c);
+            }
+        }
         // Esc ends the command: back to selecting, what is drawn kept
         if std::mem::take(&mut self.cmd.esc)
             && self.plan.modal.is_none()
