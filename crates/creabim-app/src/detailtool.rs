@@ -878,7 +878,12 @@ pub fn preview(
 }
 
 /// A hatch's scale and angle, as AutoCAD's: rows in Properties.
-fn hatch_rows(ui: &mut egui::Ui, scale: &mut f64, angle: &mut f64, mut label: &'static str) -> &'static str {
+fn hatch_rows(
+    ui: &mut egui::Ui,
+    scale: &mut f64,
+    angle: &mut f64,
+    mut label: &'static str,
+) -> &'static str {
     crate::props::row(ui, "Hatch scale", |ui| {
         if ui
             .add(egui::DragValue::new(scale).speed(0.05).range(0.05..=100.0))
@@ -1440,8 +1445,10 @@ pub fn layer_tree(
             let n = counts.get(&name).copied().unwrap_or(0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("Delete \"{name}\" and its {n} pieces of linework?"))
-                        .color(ui.visuals().warn_fg_color),
+                    egui::RichText::new(format!(
+                        "Delete \"{name}\" and its {n} pieces of linework?"
+                    ))
+                    .color(ui.visuals().warn_fg_color),
                 );
                 if ui.button("Delete").clicked() {
                     *layer_edit = Some(LayerEdit::Delete(name.clone()));

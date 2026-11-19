@@ -1018,7 +1018,8 @@ pub fn show(
     let pressed =
         response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
     // when the right button went down, for a quick click or a held one
-    if response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+    if response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+    {
         state.right_down = ui.input(|i| i.time);
     }
     let pick = if tool == Tool::Select
@@ -1167,7 +1168,10 @@ pub fn show(
         if is_plan && state.ucs_icon {
             draw_ucs_icon(&painter, &xf, state.ucs, state.ucs_icon_origin);
             // the north beside it, to the project's true north
-            let north = doc.model().project_info().map_or(0.0, |(_, p)| p.true_north);
+            let north = doc
+                .model()
+                .project_info()
+                .map_or(0.0, |(_, p)| p.true_north);
             draw_north_icon(&painter, &xf, north);
         }
     }
@@ -5852,7 +5856,11 @@ pub fn draw_north_icon(painter: &egui::Painter, xf: &Xf, true_north: f64) {
     let ink = Color32::from_rgb(60, 60, 60);
     let north = DVec2::from_angle(true_north.to_radians()).rotate(DVec2::Y);
     let v = xf.to_screen(north) - xf.to_screen(DVec2::ZERO);
-    let v = if v.length() > 1e-6 { v.normalized() } else { -Vec2::Y };
+    let v = if v.length() > 1e-6 {
+        v.normalized()
+    } else {
+        -Vec2::Y
+    };
     let side = Vec2::new(-v.y, v.x);
     let r = 14.0;
     painter.circle_stroke(base, r, Stroke::new(1.0, ink));

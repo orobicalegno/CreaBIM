@@ -154,6 +154,8 @@ pub struct CreaBimApp {
     log_ui: reportui::LogUi,
     /// AutoCAD's command line.
     cmd: cmdline::CmdLine,
+    /// What each open window found when it opened, for its Cancel.
+    dialogs: std::collections::HashMap<&'static str, osnapui::DialogSnap>,
     /// Report a problem asked for: the themed window is open; whether to
     /// put the project in.
     report_ask: Option<bool>,
@@ -439,6 +441,7 @@ impl CreaBimApp {
             masters: Default::default(),
             log_ui: Default::default(),
             cmd: Default::default(),
+            dialogs: Default::default(),
             report_ask: None,
             close_ask: false,
             close_state: Default::default(),
@@ -10475,9 +10478,9 @@ impl CreaBimApp {
                         Some(crate::detailtool::LayerEdit::Delete(name)) => {
                             Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
                         }
-                        Some(crate::detailtool::LayerEdit::Merge { from, into }) => {
-                            Some(creabim_core::detail::merge_layers(self.doc.model(), &from, &into))
-                        }
+                        Some(crate::detailtool::LayerEdit::Merge { from, into }) => Some(
+                            creabim_core::detail::merge_layers(self.doc.model(), &from, &into),
+                        ),
                         Some(crate::detailtool::LayerEdit::MakeSymbol) => {
                             self.make_symbol();
                             None

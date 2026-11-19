@@ -487,11 +487,14 @@ impl CreaBimApp {
             "menu:Help" => self.help_menu(),
             "menu:Create" => self.create_menu(),
             "menu:Disegna" => self.draw_menu(),
+            "menu:Select" => self.select_bar_menu(),
+            "menu:Annotation" => self.annotation_menu(),
             // the current layer, picked from the Home tab
             "layers.current" => {
                 let table = creabim_core::detail::layers(self.doc.model());
                 let cur = self.plan.details.layer.clone();
-                let mut items = vec![Item::new("detail.layer:0", "0 (no layer)").checked(cur.is_none())];
+                let mut items =
+                    vec![Item::new("detail.layer:0", "0 (no layer)").checked(cur.is_none())];
                 for (i, depth) in table.tree() {
                     let l = &table.layers[i];
                     let mut tags = String::new();
@@ -1147,15 +1150,75 @@ impl CreaBimApp {
         ]
     }
 
+    /// The tools of the Create menu's groups, as the View and Annotation
+    /// menus take theirs (views, annotation) from it.
+    fn tool_group_items(&self, group: u8) -> Vec<Item> {
+        Tool::ALL
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| tool_group(**t) == group)
+            .map(|(i, t)| {
+                Item::new(format!("tool:{i}"), t.label())
+                    .icon(tool_icon(*t))
+                    .hint(t.hint())
+            })
+            .collect()
+    }
+
+    /// Annotation: dimensions, tags, notes, details and their styles.
+    fn annotation_menu(&self) -> Vec<Item> {
+        let mut items = vec![Item::Header("Annotation".into())];
+        items.extend(self.tool_group_items(3));
+        items.push(Item::Separator);
+        items.push(Item::new("tag.all", "Tag all").icon("tags").hint(
+            "Tag every door, window, fixture and room in the view that has no tag yet (Shift+T)",
+        ));
+        items.push(Item::new("styles", "Annotation styles…").icon("anno-styles"));
+        items.push(Item::new("marks", "Mark numbering…").icon("hash"));
+        items.push(Item::new("view.north", "North arrow").icon("north-arrow"));
+        items
+    }
+
+    /// Select, as its own menu: all, none, invert, the box's shape and how
+    /// it combines, by type, similar.
+    fn select_bar_menu(&self) -> Vec<Item> {
+        use crate::boxsel::Combine as C;
+        let mut items = self.select_menu_items();
+        let how = crate::boxsel::combine();
+        items.push(Item::Separator);
+        items.push(Item::Header("A box or a click".into()));
+        for (i, (c, label, icon)) in [
+            (C::New, "New selection", "sel-new"),
+            (C::Add, "Add to it (Shift)", "sel-add"),
+            (C::Subtract, "Take from it (Ctrl)", "sel-sub"),
+            (C::Invert, "Invert what it takes", "sel-invert"),
+            (C::Intersect, "Keep what both hold", "sel-intersect"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            items.push(
+                Item::new(format!("sel.combine:{i}"), label)
+                    .icon(icon)
+                    .checked(how == c)
+                    .keep_open(),
+            );
+        }
+        if self.plan.edit.is_some() {
+            let k = crate::handles::pick();
+            items.push(Item::Separator);
+            items.push(Item::Header("In Edit mode".into()));
+            items.push(Item::new("sel.pick:1", "Points").key("1").checked(k == 1));
+            items.push(Item::new("sel.pick:2", "Edges").key("2").checked(k == 2));
+            items.push(Item::new("sel.pick:3", "Faces").key("3").checked(k == 3));
+        }
+        items
+    }
+
     fn create_menu(&self) -> Vec<Item> {
         let mut items = vec![];
-        for (group, title) in [
-            (1, "Building elements"),
-            (2, "Views"),
-            (5, "Site"),
-            (3, "Annotation"),
-            (4, "Sketching"),
-        ] {
+        // views are in View, annotation in Annotation
+        for (group, title) in [(1, "Building elements"), (5, "Site"), (4, "Sketching")] {
             items.push(Item::Header(title.into()));
             for (i, t) in Tool::ALL.iter().enumerate() {
                 if tool_group(*t) == group {
@@ -1221,10 +1284,6 @@ impl CreaBimApp {
                         .icon("car")
                         .hint("Entourage from the catalogue: a car, people, for scale"),
                 );
-            }
-            if group == 2 {
-                items.push(Item::new("new.sheet", "Sheet").icon("file-text"));
-                items.push(Item::sub("Schedule", schedule_items()).icon("table-2"));
             }
         }
         items
@@ -1436,7 +1495,13 @@ impl CreaBimApp {
                 .key("Ctrl+Shift+T")
                 .icon("palette"),
         );
-        vec![
+        // the views to make, moved here from Create
+        let mut make = vec![Item::Header("New view".into())];
+        make.extend(self.tool_group_items(2));
+        make.push(Item::new("new.sheet", "Sheet").icon("file-text"));
+        make.push(Item::sub("Schedule", schedule_items()).icon("table-2"));
+        make.push(Item::Separator);
+        let rest = vec![
             Item::Header("2D view".into()),
             place(PlanPlacement::Docked, 0, "Docked beside 3D"),
             place(PlanPlacement::Window, 1, "In its own window"),
@@ -1507,7 +1572,9 @@ impl CreaBimApp {
             Item::new("ui.classic", "Classic panels")
                 .checked(self.shell.classic)
                 .hint("The plain built-in panels instead of the new interface"),
-        ]
+        ];
+        make.extend(rest);
+        make
     }
 
     /// The Step choices: Off, three in the project's units, and Custom.
@@ -3624,13 +3691,8 @@ impl CreaBimApp {
                     ),
                 ]));
             }
-            sel_opts.push(json!({
-                "kind": "menu", "key": "select.menu", "label": "", "value": "Select",
-                "hint": "All, none, invert, similar, linked, random",
-            }));
-            sel_opts.push(json!({"kind": "sep"}));
-            sel_opts.extend(options);
-            options = sel_opts;
+            // the box's shape and the rest are in the Select menu now
+            let _ = sel_opts;
             hint = self.selection_hint();
         }
         let head = json!({
@@ -3930,7 +3992,7 @@ impl CreaBimApp {
         json!({
             "theme": self.theme(),
             "popup": self.popup_key(),
-            "menus": (["File", "Edit", "View", "Create", "Disegna", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
+            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
             "quick": quick,
             // the selection count is in the status bar, where it belongs
             "doc": {

@@ -664,8 +664,14 @@ pub fn shaped_path(path: &[DVec2], loops: bool, mm: f64) -> Vec<DVec2> {
         let t = ((s - cum[i - 1]) / len).clamp(0.0, 1.0);
         (a + (b - a) * t, (b - a).normalize_or_zero())
     };
-    let (wave, amp) = if loops { (2.6 * mm, 1.3 * mm) } else { (2.0 * mm, 0.8 * mm) };
-    let steps = ((total / wave) * if loops { 24.0 } else { 2.0 }).ceil().clamp(2.0, 40_000.0) as usize;
+    let (wave, amp) = if loops {
+        (2.6 * mm, 1.3 * mm)
+    } else {
+        (2.0 * mm, 0.8 * mm)
+    };
+    let steps = ((total / wave) * if loops { 24.0 } else { 2.0 })
+        .ceil()
+        .clamp(2.0, 40_000.0) as usize;
     let mut out = Vec::with_capacity(steps + 1);
     for k in 0..=steps {
         let s = total * k as f64 / steps as f64;
@@ -690,7 +696,14 @@ pub fn shaped_path(path: &[DVec2], loops: bool, mm: f64) -> Vec<DVec2> {
 /// A hatch over `pts`: as the drawing style draws hatches, or, scaled or
 /// turned (the piece's hatch scale and angle, as AutoCAD's), its lines
 /// drawn here at that size and angle over the hatch's fill.
-fn push_hatch(out: &mut Vec<PlanItem>, id: ElementId, pts: &[DVec2], hatch: Hatch, d: &DetailItem, mm: f64) {
+fn push_hatch(
+    out: &mut Vec<PlanItem>,
+    id: ElementId,
+    pts: &[DVec2],
+    hatch: Hatch,
+    d: &DetailItem,
+    mm: f64,
+) {
     let (k, a) = (d.hatch_scale, d.hatch_angle);
     if (k - 1.0).abs() < 1e-9 && a.abs() < 1e-9 || hatch == Hatch::Solid {
         out.push(PlanItem::Fill {

@@ -601,7 +601,9 @@ impl CreaBimApp {
             ("Project", "folder"),
             ("Keymap", "keyboard"),
         ];
-        let height = (area.height() - 80.0).clamp(300.0, 560.0);
+        let height = (area.height() - 80.0).clamp(300.0, 520.0);
+        self.dialog_begin("settings");
+        let mut footer = None;
         crate::app::shell::window("Settings")
             .open(&mut open)
             .default_pos(area.center() - Vec2::new(310.0, height / 2.0))
@@ -877,8 +879,18 @@ impl CreaBimApp {
                             });
                     });
                 });
+                footer = Self::dialog_footer(ui);
             });
         ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+        // Save keeps, Cancel and the cross put it all back
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if keep.is_some() {
+            open = false;
+        }
         self.settings_open = open;
         if !open {
             ctx.data_mut(|d| d.remove::<f64>(egui::Id::new("settings.logo.t0")));
@@ -942,6 +954,10 @@ impl CreaBimApp {
         }
         if keys {
             self.open_help("shortcuts");
+        }
+        // last, once what was picked is applied: kept, or put back
+        if let Some(k) = keep {
+            self.dialog_end("settings", k);
         }
     }
 }

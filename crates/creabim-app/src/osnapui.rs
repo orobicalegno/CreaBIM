@@ -5,11 +5,86 @@
 
 use super::*;
 
+/// What a window found when it opened: its Cancel puts it all back.
+pub(super) struct DialogSnap {
+    settings: crate::files::Settings,
+    snap: crate::snaps::SnapSettings,
+    guide_step: f64,
+    ucs: crate::planview::Ucs,
+    undo: usize,
+}
+
+impl CreaBimApp {
+    /// A window opens: what it may change is noted, for Cancel.
+    pub(super) fn dialog_begin(&mut self, key: &'static str) {
+        if self.dialogs.contains_key(key) {
+            return;
+        }
+        self.dialogs.insert(
+            key,
+            DialogSnap {
+                settings: self.shell.settings.clone(),
+                snap: self.plan.snap,
+                guide_step: self.plan.guide_step,
+                ucs: self.plan.ucs,
+                undo: self.doc.undo_steps().len(),
+            },
+        );
+    }
+
+    /// Save and Cancel at a window's foot: Some(true) to keep what changed,
+    /// Some(false) to put it back.
+    pub(super) fn dialog_footer(ui: &mut egui::Ui) -> Option<bool> {
+        let mut out = None;
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui
+                .button("Save")
+                .on_hover_text("Keep what you changed")
+                .clicked()
+            {
+                out = Some(true);
+            }
+            if ui
+                .button("Cancel")
+                .on_hover_text("Put everything back as it was when the window opened")
+                .clicked()
+            {
+                out = Some(false);
+            }
+        });
+        out
+    }
+
+    /// A window closes: kept, or put back as it was (its changes to the
+    /// project undone).
+    pub(super) fn dialog_end(&mut self, key: &'static str, keep: bool) {
+        let Some(s) = self.dialogs.remove(key) else {
+            return;
+        };
+        if keep {
+            return;
+        }
+        self.shell.settings = s.settings;
+        self.shell.settings.store();
+        self.plan.snap = s.snap;
+        self.plan.guide_step = s.guide_step;
+        self.plan.ucs = s.ucs;
+        while self.doc.undo_steps().len() > s.undo && self.doc.undo() {}
+        self.plan.forget_snaps();
+        self.snaps_3d = None;
+        self.geometry_key = None;
+        self.status = "Cancelled: put back as it was.".into();
+    }
+}
+
 impl CreaBimApp {
     pub(super) fn drafting_settings_window(&mut self, ctx: &egui::Context) {
         if !self.shell.drafting_settings {
             return;
         }
+        self.dialog_begin("dsettings");
+        let mut footer = None;
         let mut open = true;
         let mut s = self.plan.snap;
         let mut angle = self.plan.guide_step;
@@ -134,6 +209,7 @@ impl CreaBimApp {
                     }
                 });
                     });
+                footer = Self::dialog_footer(ui);
             });
         if s != self.plan.snap {
             self.plan.snap = s;
@@ -148,7 +224,15 @@ impl CreaBimApp {
             st.snap_tooltip = tip;
             st.store();
         }
-        if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // closed by its cross or Esc: as Cancel
+        let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open || esc => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("dsettings", k);
             self.shell.drafting_settings = false;
         }
     }
@@ -161,6 +245,8 @@ impl CreaBimApp {
         if !self.shell.layer_manager {
             return;
         }
+        self.dialog_begin("layers");
+        let mut footer = None;
         let mut open = true;
         let table = creabim_core::detail::layers(self.doc.model());
         let counts = creabim_core::detail::layer_counts(self.doc.model());
@@ -185,6 +271,7 @@ impl CreaBimApp {
                     .weak()
                     .small(),
                 );
+                footer = Self::dialog_footer(ui);
             });
         let tx = match edit {
             Some(crate::detailtool::LayerEdit::Set(t)) => {
@@ -196,9 +283,9 @@ impl CreaBimApp {
             Some(crate::detailtool::LayerEdit::Delete(name)) => {
                 Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
             }
-            Some(crate::detailtool::LayerEdit::Merge { from, into }) => {
-                Some(creabim_core::detail::merge_layers(self.doc.model(), &from, &into))
-            }
+            Some(crate::detailtool::LayerEdit::Merge { from, into }) => Some(
+                creabim_core::detail::merge_layers(self.doc.model(), &from, &into),
+            ),
             _ => None,
         };
         if let Some(tx) = tx.filter(|t| !t.ops.is_empty()) {
@@ -207,7 +294,13 @@ impl CreaBimApp {
                 Err(e) => self.status = format!("Couldn't do that: {e}"),
             }
         }
-        if !open {
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("layers", k);
             self.shell.layer_manager = false;
         }
     }
@@ -220,6 +313,8 @@ impl CreaBimApp {
         if !self.shell.ucs_manager {
             return;
         }
+        self.dialog_begin("ucs");
+        let mut footer = None;
         let mut open = true;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         let saved: Vec<creabim_core::NamedUcs> = self
@@ -305,6 +400,7 @@ impl CreaBimApp {
                     ui.checkbox(&mut self.plan.ucs_icon, "UCS icon");
                     ui.checkbox(&mut self.plan.ucs_icon_origin, "at its origin");
                 });
+                footer = Self::dialog_footer(ui);
             });
         ctx.data_mut(|d| d.insert_temp(name_id, name.clone()));
         if let Some(u) = pick {
@@ -321,7 +417,13 @@ impl CreaBimApp {
         if plan {
             self.cmd_word(super::cmdline::WordFor::Plan, "");
         }
-        if !open {
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("ucs", k);
             self.shell.ucs_manager = false;
         }
     }

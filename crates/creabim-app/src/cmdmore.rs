@@ -483,7 +483,12 @@ impl CreaBimApp {
                     self.cmd.running = None;
                     self.set_true_north(a);
                 }
-                None => self.cmd_pick_start(name, "Specify a point, then a point towards north:", 2, Finish::NorthPoints),
+                None => self.cmd_pick_start(
+                    name,
+                    "Specify a point, then a point towards north:",
+                    2,
+                    Finish::NorthPoints,
+                ),
             },
             NumberFor::UcsZ => {
                 self.cmd.running = None;
@@ -1060,7 +1065,12 @@ impl CreaBimApp {
 
     /// The project's true north, degrees anticlockwise from the drawing's up.
     pub(super) fn set_true_north(&mut self, deg: f64) {
-        let mut info = self.doc.model().project_info().map(|(_, p)| p.clone()).unwrap_or_default();
+        let mut info = self
+            .doc
+            .model()
+            .project_info()
+            .map(|(_, p)| p.clone())
+            .unwrap_or_default();
         info.true_north = deg;
         let tx = creabim_core::set_project(self.doc.model(), info);
         match self.doc.commit(tx) {
@@ -1320,7 +1330,12 @@ impl CreaBimApp {
         if locked.is_empty() {
             return;
         }
-        let keep: Vec<ElementId> = self.selection.all().into_iter().filter(|id| !locked.contains(id)).collect();
+        let keep: Vec<ElementId> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter(|id| !locked.contains(id))
+            .collect();
         self.selection.clear();
         self.selection.extend(keep, false);
         self.status = "That is on a locked layer: unlock the layer to select it.".into();
