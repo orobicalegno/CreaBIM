@@ -1012,6 +1012,7 @@ impl CreaBimApp {
                     c("CIRCLE", "Centro, raggio", "C", "circle"),
                     c("CIRCLE 2P", "2 punti", "", "circle"),
                     c("CIRCLE 3P", "3 punti", "", "circle"),
+                    c("CIRCLE TTR", "Tangente, tangente, raggio", "", "circle"),
                 ],
             )
             .icon("circle"),
@@ -1027,6 +1028,8 @@ impl CreaBimApp {
             c("POLYGON", "Poligono", "POL", "diamond"),
             c("ELLIPSE", "Ellisse", "EL", "ellipse"),
             c("SPLINE", "Spline", "SPL", "spline"),
+            c("DONUT", "Ciambella", "DO", "circle-dot"),
+            c("POINT", "Punto", "PO", "circle-dot"),
             c("HATCH", "Tratteggio", "H", "hash"),
             c("TEXT", "Testo", "T", "text-tool"),
             Item::sub(
@@ -1062,12 +1065,29 @@ impl CreaBimApp {
                 ],
             )
             .icon("grid-3x3"),
+            c("STRETCH", "Stira", "S", "move"),
+            c("LENGTHEN", "Allunga", "LEN", "arrow-right"),
+            c("BREAK", "Spezza", "BR", "scissors"),
+            c("BREAKATPOINT", "Spezza in un punto", "", "scissors"),
+            c("JOIN", "Unisci", "J", "link"),
+            c("MATCHPROP", "Copia proprietà", "MA", "palette"),
+            c("DIVIDE", "Dividi", "DIV", "ruler"),
+            c("MEASURE", "Misura", "ME", "ruler"),
             c("EXPLODE", "Esplodi", "X", "box"),
             Item::Separator,
             Item::Header("Strumenti".into()),
             c("DIST", "Distanza", "DI", "ruler"),
             c("AREA", "Area", "AA", "square"),
             c("ID", "Coordinate di un punto", "ID", "crosshair"),
+            Item::sub(
+                "Zoom",
+                vec![
+                    c("ZOOM E", "Estensioni", "Z E", "maximize-2"),
+                    c("ZOOM W", "Finestra", "Z W", "zoom-in"),
+                    c("ZOOM P", "Precedente", "Z P", "zoom-out"),
+                ],
+            )
+            .icon("zoom-in"),
             c("LAYER", "Layer", "LA", "layers"),
             c("OSNAP", "Impostazioni snap", "OS", "settings"),
             Item::new("cmdline:toggle", "Riga di comando")

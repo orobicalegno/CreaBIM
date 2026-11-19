@@ -33,6 +33,8 @@ mod areasui;
 mod assemblies;
 #[path = "cmdline.rs"]
 pub(crate) mod cmdline;
+#[path = "cmdmore.rs"]
+mod cmdmore;
 #[path = "cropui.rs"]
 mod cropui;
 #[path = "divideui.rs"]

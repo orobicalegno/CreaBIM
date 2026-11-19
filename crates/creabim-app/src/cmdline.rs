@@ -26,6 +26,23 @@ pub struct CmdLine {
     pub running: Option<Running>,
     /// The last command entered, for Enter on an empty line.
     pub last: Option<String>,
+    /// How many of a command's points it has dealt with already (those
+    /// that act as they come: MATCHPROP, PLINE…).
+    pub seen: usize,
+    /// The linework a command works on (MATCHPROP's source, DIVIDE's).
+    pub source: Option<ElementId>,
+    /// A polyline's points so far, its arcs as chords, and whether the
+    /// next stretch is an arc.
+    pub pline: Vec<DVec2>,
+    pub arc_mode: bool,
+    /// Numbers a command asked for before its points (DONUT's diameters,
+    /// TTR's picks).
+    pub values: Vec<f64>,
+    pub picks: Vec<DVec2>,
+    /// The command a FROM or M2P interrupted, to go back to.
+    pub resume: Option<Running>,
+    /// Each view's camera before the last ZOOM, for ZOOM Previous.
+    pub zoomed: Vec<(ElementId, (DVec2, f32))>,
 }
 
 /// A command waiting for more from the command line.
@@ -50,6 +67,8 @@ pub enum Wants {
     Number(NumberFor),
     /// Objects to work on (clicked in the drawing), then Enter.
     Selection(crate::commands::Command),
+    /// Objects to work on, then Enter: a command of the command line's own.
+    SelectThen(&'static str),
 }
 
 /// What a command does with the points it gathered.
@@ -62,6 +81,36 @@ pub enum Finish {
     Circle3P,
     /// An arc from its start, centre and end, drawn as a 3-point arc.
     ArcCenter,
+    Break,
+    BreakAt,
+    Stretch,
+    MatchProp,
+    Donut,
+    Point,
+    DividePick,
+    MeasurePick,
+    Pline,
+    HatchPick,
+    Ttr,
+    FromBase,
+    Mid2,
+    ZoomWindow,
+    Lengthen,
+}
+
+impl Finish {
+    /// Does it act on each point as it comes (until Enter)?
+    pub fn streams(self) -> bool {
+        matches!(
+            self,
+            Finish::MatchProp
+                | Finish::Donut
+                | Finish::Point
+                | Finish::Pline
+                | Finish::HatchPick
+                | Finish::Lengthen
+        )
+    }
 }
 
 /// What a number typed for a command sets.
@@ -71,6 +120,12 @@ pub enum NumberFor {
     FilletRadius,
     ChamferDistance,
     OffsetDistance,
+    LengthenDelta,
+    DonutInner,
+    DonutOuter,
+    DivideCount,
+    MeasureLength,
+    TtrRadius,
 }
 
 /// A command, by its name or one of its aliases: English and Italian
@@ -120,6 +175,16 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("OFFSET", "OFFSET O"),
     ("ARRAY", "ARRAY AR ARRAYRECT SERIE SERIERETT"),
     ("ARRAYPOLAR", "ARRAYPOLAR SERIEPOLARE"),
+    ("BREAK", "BREAK BR SPEZZA"),
+    ("BREAKATPOINT", "BREAKATPOINT BRP SPEZZAINPUNTO"),
+    ("JOIN", "JOIN J UNISCI"),
+    ("LENGTHEN", "LENGTHEN LEN ALLUNGA"),
+    ("STRETCH", "STRETCH S STIRA"),
+    ("MATCHPROP", "MATCHPROP MA COPIAPROP"),
+    ("DONUT", "DONUT DO CIAMBELLA"),
+    ("POINT", "POINT PO PUNTO"),
+    ("DIVIDE", "DIVIDE DIV DIVIDI"),
+    ("MEASURE", "MEASURE ME MISURA"),
     ("EXPLODE", "EXPLODE X ESPLODI ESP"),
     ("BLOCK", "BLOCK B BLOCCO"),
     ("UNDO", "UNDO U ANNULLA"),
@@ -221,7 +286,7 @@ fn draft_index(name: &str) -> Option<usize> {
 
 impl CreaBimApp {
     /// The 2D view the command line works in: the one in front.
-    fn cmd_view(&self) -> Option<ElementId> {
+    pub(super) fn cmd_view(&self) -> Option<ElementId> {
         self.active_view.filter(|v| {
             matches!(
                 self.view(*v).map(|v| &v.kind),
@@ -230,7 +295,7 @@ impl CreaBimApp {
         })
     }
 
-    fn say(&mut self, line: impl Into<String>) {
+    pub(super) fn say(&mut self, line: impl Into<String>) {
         let line = line.into();
         self.status = line.clone();
         self.cmd.log.push(line);
@@ -240,7 +305,7 @@ impl CreaBimApp {
         }
     }
 
-    fn ask(&mut self, name: &'static str, prompt: impl Into<String>, wants: Wants) {
+    pub(super) fn ask(&mut self, name: &'static str, prompt: impl Into<String>, wants: Wants) {
         let prompt = prompt.into();
         self.cmd.running = Some(Running {
             name,
@@ -364,6 +429,9 @@ impl CreaBimApp {
             if let Some(r) = self.cmd.running.take() {
                 self.say(format!("{} *Cancel*", r.name));
                 self.plan.cmd_pick = None;
+                self.plan.cmd_preview = None;
+                self.plan.pline_arcs.clear();
+                self.cmd.pline.clear();
                 self.plan.details.path.clear();
             }
         }
@@ -468,6 +536,37 @@ impl CreaBimApp {
                         );
                         return true;
                     }
+                    ("CIRCLE", "TTR" | "T") => {
+                        self.cmd_pick_start(
+                            r.name,
+                            "Specify point on object for first tangent, then on the second:",
+                            2,
+                            Finish::Ttr,
+                        );
+                        return true;
+                    }
+                    // FROM: a base point, then the offset from it
+                    (_, "FROM" | "FRO" | "DA" | "_FROM") => {
+                        self.cmd.resume = Some(r.clone());
+                        self.cmd_pick_start(
+                            r.name,
+                            "Base point (then <Offset>: @dx,dy):",
+                            1,
+                            Finish::FromBase,
+                        );
+                        return true;
+                    }
+                    // the point halfway between two points
+                    (_, "M2P" | "MTP" | "PM" | "_M2P") => {
+                        self.cmd.resume = Some(r.clone());
+                        self.cmd_pick_start(
+                            r.name,
+                            "First point of mid, then second point of mid:",
+                            2,
+                            Finish::Mid2,
+                        );
+                        return true;
+                    }
                     ("CIRCLE", "3P") => {
                         self.cmd_pick_start(
                             r.name,
@@ -546,7 +645,7 @@ impl CreaBimApp {
                         self.cmd_tick();
                         true
                     }
-                    None => false,
+                    None => self.cmd_more_option(ctx, r, t),
                 }
             }
             Wants::Number(what) => {
@@ -566,6 +665,15 @@ impl CreaBimApp {
                 self.cmd_number_done(ctx, r.name, what, Some(v));
                 true
             }
+            Wants::SelectThen(what) => {
+                if t.is_empty() {
+                    let what = *what;
+                    self.cmd.running = None;
+                    self.cmd_selected(what);
+                    return true;
+                }
+                false
+            }
             Wants::Selection(c) => {
                 if t.is_empty() {
                     let c = *c;
@@ -582,7 +690,14 @@ impl CreaBimApp {
         }
     }
 
-    fn cmd_pick_start(&mut self, name: &'static str, prompt: &str, n: usize, then: Finish) {
+    pub(super) fn cmd_pick_start(
+        &mut self,
+        name: &'static str,
+        prompt: &str,
+        n: usize,
+        then: Finish,
+    ) {
+        self.cmd.seen = 0;
         self.plan.details.path.clear();
         self.plan.cmd_pick = Some((None, vec![]));
         self.ask(name, prompt, Wants::Points { n, then });
@@ -596,6 +711,9 @@ impl CreaBimApp {
         v: Option<f64>,
     ) {
         use crate::detailtool::DraftEdit;
+        if self.cmd_more_number(name, what, v) {
+            return;
+        }
         let d = &mut self.plan.details;
         let edit = match what {
             NumberFor::PolygonSides => {
@@ -634,6 +752,7 @@ impl CreaBimApp {
                 }
                 DraftEdit::Offset
             }
+            _ => return,
         };
         let _ = ctx;
         self.plan.details.pick_edit(edit);
@@ -642,7 +761,7 @@ impl CreaBimApp {
     }
 
     /// A command's points are in: what it does with them.
-    fn cmd_finish_points(&mut self, then: Finish, pts: &[DVec2]) {
+    pub(super) fn cmd_finish_points(&mut self, then: Finish, pts: &[DVec2]) {
         let len = crate::units::len;
         match (then, pts) {
             (Finish::Distance, [a, b, ..]) => {
@@ -680,11 +799,12 @@ impl CreaBimApp {
                 let end = *c + DVec2::from_angle(a1) * r;
                 self.cmd_add_draft(creabim_core::DraftShape::Arc, vec![*s, mid, end]);
             }
+            (then, pts) if self.cmd_more_finish(then, pts) => {}
             _ => self.say("Not enough points."),
         }
     }
 
-    fn cmd_add_circle(&mut self, c: DVec2, r: f64) {
+    pub(super) fn cmd_add_circle(&mut self, c: DVec2, r: f64) {
         if r <= 1e-9 {
             self.say("A circle needs a radius.");
             return;
@@ -694,7 +814,7 @@ impl CreaBimApp {
 
     /// New linework in the command line's view, with the pen, layer and
     /// line type the Detail tool would give it.
-    fn cmd_add_draft(&mut self, shape: creabim_core::DraftShape, points: Vec<DVec2>) {
+    pub(super) fn cmd_add_draft(&mut self, shape: creabim_core::DraftShape, points: Vec<DVec2>) {
         let Some(view) = self.cmd_view() else {
             self.say("Linework goes in a plan or section: open one first.");
             return;
@@ -759,6 +879,7 @@ impl CreaBimApp {
         };
         use crate::detailtool::DraftEdit as D;
         match name {
+            _ if self.cmd_more_start(ctx, name) => {}
             "LINE" => {
                 detail(self, ctx);
                 self.ask(
@@ -975,6 +1096,17 @@ impl CreaBimApp {
             return;
         };
         let got = self.plan.cmd_pick.as_ref().map_or(0, |p| p.1.len());
+        if n == 0 && then.streams() && got > self.cmd.seen {
+            let pts = self
+                .plan
+                .cmd_pick
+                .as_ref()
+                .map(|p| p.1.clone())
+                .unwrap_or_default();
+            let from = self.cmd.seen;
+            self.cmd.seen = pts.len();
+            self.cmd_stream(then, &pts, from);
+        }
         if n > 0 && got >= n {
             let pts = self.plan.cmd_pick.take().map(|p| p.1).unwrap_or_default();
             self.cmd.running = None;

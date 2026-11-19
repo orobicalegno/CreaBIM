@@ -461,6 +461,10 @@ pub struct PlanState {
     /// A command collecting points of its own (DIST, ID, CIRCLE 3P…): the
     /// view and the points so far. Clicks go here, not to the tool.
     pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
+    /// What a command shows as it goes (a polyline with its arcs).
+    pub cmd_preview: Option<(ElementId, Vec<DVec2>)>,
+    /// Which of a polyline's clicked points an arc led to.
+    pub pline_arcs: Vec<bool>,
     /// The one object snap the next pick uses (AutoCAD's override).
     pub snap_once: Option<snaps::SnapKind>,
     /// The override was used by a click: it goes before the next frame.
@@ -698,6 +702,8 @@ impl Default for PlanState {
             cursor_at: None,
             cmd_finish: false,
             cmd_pick: None,
+            cmd_preview: None,
+            pline_arcs: vec![],
             snap_once: None,
             snap_once_spent: false,
             rest: None,
@@ -1630,6 +1636,30 @@ pub fn show(
     };
 
     let hover_world = forced.or(hover_world_);
+    // a command's own points: what it has so far, and on to the pointer
+    if let Some((v, pts)) = &state.cmd_pick {
+        if v.is_none_or(|v| v == view) {
+            let ink = Stroke::new(1.0, accent_selected());
+            let shown = match &state.cmd_preview {
+                Some((pv, p)) if *pv == view && !p.is_empty() => p.clone(),
+                _ => pts.clone(),
+            };
+            for w in shown.windows(2) {
+                painter.line_segment([xf.to_screen(w[0]), xf.to_screen(w[1])], ink);
+            }
+            for p in pts {
+                painter.circle_stroke(xf.to_screen(*p), 3.0, ink);
+            }
+            if let (Some(a), Some(h)) = (shown.last(), hover_world_) {
+                painter.add(egui::Shape::dashed_line(
+                    &[xf.to_screen(*a), xf.to_screen(h)],
+                    ink,
+                    4.0,
+                    3.0,
+                ));
+            }
+        }
+    }
     if let (Some(h), true) = (hover_world_, response.hovered()) {
         state.cursor_at = Some((view, h));
     }
