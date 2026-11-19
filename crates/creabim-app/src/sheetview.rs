@@ -1176,6 +1176,7 @@ pub fn show(
                     rect,
                     center,
                     scale: zoom,
+                    rot: 0.0,
                 };
                 crate::annotate::paint_weighted(
                     &painter,
@@ -1292,6 +1293,7 @@ pub fn show(
             rect,
             center,
             scale: zoom,
+            rot: 0.0,
         };
         let mut failed = None;
         if crate::detailtool::sheet_input(
@@ -1640,6 +1642,7 @@ pub fn show(
             rect,
             center,
             scale: zoom,
+            rot: 0.0,
         };
         let took = crate::annotate::sheet_input(
             doc,
@@ -1728,6 +1731,7 @@ pub fn show(
                     rect,
                     center,
                     scale: zoom,
+                    rot: 0.0,
                 };
                 let model = doc.model();
                 for it in &note_items {

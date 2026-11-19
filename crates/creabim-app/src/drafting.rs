@@ -1060,6 +1060,7 @@ fn style_preview(ui: &mut egui::Ui, s: &TextStyle) {
         rect,
         center: DVec2::new(45.0, 10.0),
         scale: 4.0,
+        rot: 0.0,
     };
     let look: creabim_geom::annotation::TextLook = (*s).into();
     let items = [

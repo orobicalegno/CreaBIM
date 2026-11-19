@@ -130,6 +130,7 @@ fn draw_fitted(painter: &Painter, r: Rect, items: &[PlanItem]) {
         rect: inner,
         center: (lo + hi) / 2.0,
         scale,
+        rot: 0.0,
     };
     let painter = painter.with_clip_rect(r);
     for i in items {

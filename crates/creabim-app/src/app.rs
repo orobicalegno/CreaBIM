@@ -7041,7 +7041,20 @@ impl CreaBimApp {
             {
                 // the pickbox while selecting; a point is asked for otherwise
                 let pickbox = self.plan.tool == planview::Tool::Select && !self.plan.point_pick;
-                planview::draw_crosshair(ui, rect, dark, self.shell.settings.cursor_size, pickbox);
+                // along the UCS, as the view is turned
+                let angle = if matches!(kind, planview::PaneKind::Plan { .. }) {
+                    self.plan.ucs.angle - self.plan.view_rot.get(&view).copied().unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                planview::draw_crosshair(
+                    ui,
+                    rect,
+                    dark,
+                    self.shell.settings.cursor_size,
+                    pickbox,
+                    angle as f32,
+                );
             }
             r
         };
@@ -12010,6 +12023,7 @@ impl eframe::App for CreaBimApp {
         self.report_window(&ctx);
         self.drafting_settings_window(&ctx);
         self.layer_manager_window(&ctx);
+        self.ucs_manager_window(&ctx);
         self.cmdline_window(&ctx);
         self.close_window(&ctx);
         // a plan in its own window keeps egui's menus

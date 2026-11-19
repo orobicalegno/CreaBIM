@@ -1780,6 +1780,7 @@ impl CreaBimApp {
                 rect: body,
                 center,
                 scale,
+                rot: 0.0,
             };
             if prof.more.is_empty() && prof.flips.is_empty() {
                 let outline = prof.outline();
@@ -2794,6 +2795,7 @@ impl CreaBimApp {
                             rect: body,
                             center,
                             scale,
+                            rot: 0.0,
                         };
                         let tint = if f.filled {
                             egui::Color32::from_rgb(220, 80, 80)
