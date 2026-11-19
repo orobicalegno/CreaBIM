@@ -1,0 +1,758 @@
+//! The command line's editing commands of its own: BREAK, JOIN,
+//! LENGTHEN, STRETCH, MATCHPROP, DONUT, POINT, DIVIDE, MEASURE, PLINE
+//! with arcs, HATCH by a point inside, CIRCLE TTR, FROM and M2P, ZOOM.
+
+use super::cmdline::{Finish, NumberFor, Running, Wants};
+use super::*;
+use creabim_core::draftedit;
+use creabim_core::{DetailItem, DetailKind, DraftShape, Hatch, Transaction};
+use glam::DVec2;
+
+impl CreaBimApp {
+    /// How near, in drawing units, a pick must be to a line: 3 mm on paper.
+    fn pick_tol(&self, view: ElementId) -> f64 {
+        self.view(view).map_or(100.0, |v| v.scale) * 0.003
+    }
+
+    /// The plain linework of `view` nearest `p`, within the pick distance.
+    fn linework_at(&self, view: ElementId, p: DVec2) -> Option<(Element, DetailItem)> {
+        let tol = self.pick_tol(view);
+        self.doc
+            .model()
+            .iter()
+            .filter_map(|e| match &e.kind {
+                ElementKind::Detail(d) if d.view == view && d.kind.as_draft().is_some() => {
+                    let h = draftedit::hit(d, p)?;
+                    (h.distance <= tol).then(|| (h.distance, e.clone(), d.clone()))
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, e, d)| (e, d))
+    }
+
+    /// Put `new` in place of `old` (none: remove it), as one undo step.
+    fn replace_linework(&mut self, label: &str, old: &Element, new: Vec<DetailItem>) -> bool {
+        let mut tx = Transaction::new(label);
+        let mut first = true;
+        for d in new {
+            if first {
+                let mut e = old.clone();
+                e.kind = ElementKind::Detail(d);
+                tx = tx.replace(old.clone(), e);
+                first = false;
+            } else {
+                tx = tx.insert(Element::new(old.name.clone(), ElementKind::Detail(d)));
+            }
+        }
+        if first {
+            tx = tx.remove_cascade(self.doc.model(), old.id);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => true,
+            Err(e) => {
+                self.say(format!("Couldn't do that: {e}"));
+                false
+            }
+        }
+    }
+
+    /// New pieces of linework, as one undo step.
+    fn add_linework(&mut self, label: &str, items: Vec<DetailItem>) {
+        if items.is_empty() {
+            return;
+        }
+        let mut tx = Transaction::new(label);
+        for d in items {
+            let name = d.kind.label().to_string();
+            tx = tx.insert(Element::new(name, ElementKind::Detail(d)));
+        }
+        if let Err(e) = self.doc.commit(tx) {
+            self.say(format!("Couldn't do that: {e}"));
+        }
+    }
+
+    /// A new piece in the command line's view, drawn as the Detail tool
+    /// would draw it (its pen, layer and line type).
+    fn new_piece(&self, view: ElementId, shape: DraftShape, points: Vec<DVec2>) -> DetailItem {
+        let pen = self
+            .plan
+            .details
+            .kind
+            .as_draft()
+            .map_or(creabim_core::LinePen::Medium, |d| d.1);
+        let mut d = DetailItem::new(view, DetailKind::Draft { shape, pen }, points);
+        d.layer = self.plan.details.layer.clone();
+        d.linetype = self.plan.details.linetype;
+        d
+    }
+
+    /// A point, as AutoCAD's (PDMODE 34): a small ring, its centre snaps.
+    fn point_piece(&self, view: ElementId, p: DVec2) -> DetailItem {
+        let r = self.view(view).map_or(100.0, |v| v.scale) * 0.0006;
+        self.new_piece(view, DraftShape::Circle, vec![p, p + DVec2::X * r])
+    }
+
+    /// Start one of the commands here; false when it is not one of them.
+    pub(super) fn cmd_more_start(&mut self, ctx: &egui::Context, name: &'static str) -> bool {
+        self.cmd.values.clear();
+        self.cmd.picks.clear();
+        self.cmd.source = None;
+        match name {
+            "BREAK" => self.cmd_pick_start(
+                name,
+                "Select object at the first break point, then second break point:",
+                2,
+                Finish::Break,
+            ),
+            "BREAKATPOINT" => self.cmd_pick_start(
+                name,
+                "Select object at the break point:",
+                1,
+                Finish::BreakAt,
+            ),
+            "JOIN" => {
+                if self.selection.len() >= 2 {
+                    self.cmd_selected("JOIN");
+                } else {
+                    self.pick_tool(ctx, crate::planview::Tool::Select);
+                    self.ask(
+                        name,
+                        "Select lines to join, then Enter:",
+                        Wants::SelectThen("JOIN"),
+                    );
+                }
+            }
+            "LENGTHEN" => self.ask(
+                name,
+                "Enter delta length (negative shortens):",
+                Wants::Number(NumberFor::LengthenDelta),
+            ),
+            "STRETCH" => self.cmd_pick_start(
+                name,
+                "Specify crossing window corners, then base point and second point:",
+                4,
+                Finish::Stretch,
+            ),
+            "MATCHPROP" => self.cmd_pick_start(
+                name,
+                "Select source object, then destination objects; Enter ends:",
+                0,
+                Finish::MatchProp,
+            ),
+            "DONUT" => self.ask(
+                name,
+                "Specify inside diameter of donut:",
+                Wants::Number(NumberFor::DonutInner),
+            ),
+            "POINT" => self.cmd_pick_start(name, "Specify points; Enter ends:", 0, Finish::Point),
+            "DIVIDE" => {
+                self.cmd_pick_start(name, "Select object to divide:", 1, Finish::DividePick)
+            }
+            "MEASURE" => {
+                self.cmd_pick_start(name, "Select object to measure:", 1, Finish::MeasurePick)
+            }
+            "PLINE" => {
+                self.cmd.pline.clear();
+                self.cmd.arc_mode = false;
+                self.cmd_pick_start(
+                    name,
+                    "Specify start point, then next points [Arc/Line/Close/Undo]; Enter ends:",
+                    0,
+                    Finish::Pline,
+                );
+            }
+            "HATCH" => self.cmd_pick_start(
+                name,
+                "Pick internal point [Select corners]; Enter ends:",
+                0,
+                Finish::HatchPick,
+            ),
+            "ZOOM" => self.ask(
+                name,
+                "[Extents/Window/Previous] <Extents>:",
+                Wants::Points {
+                    n: 0,
+                    then: Finish::ZoomWindow,
+                },
+            ),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Typed words for these commands: PLINE's options, HATCH's corners,
+    /// ZOOM's; true when one was taken.
+    pub(super) fn cmd_more_option(&mut self, ctx: &egui::Context, r: &Running, word: &str) -> bool {
+        let w = word.to_uppercase();
+        match (r.name, w.as_str()) {
+            ("PLINE", "A" | "ARC" | "ARCO") => {
+                self.cmd.arc_mode = true;
+                self.say("PLINE: arc segments, each tangent to the last [Line].");
+            }
+            ("PLINE", "L" | "LINE" | "LINEA") => {
+                self.cmd.arc_mode = false;
+                self.say("PLINE: straight segments [Arc].");
+            }
+            ("PLINE", "U") => {
+                // back to the last point clicked: an arc's chords go with it
+                let clicked = self
+                    .plan
+                    .cmd_pick
+                    .as_ref()
+                    .map(|p| p.1.clone())
+                    .unwrap_or_default();
+                if clicked.len() > 1 {
+                    let keep = clicked[..clicked.len() - 1].to_vec();
+                    self.rebuild_pline(&keep);
+                    if let Some(p) = self.plan.cmd_pick.as_mut() {
+                        p.1 = keep;
+                    }
+                    self.cmd.seen = self.plan.cmd_pick.as_ref().map_or(0, |p| p.1.len());
+                }
+            }
+            ("PLINE", "C" | "CL" | "CLOSE") => {
+                if let Some(first) = self.cmd.pline.first().copied() {
+                    self.cmd.pline.push(first);
+                }
+                self.cmd.running = None;
+                self.plan.cmd_pick = None;
+                self.finish_pline(true);
+            }
+            ("HATCH", "S" | "C" | "SELECT" | "CORNERS") => {
+                self.plan.cmd_pick = None;
+                self.cmd.running = None;
+                self.pick_tool(ctx, crate::planview::Tool::Detail);
+                if let Some(i) = DetailKind::ALL
+                    .iter()
+                    .position(|k| matches!(k, DetailKind::Region { .. }))
+                {
+                    self.run_action(ctx, &format!("detail.kind:{i}"));
+                }
+                self.ask(
+                    "HATCH",
+                    "Specify the corners of the area to hatch; Enter ends it:",
+                    Wants::ToolPoints,
+                );
+            }
+            ("ZOOM", "E" | "EXTENTS" | "ESTENSIONI") => {
+                self.cmd.running = None;
+                self.plan.cmd_pick = None;
+                self.zoom_extents();
+            }
+            ("ZOOM", "W" | "WINDOW" | "FINESTRA") => {
+                self.cmd_pick_start(
+                    "ZOOM",
+                    "Specify first corner, then opposite corner:",
+                    2,
+                    Finish::ZoomWindow,
+                );
+            }
+            ("ZOOM", "P" | "PREVIOUS" | "PRECEDENTE") => {
+                self.cmd.running = None;
+                self.plan.cmd_pick = None;
+                match self.cmd.zoomed.pop() {
+                    Some((v, cam)) => {
+                        self.plan.cameras.insert(v, cam);
+                        self.say("ZOOM Previous.");
+                    }
+                    None => self.say("No previous view."),
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn remember_zoom(&mut self, v: ElementId) {
+        if let Some(c) = self.plan.cameras.get(&v) {
+            self.cmd.zoomed.push((v, *c));
+            if self.cmd.zoomed.len() > 20 {
+                self.cmd.zoomed.remove(0);
+            }
+        }
+    }
+
+    fn zoom_extents(&mut self) {
+        let Some(v) = self.cmd_view() else { return };
+        self.remember_zoom(v);
+        // the view fits its drawing again when its camera is gone
+        self.plan.cameras.remove(&v);
+        self.say("ZOOM Extents.");
+    }
+
+    /// A number asked for by these commands; true when it was one.
+    pub(super) fn cmd_more_number(
+        &mut self,
+        name: &'static str,
+        what: NumberFor,
+        v: Option<f64>,
+    ) -> bool {
+        match what {
+            NumberFor::LengthenDelta => {
+                let d = v.unwrap_or(self.cmd.values.first().copied().unwrap_or(0.1));
+                self.cmd.values = vec![d];
+                self.cmd_pick_start(
+                    name,
+                    "Select an object near the end to change; Enter ends:",
+                    0,
+                    Finish::Lengthen,
+                );
+            }
+            NumberFor::DonutInner => {
+                self.cmd.values = vec![v.unwrap_or(0.5).max(0.0)];
+                self.ask(
+                    name,
+                    "Specify outside diameter of donut:",
+                    Wants::Number(NumberFor::DonutOuter),
+                );
+            }
+            NumberFor::DonutOuter => {
+                let inner = self.cmd.values.first().copied().unwrap_or(0.5);
+                self.cmd.values = vec![inner, v.unwrap_or(1.0).max(inner + 1e-6)];
+                self.cmd_pick_start(
+                    name,
+                    "Specify center of donut; Enter ends:",
+                    0,
+                    Finish::Donut,
+                );
+            }
+            NumberFor::DivideCount | NumberFor::MeasureLength => {
+                self.cmd.running = None;
+                let (Some(src), Some(v)) = (self.cmd.source, v) else {
+                    self.say("Nothing to divide.");
+                    return true;
+                };
+                let Some(ElementKind::Detail(d)) =
+                    self.doc.model().get(src).map(|e| e.kind.clone())
+                else {
+                    return true;
+                };
+                let pts = if what == NumberFor::DivideCount {
+                    draftedit::divide(&d, v.round().max(2.0) as usize)
+                } else {
+                    draftedit::measure(&d, v)
+                };
+                let n = pts.len();
+                let items: Vec<DetailItem> = pts
+                    .into_iter()
+                    .map(|p| self.point_piece(d.view, p))
+                    .collect();
+                self.add_linework(
+                    if what == NumberFor::DivideCount {
+                        "Divide"
+                    } else {
+                        "Measure"
+                    },
+                    items,
+                );
+                self.say(format!("{name}: {n} points placed (Center snaps to them)."));
+            }
+            NumberFor::TtrRadius => {
+                self.cmd.running = None;
+                let r = v.unwrap_or(0.5);
+                self.circle_ttr(r);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn circle_ttr(&mut self, r: f64) {
+        let Some(view) = self.cmd_view() else { return };
+        let [pa, pb] = [
+            self.cmd.picks.first().copied(),
+            self.cmd.picks.get(1).copied(),
+        ];
+        let (Some(pa), Some(pb)) = (pa, pb) else {
+            return;
+        };
+        // the stretch of linework under each pick
+        let seg = |app: &Self, p: DVec2| -> Option<(DVec2, DVec2)> {
+            let (_, d) = app.linework_at(view, p)?;
+            let h = draftedit::hit(&d, p)?;
+            let (path, closed) = d.draft_path()?;
+            let mut path = path;
+            if closed {
+                path.push(path[0]);
+            }
+            Some((path[h.segment], path[h.segment + 1]))
+        };
+        match (seg(self, pa), seg(self, pb)) {
+            (Some((a1, a2)), Some((b1, b2))) => {
+                match draftedit::circle_ttr(a1, a2, pa, b1, b2, pb, r) {
+                    Some(c) => self.cmd_add_circle(c, r),
+                    None => self.say("The two lines are parallel: no circle touches both there."),
+                }
+            }
+            _ => self.say("Pick two straight lines of linework."),
+        }
+    }
+
+    /// JOIN and the like, on the selection.
+    pub(super) fn cmd_selected(&mut self, what: &'static str) {
+        if what != "JOIN" {
+            return;
+        }
+        let ids = self.selection.all();
+        let items: Vec<(Element, DetailItem)> = ids
+            .iter()
+            .filter_map(|id| {
+                let e = self.doc.model().get(*id)?;
+                match &e.kind {
+                    ElementKind::Detail(d) if d.kind.as_draft().is_some() => {
+                        Some((e.clone(), d.clone()))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        if items.len() < 2 {
+            self.say("JOIN: select two or more lines of linework.");
+            return;
+        }
+        let tol = self.pick_tol(items[0].1.view) * 0.2;
+        let refs: Vec<&DetailItem> = items.iter().map(|i| &i.1).collect();
+        let Some(joined) = draftedit::join_all(&refs, tol) else {
+            self.say("JOIN: the lines don't meet end to end.");
+            return;
+        };
+        let mut tx = Transaction::new("Join");
+        let mut first = items[0].0.clone();
+        first.kind = ElementKind::Detail(joined);
+        tx = tx.replace(items[0].0.clone(), first);
+        for (e, _) in &items[1..] {
+            tx = tx.remove_cascade(self.doc.model(), e.id);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => {
+                let id = items[0].0.id;
+                self.selection.only(id);
+                self.say(format!("JOIN: {} lines joined into one.", items.len()));
+            }
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
+        }
+    }
+
+    /// Points that act as they come: from `from` on.
+    pub(super) fn cmd_stream(&mut self, then: Finish, pts: &[DVec2], from: usize) {
+        let Some(view) = self.cmd_view() else { return };
+        for i in from..pts.len() {
+            let p = pts[i];
+            match then {
+                Finish::Point => {
+                    let d = self.point_piece(view, p);
+                    self.add_linework("Point", vec![d]);
+                }
+                Finish::Donut => {
+                    let (inner, outer) = (self.cmd.values[0] / 2.0, self.cmd.values[1] / 2.0);
+                    let n = 48;
+                    let ring = |r: f64| -> Vec<DVec2> {
+                        (0..=n)
+                            .map(|k| {
+                                p + DVec2::from_angle(std::f64::consts::TAU * k as f64 / n as f64)
+                                    * r
+                            })
+                            .collect()
+                    };
+                    // the outer circle out, the inner one back: one filled ring
+                    let mut pts = ring(outer);
+                    if inner > 1e-9 {
+                        let mut back = ring(inner);
+                        back.reverse();
+                        pts.extend(back);
+                    }
+                    let mut d = self.new_piece(view, DraftShape::Closed, pts);
+                    d.fill = Some(Hatch::Solid);
+                    self.add_linework("Donut", vec![d]);
+                }
+                Finish::MatchProp => {
+                    let Some((e, d)) = self.linework_at(view, p) else {
+                        self.say("MATCHPROP: no linework there.");
+                        continue;
+                    };
+                    match self.cmd.source {
+                        None => {
+                            self.cmd.source = Some(e.id);
+                            self.say("MATCHPROP: now the objects to give its properties.");
+                        }
+                        Some(src) => {
+                            let Some(ElementKind::Detail(s)) =
+                                self.doc.model().get(src).map(|e| e.kind.clone())
+                            else {
+                                continue;
+                            };
+                            let mut to = d.clone();
+                            if let (DetailKind::Draft { pen, .. }, Some((_, sp))) =
+                                (&mut to.kind, s.kind.as_draft())
+                            {
+                                *pen = sp;
+                            }
+                            to.layer = s.layer.clone();
+                            to.linetype = s.linetype;
+                            to.color = s.color;
+                            if to.fillable() {
+                                to.fill = s.fill;
+                            }
+                            self.replace_linework("Match properties", &e, vec![to]);
+                        }
+                    }
+                }
+                Finish::Lengthen => {
+                    let Some((e, d)) = self.linework_at(view, p) else {
+                        self.say("LENGTHEN: no linework there.");
+                        continue;
+                    };
+                    let delta = self.cmd.values.first().copied().unwrap_or(0.0);
+                    match draftedit::lengthen(&d, p, delta) {
+                        Some(n) => {
+                            self.replace_linework("Lengthen", &e, vec![n]);
+                        }
+                        None => {
+                            self.say("LENGTHEN: only open lines, and not shorter than nothing.")
+                        }
+                    }
+                }
+                Finish::HatchPick => self.hatch_at(view, p),
+                Finish::Pline => {
+                    let clicked = pts[..=i].to_vec();
+                    self.rebuild_pline(&clicked);
+                }
+                _ => {}
+            }
+        }
+        // a polyline shows its arcs as it goes
+        if then == Finish::Pline {
+            if let Some((v, _)) = self.plan.cmd_pick.clone() {
+                self.plan.cmd_preview = Some((v.unwrap_or(view), self.cmd.pline.clone()));
+            }
+        }
+    }
+
+    /// The polyline through the points clicked, arcs where the arc mode
+    /// was on (kept per point in `pline_arcs`).
+    fn rebuild_pline(&mut self, clicked: &[DVec2]) {
+        // arcs are kept as which clicked points were reached by an arc
+        while self.plan.pline_arcs.len() < clicked.len() {
+            self.plan.pline_arcs.push(self.cmd.arc_mode);
+        }
+        self.plan.pline_arcs.truncate(clicked.len());
+        let mut out: Vec<DVec2> = vec![];
+        for (k, p) in clicked.iter().enumerate() {
+            if k == 0 {
+                out.push(*p);
+                continue;
+            }
+            let last = *out.last().expect("a start");
+            if self.plan.pline_arcs[k] {
+                let dir = if out.len() >= 2 {
+                    last - out[out.len() - 2]
+                } else {
+                    DVec2::X
+                };
+                let arc = draftedit::tangent_arc(last, dir, *p);
+                out.extend(arc.into_iter().skip(1));
+            } else {
+                out.push(*p);
+            }
+        }
+        self.cmd.pline = out;
+    }
+
+    fn finish_pline(&mut self, closed: bool) {
+        self.plan.cmd_preview = None;
+        self.plan.pline_arcs.clear();
+        let mut pts = std::mem::take(&mut self.cmd.pline);
+        let Some(view) = self.cmd_view() else { return };
+        if pts.len() < 2 {
+            self.say("PLINE: it needs two points.");
+            return;
+        }
+        let shape = if closed && pts.len() > 3 {
+            pts.pop();
+            DraftShape::Closed
+        } else {
+            DraftShape::Line
+        };
+        let d = self.new_piece(view, shape, pts);
+        self.add_linework("Polyline", vec![d]);
+        self.say("PLINE done. Ctrl+Z to undo.");
+    }
+
+    /// HATCH by a point inside: the smallest closed linework, or room,
+    /// around `p`, filled with a region of the Detail tool's hatch.
+    fn hatch_at(&mut self, view: ElementId, p: DVec2) {
+        let inside = |poly: &[DVec2]| {
+            let mut c = false;
+            let n = poly.len();
+            for i in 0..n {
+                let (a, b) = (poly[i], poly[(i + 1) % n]);
+                if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y)
+                {
+                    c = !c;
+                }
+            }
+            c
+        };
+        let area = |poly: &[DVec2]| super::cmdline::area_of(poly).0;
+        let mut best: Option<(f64, Vec<DVec2>)> = None;
+        let mut consider = |poly: Vec<DVec2>| {
+            if poly.len() >= 3 && inside(&poly) {
+                let a = area(&poly);
+                if best.as_ref().is_none_or(|b| a < b.0) {
+                    best = Some((a, poly));
+                }
+            }
+        };
+        for e in self.doc.model().iter() {
+            if let ElementKind::Detail(d) = &e.kind {
+                if d.view == view {
+                    if let Some((path, true)) = d.draft_path() {
+                        consider(path);
+                    }
+                }
+            }
+        }
+        // rooms in a plan: their outline as the boundary
+        if let Some(drawing) = self.drawing_live(view) {
+            for it in &drawing.items {
+                if let creabim_geom::PlanItem::Room { points, .. } = it {
+                    consider(points.clone());
+                }
+            }
+        }
+        let Some((_, outline)) = best else {
+            self.say("HATCH: no closed boundary round that point (closed linework or a room). Type S to draw its corners.");
+            return;
+        };
+        let hatch = match self.plan.details.kind {
+            DetailKind::Region { hatch } => hatch,
+            _ => Hatch::Diagonal,
+        };
+        let mut d = DetailItem::new(view, DetailKind::Region { hatch }, outline);
+        d.layer = self.plan.details.layer.clone();
+        self.add_linework("Hatch", vec![d]);
+        self.say("HATCH: filled. Pick another point, or Enter.");
+    }
+
+    /// The points of a command here are in.
+    pub(super) fn cmd_more_finish(&mut self, then: Finish, pts: &[DVec2]) -> bool {
+        let Some(view) = self.cmd_view() else {
+            return false;
+        };
+        match (then, pts) {
+            (Finish::Break, [a, b, ..]) => match self.linework_at(view, *a) {
+                Some((e, d)) => match draftedit::break_between(&d, *a, *b) {
+                    Some(parts) => {
+                        if self.replace_linework("Break", &e, parts) {
+                            self.say("BREAK done.");
+                        }
+                    }
+                    None => self.say("BREAK: couldn't break it there."),
+                },
+                None => self.say("BREAK: pick linework at the first break point."),
+            },
+            (Finish::BreakAt, [a, ..]) => match self.linework_at(view, *a) {
+                Some((e, d)) => match draftedit::break_at(&d, *a) {
+                    Some(parts) => {
+                        if self.replace_linework("Break at point", &e, parts) {
+                            self.say("BREAKATPOINT done: two pieces.");
+                        }
+                    }
+                    None => self.say("BREAKATPOINT: not at an end."),
+                },
+                None => self.say("BREAKATPOINT: pick linework."),
+            },
+            (Finish::Stretch, [c1, c2, base, to, ..]) => {
+                let (lo, hi) = (c1.min(*c2), c1.max(*c2));
+                let by = *to - *base;
+                let moved: Vec<(Element, DetailItem)> = self
+                    .doc
+                    .model()
+                    .iter()
+                    .filter_map(|e| match &e.kind {
+                        ElementKind::Detail(d) if d.view == view && d.kind.as_draft().is_some() => {
+                            draftedit::stretch_in(d, lo, hi, by).map(|n| (e.clone(), n))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if moved.is_empty() {
+                    self.say("STRETCH: no linework in the window.");
+                } else {
+                    let mut tx = Transaction::new("Stretch");
+                    for (e, d) in &moved {
+                        let mut after = e.clone();
+                        after.kind = ElementKind::Detail(d.clone());
+                        tx = tx.replace(e.clone(), after);
+                    }
+                    match self.doc.commit(tx) {
+                        Ok(_) => self.say(format!("STRETCH: {} pieces stretched.", moved.len())),
+                        Err(e) => self.say(format!("Couldn't do that: {e}")),
+                    }
+                }
+            }
+            (Finish::DividePick | Finish::MeasurePick, [a, ..]) => match self.linework_at(view, *a)
+            {
+                Some((e, _)) => {
+                    self.cmd.source = Some(e.id);
+                    if then == Finish::DividePick {
+                        self.ask(
+                            "DIVIDE",
+                            "Enter the number of segments:",
+                            Wants::Number(NumberFor::DivideCount),
+                        );
+                    } else {
+                        self.ask(
+                            "MEASURE",
+                            "Specify length of segment:",
+                            Wants::Number(NumberFor::MeasureLength),
+                        );
+                    }
+                }
+                None => self.say("Pick linework."),
+            },
+            (Finish::Ttr, [a, b, ..]) => {
+                self.cmd.picks = vec![*a, *b];
+                self.ask(
+                    "CIRCLE",
+                    "Specify radius of circle:",
+                    Wants::Number(NumberFor::TtrRadius),
+                );
+            }
+            (Finish::FromBase, [base, ..]) => {
+                self.plan.last_point = Some((view, *base));
+                if let Some(r) = self.cmd.resume.take() {
+                    self.ask(
+                        r.name,
+                        "<Offset>: (@dx,dy or @dist<angle from the base point)",
+                        r.wants,
+                    );
+                }
+            }
+            (Finish::Mid2, [a, b, ..]) => {
+                let m = (*a + *b) / 2.0;
+                if let Some(r) = self.cmd.resume.take() {
+                    self.cmd.running = Some(r);
+                }
+                self.plan.forced_point = Some((view, m));
+            }
+            (Finish::ZoomWindow, [a, b, ..]) => {
+                self.remember_zoom(view);
+                let (lo, hi) = (a.min(*b), a.max(*b));
+                let size = (hi - lo).max(DVec2::splat(1e-3));
+                let pane = self.rect_2d.map_or(egui::vec2(800.0, 600.0), |r| r.size());
+                let scale = (pane.x as f64 / size.x).min(pane.y as f64 / size.y) * 0.95;
+                self.plan
+                    .cameras
+                    .insert(view, ((lo + hi) / 2.0, scale as f32));
+                self.say("ZOOM Window.");
+            }
+            (Finish::ZoomWindow, []) => self.zoom_extents(),
+            (Finish::Pline, _) => self.finish_pline(false),
+            (f, _) if f.streams() => self.say("Done."),
+            _ => return false,
+        }
+        true
+    }
+}

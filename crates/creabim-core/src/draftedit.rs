@@ -739,3 +739,329 @@ mod tests {
         assert!(half[2].points[1].distance(p(-1.0, 0.0)) < 1e-9);
     }
 }
+
+/// BREAK: the part of `d` between where `p1` and `p2` land on it taken
+/// out. An open line leaves up to two pieces; a closed one is opened, the
+/// part from `p1` round to `p2` (anticlockwise as drawn) gone.
+pub fn break_between(d: &DetailItem, p1: DVec2, p2: DVec2) -> Option<Vec<DetailItem>> {
+    let (path, closed) = path_of(d)?;
+    let (a, b) = (hit(d, p1)?.along, hit(d, p2)?.along);
+    let total = length(&path);
+    if closed {
+        let (from, to) = (a.min(b), a.max(b));
+        if to - from < 1e-9 {
+            return break_at(d, p1);
+        }
+        // what is left runs from `to` round past the start to `from`
+        let mut left = between(&path, to, total);
+        left.extend(between(&path, 0.0, from).into_iter().skip(1));
+        return Some(vec![stretch(d, left)]);
+    }
+    let (from, to) = (a.min(b), a.max(b));
+    let mut out = vec![];
+    if from > 1e-9 {
+        out.push(stretch(d, between(&path, 0.0, from)));
+    }
+    if to < total - 1e-9 {
+        out.push(stretch(d, between(&path, to, total)));
+    }
+    Some(out)
+}
+
+/// BREAKATPOINT: `d` split where `p` lands on it, into two pieces (a
+/// closed one opened there, as one).
+pub fn break_at(d: &DetailItem, p: DVec2) -> Option<Vec<DetailItem>> {
+    let (path, closed) = path_of(d)?;
+    let at = hit(d, p)?.along;
+    let total = length(&path);
+    if closed {
+        let mut open = between(&path, at, total);
+        open.extend(between(&path, 0.0, at).into_iter().skip(1));
+        return Some(vec![piece(d, DraftShape::Line, open)]);
+    }
+    if at < 1e-9 || at > total - 1e-9 {
+        return None;
+    }
+    Some(vec![
+        stretch(d, between(&path, 0.0, at)),
+        stretch(d, between(&path, at, total)),
+    ])
+}
+
+/// JOIN: open lines whose ends meet (within `tol`) as one line, closed
+/// when the chain comes back to its start. `None` when they don't meet.
+pub fn join_all(items: &[&DetailItem], tol: f64) -> Option<DetailItem> {
+    let mut paths: Vec<Vec<DVec2>> = items
+        .iter()
+        .filter_map(|d| path_of(d).filter(|(_, c)| !c).map(|(p, _)| p))
+        .collect();
+    if paths.len() < 2 || paths.len() != items.len() {
+        return None;
+    }
+    let mut chain = paths.remove(0);
+    while !paths.is_empty() {
+        let (first, last) = (chain[0], *chain.last()?);
+        let next = paths.iter().position(|p| {
+            let (a, b) = (p[0], *p.last().expect("points"));
+            [a, b]
+                .iter()
+                .any(|q| q.distance(first) < tol || q.distance(last) < tol)
+        })?;
+        let mut p = paths.remove(next);
+        let (a, b) = (p[0], *p.last()?);
+        if a.distance(last) < tol {
+            chain.extend(p.drain(1..));
+        } else if b.distance(last) < tol {
+            p.reverse();
+            chain.extend(p.drain(1..));
+        } else if b.distance(first) < tol {
+            p.pop();
+            p.extend(chain);
+            chain = p;
+        } else {
+            p.reverse();
+            p.pop();
+            p.extend(chain);
+            chain = p;
+        }
+    }
+    let closed = chain.len() > 3 && chain[0].distance(*chain.last()?) < tol;
+    if closed {
+        chain.pop();
+    }
+    let shape = if closed {
+        DraftShape::Closed
+    } else {
+        DraftShape::Line
+    };
+    Some(piece(items[0], shape, chain))
+}
+
+/// LENGTHEN by `delta`: the end of open line `d` nearer `p` runs on along
+/// its last stretch, or comes back along the line (`delta` < 0).
+pub fn lengthen(d: &DetailItem, p: DVec2, delta: f64) -> Option<DetailItem> {
+    let (mut path, closed) = path_of(d)?;
+    if closed {
+        return None;
+    }
+    let n = path.len();
+    let at_start = p.distance(path[0]) < p.distance(path[n - 1]);
+    if at_start {
+        path.reverse();
+    }
+    let total = length(&path);
+    let path = if delta >= 0.0 {
+        let (a, b) = (path[path.len() - 2], path[path.len() - 1]);
+        let dir = (b - a).try_normalize()?;
+        let mut q = path.clone();
+        *q.last_mut()? = b + dir * delta;
+        q
+    } else {
+        if total + delta <= 1e-9 {
+            return None;
+        }
+        between(&path, 0.0, total + delta)
+    };
+    let mut path = path;
+    if at_start {
+        path.reverse();
+    }
+    Some(stretch(d, path))
+}
+
+/// STRETCH: the points of `d` inside the box `lo`..`hi` moved by `by`;
+/// a piece wholly inside moves whole. `None` when none of it is inside.
+pub fn stretch_in(d: &DetailItem, lo: DVec2, hi: DVec2, by: DVec2) -> Option<DetailItem> {
+    let inside = |p: &DVec2| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
+    let n = d.points.iter().filter(|p| inside(p)).count();
+    if n == 0 {
+        return None;
+    }
+    let mut out = d.clone();
+    let free = matches!(
+        d.kind.as_draft().map(|k| k.0),
+        Some(DraftShape::Line | DraftShape::Closed | DraftShape::Spline)
+    );
+    if n == d.points.len() || !free {
+        // a circle, an ellipse or a polygon only moves whole
+        if n < d.points.len() {
+            return None;
+        }
+        out.points.iter_mut().for_each(|p| *p += by);
+    } else {
+        out.points
+            .iter_mut()
+            .filter(|p| inside(p))
+            .for_each(|p| *p += by);
+    }
+    Some(out)
+}
+
+/// DIVIDE: the points that cut `d` into `n` even parts (not its ends).
+pub fn divide(d: &DetailItem, n: usize) -> Vec<DVec2> {
+    let Some((path, closed)) = path_of(d) else {
+        return vec![];
+    };
+    let total = length(&path);
+    let n = n.max(2);
+    let k = if closed { n } else { n - 1 };
+    (1..=k)
+        .map(|i| point_at(&path, total * i as f64 / n as f64))
+        .collect()
+}
+
+/// MEASURE: points every `step` along `d` from its start.
+pub fn measure(d: &DetailItem, step: f64) -> Vec<DVec2> {
+    let Some((path, _)) = path_of(d) else {
+        return vec![];
+    };
+    let total = length(&path);
+    if step <= 1e-9 {
+        return vec![];
+    }
+    let mut out = vec![];
+    let mut s = step;
+    while s < total - 1e-9 && out.len() < 10_000 {
+        out.push(point_at(&path, s));
+        s += step;
+    }
+    out
+}
+
+/// A tangent arc from `s`, leaving along `dir`, to `e`, as chords: a
+/// polyline's arc segment.
+pub fn tangent_arc(s: DVec2, dir: DVec2, e: DVec2) -> Vec<DVec2> {
+    let Some(t) = dir.try_normalize() else {
+        return vec![s, e];
+    };
+    let n = t.perp();
+    let se = e - s;
+    let k = se.dot(n);
+    if k.abs() < 1e-12 {
+        return vec![s, e];
+    }
+    let r = se.length_squared() / (2.0 * k);
+    let c = s + n * r;
+    let (a0, a1) = ((s - c).to_angle(), (e - c).to_angle());
+    let tau = std::f64::consts::TAU;
+    // anticlockwise when the centre is to the left of the way it leaves
+    let sweep = if r > 0.0 {
+        (a1 - a0).rem_euclid(tau)
+    } else {
+        -((a0 - a1).rem_euclid(tau))
+    };
+    let steps = ((sweep.abs() / (tau / 48.0)).ceil() as usize).max(2);
+    (0..=steps)
+        .map(|i| c + DVec2::from_angle(a0 + sweep * i as f64 / steps as f64) * r.abs())
+        .collect()
+}
+
+/// A circle of radius `r` touching the two lines through `a1`..`a2` and
+/// `b1`..`b2`, in the corner where `pa` and `pb` (points picked on them)
+/// lie: its centre.
+pub fn circle_ttr(
+    a1: DVec2,
+    a2: DVec2,
+    pa: DVec2,
+    b1: DVec2,
+    b2: DVec2,
+    pb: DVec2,
+    r: f64,
+) -> Option<DVec2> {
+    let (da, db) = ((a2 - a1).try_normalize()?, (b2 - b1).try_normalize()?);
+    let den = da.perp_dot(db);
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    // where the lines cross, and the side of each the other pick is on
+    let x = a1 + da * ((b1 - a1).perp_dot(db) / den);
+    let side_a = da.perp() * (pb - x).dot(da.perp()).signum();
+    let side_b = db.perp() * (pa - x).dot(db.perp()).signum();
+    let (oa, ob) = (a1 + side_a * r, b1 + side_b * r);
+    let den = da.perp_dot(db);
+    Some(oa + da * ((ob - oa).perp_dot(db) / den))
+}
+
+#[cfg(test)]
+mod more_edits {
+    use super::*;
+    use crate::ElementId;
+
+    fn line(pts: &[(f64, f64)]) -> DetailItem {
+        DetailItem::new(
+            ElementId::new(),
+            DetailKind::draft(DraftShape::Line),
+            pts.iter().map(|p| DVec2::new(p.0, p.1)).collect(),
+        )
+    }
+
+    #[test]
+    fn break_join_lengthen_and_stretch_work_on_lines() {
+        let l = line(&[(0.0, 0.0), (10.0, 0.0)]);
+        let parts = break_between(&l, DVec2::new(3.0, 0.1), DVec2::new(5.0, -0.1)).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(
+            parts[0]
+                .points
+                .last()
+                .unwrap()
+                .distance(DVec2::new(3.0, 0.0))
+                < 1e-9
+        );
+        assert!(parts[1].points[0].distance(DVec2::new(5.0, 0.0)) < 1e-9);
+        let two = break_at(&l, DVec2::new(4.0, 0.0)).unwrap();
+        assert_eq!(two.len(), 2);
+        // joined back, one line from 0 to 10
+        let j = join_all(&[&two[1], &two[0]], 1e-6).unwrap();
+        assert_eq!(j.points.len(), 3);
+        let ends = (j.points[0], *j.points.last().unwrap());
+        assert!(
+            ends.0.x.min(ends.1.x).abs() < 1e-9 && (ends.0.x.max(ends.1.x) - 10.0).abs() < 1e-9
+        );
+        // lengthened at the end nearer the pick, and shortened
+        let longer = lengthen(&l, DVec2::new(9.0, 0.0), 2.0).unwrap();
+        assert!(
+            longer
+                .points
+                .last()
+                .unwrap()
+                .distance(DVec2::new(12.0, 0.0))
+                < 1e-9
+        );
+        let shorter = lengthen(&l, DVec2::new(1.0, 0.0), -3.0).unwrap();
+        assert!(shorter.points[0].distance(DVec2::new(3.0, 0.0)) < 1e-9);
+        // stretched: only the end inside the box moves
+        let s = stretch_in(
+            &l,
+            DVec2::new(9.0, -1.0),
+            DVec2::new(11.0, 1.0),
+            DVec2::new(0.0, 5.0),
+        )
+        .unwrap();
+        assert_eq!(s.points[0], DVec2::ZERO);
+        assert_eq!(s.points[1], DVec2::new(10.0, 5.0));
+        assert_eq!(divide(&l, 4).len(), 3);
+        assert_eq!(measure(&l, 3.0).len(), 3);
+    }
+
+    #[test]
+    fn a_tangent_arc_and_a_circle_touching_two_lines() {
+        let arc = tangent_arc(DVec2::ZERO, DVec2::X, DVec2::new(0.0, 2.0));
+        // a half circle of radius 1 about (0, 1), leaving along X
+        assert!(arc
+            .iter()
+            .all(|p| (p.distance(DVec2::new(0.0, 1.0)) - 1.0).abs() < 1e-9));
+        assert!(arc[1].x > 0.0);
+        let c = circle_ttr(
+            DVec2::ZERO,
+            DVec2::X,
+            DVec2::new(3.0, 0.0),
+            DVec2::ZERO,
+            DVec2::Y,
+            DVec2::new(0.0, 3.0),
+            1.0,
+        )
+        .unwrap();
+        assert!(c.distance(DVec2::new(1.0, 1.0)) < 1e-9);
+    }
+}
