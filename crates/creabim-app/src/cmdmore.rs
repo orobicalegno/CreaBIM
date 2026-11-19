@@ -168,6 +168,15 @@ impl CreaBimApp {
                 0,
                 Finish::HatchPick,
             ),
+            "UCS" => self.cmd_pick_start(
+                name,
+                "Specify origin of UCS or [World/Previous/OBject/Z/View/NAmed/Save/Restore/Delete/?] <World>:",
+                0,
+                Finish::Ucs,
+            ),
+            "UCSMAN" => self.shell.ucs_manager = true,
+            "PLAN" => self.ask(name, "Enter an option [Current ucs/World/name of a saved UCS] <Current>:", Wants::Word(super::cmdline::WordFor::Plan)),
+            "UCSICON" => self.ask(name, "Enter an option [ON/OFF/ORigin/Noorigin] <ON>:", Wants::Word(super::cmdline::WordFor::UcsIcon)),
             "ZOOM" => self.ask(
                 name,
                 "[Extents/Window/Previous] <Extents>:",
@@ -234,6 +243,81 @@ impl CreaBimApp {
                     "Specify the corners of the area to hatch; Enter ends it:",
                     Wants::ToolPoints,
                 );
+            }
+            ("UCS", "W" | "WORLD" | "GLOBALE" | "G") => {
+                self.end_pick();
+                self.set_ucs(crate::planview::Ucs::default(), "UCS: World.");
+            }
+            ("UCS", "P" | "PREVIOUS" | "PRECEDENTE") => {
+                self.end_pick();
+                match self.plan.ucs_prev.pop() {
+                    Some(u) => {
+                        self.plan.ucs = u;
+                        self.say("UCS: the previous one.");
+                    }
+                    None => self.say("UCS: no previous UCS."),
+                }
+            }
+            ("UCS", "OB" | "OBJECT" | "E" | "ENTITY" | "OGGETTO") => {
+                self.cmd_pick_start("UCS", "Select object to align UCS:", 1, Finish::UcsObject);
+            }
+            ("UCS", "Z") => {
+                self.end_pick();
+                self.ask(
+                    "UCS",
+                    "Specify rotation angle about Z axis <90>:",
+                    Wants::Number(NumberFor::UcsZ),
+                );
+            }
+            ("UCS", "V" | "VIEW" | "VISTA") => {
+                self.end_pick();
+                let rot = self
+                    .cmd_view()
+                    .and_then(|v| self.plan.view_rot.get(&v).copied())
+                    .unwrap_or(0.0);
+                let mut u = self.plan.ucs;
+                u.angle = rot;
+                self.set_ucs(u, "UCS: square to the view.");
+            }
+            ("UCS", "S" | "SAVE" | "SALVA") => {
+                self.end_pick();
+                self.ask(
+                    "UCS",
+                    "Enter name to save current UCS:",
+                    Wants::Word(super::cmdline::WordFor::UcsSave),
+                );
+            }
+            ("UCS", "R" | "RESTORE" | "RIPRISTINA" | "NA" | "NAMED") => {
+                self.end_pick();
+                let names = self.ucs_names();
+                self.ask(
+                    "UCS",
+                    format!(
+                        "Enter name of UCS to restore ({}):",
+                        if names.is_empty() {
+                            "none saved".into()
+                        } else {
+                            names.join(", ")
+                        }
+                    ),
+                    Wants::Word(super::cmdline::WordFor::UcsRestore),
+                );
+            }
+            ("UCS", "D" | "DELETE" | "ELIMINA") => {
+                self.end_pick();
+                self.ask(
+                    "UCS",
+                    "Enter name of UCS to delete:",
+                    Wants::Word(super::cmdline::WordFor::UcsDelete),
+                );
+            }
+            ("UCS", "?") => {
+                let names = self.ucs_names();
+                self.say(if names.is_empty() {
+                    "No UCS saved. UCS S saves the current one.".to_string()
+                } else {
+                    format!("Saved UCS: {}", names.join(", "))
+                });
             }
             ("ZOOM", "E" | "EXTENTS" | "ESTENSIONI") => {
                 self.cmd.running = None;
@@ -347,6 +431,13 @@ impl CreaBimApp {
                     items,
                 );
                 self.say(format!("{name}: {n} points placed (Center snaps to them)."));
+            }
+            NumberFor::UcsZ => {
+                self.cmd.running = None;
+                let a = v.unwrap_or(90.0);
+                let mut u = self.plan.ucs;
+                u.angle += a.to_radians();
+                self.set_ucs(u, &format!("UCS turned {a}° about Z."));
             }
             NumberFor::TtrRadius => {
                 self.cmd.running = None;
@@ -514,6 +605,7 @@ impl CreaBimApp {
                     }
                 }
                 Finish::HatchPick => self.hatch_at(view, p),
+                Finish::Ucs => self.ucs_point(i, p),
                 Finish::Pline => {
                     let clicked = pts[..=i].to_vec();
                     self.rebuild_pline(&clicked);
@@ -750,9 +842,238 @@ impl CreaBimApp {
             }
             (Finish::ZoomWindow, []) => self.zoom_extents(),
             (Finish::Pline, _) => self.finish_pline(false),
+            // UCS with no point: the world's (Enter); one point: its origin
+            (Finish::Ucs, []) => self.set_ucs(crate::planview::Ucs::default(), "UCS: World."),
+            (Finish::Ucs, _) => self.say("UCS set."),
+            (Finish::UcsObject, [p, ..]) => self.ucs_object(view, *p),
             (f, _) if f.streams() => self.say("Done."),
             _ => return false,
         }
         true
+    }
+
+    fn end_pick(&mut self) {
+        self.plan.cmd_pick = None;
+        self.cmd.running = None;
+    }
+
+    /// Make `u` the UCS, the one before kept for UCS Previous.
+    pub(super) fn set_ucs(&mut self, u: crate::planview::Ucs, msg: &str) {
+        if u != self.plan.ucs {
+            self.plan.ucs_prev.push(self.plan.ucs);
+            if self.plan.ucs_prev.len() > 10 {
+                self.plan.ucs_prev.remove(0);
+            }
+            self.plan.ucs = u;
+        }
+        let deg = u.angle.to_degrees().rem_euclid(360.0);
+        self.say(format!(
+            "{msg} Origin {}, {}; X axis at {:.4}°. PLAN turns the plan to it.",
+            crate::units::len(u.origin.x),
+            crate::units::len(u.origin.y),
+            deg
+        ));
+    }
+
+    /// UCS by points: the first its origin, the second along its X axis.
+    fn ucs_point(&mut self, i: usize, p: DVec2) {
+        let mut u = self.plan.ucs;
+        if i == 0 {
+            u.origin = p;
+            self.set_ucs(u, "UCS origin.");
+            self.ask(
+                "UCS",
+                "Specify point on X-axis or <accept>:",
+                Wants::Points {
+                    n: 0,
+                    then: Finish::Ucs,
+                },
+            );
+        } else {
+            let d = p - u.origin;
+            if d.length() > 1e-9 {
+                u.angle = d.y.atan2(d.x);
+            }
+            self.end_pick();
+            self.set_ucs(u, "UCS by its origin and X axis.");
+        }
+    }
+
+    /// UCS OBject: its origin at the nearer end of the line picked, its X
+    /// axis along it.
+    fn ucs_object(&mut self, view: ElementId, p: DVec2) {
+        let tol = self.pick_tol(view);
+        let mut best: Option<(f64, DVec2, DVec2)> = None;
+        let mut consider = |a: DVec2, b: DVec2| {
+            let ab = b - a;
+            let l2 = ab.length_squared();
+            if l2 < 1e-12 {
+                return;
+            }
+            let t = ((p - a).dot(ab) / l2).clamp(0.0, 1.0);
+            let d = (a + ab * t).distance(p);
+            if d <= tol && best.is_none_or(|b| d < b.0) {
+                best = Some((d, a, b));
+            }
+        };
+        for e in self.doc.model().iter() {
+            if let ElementKind::Detail(d) = &e.kind {
+                if d.view == view {
+                    if let Some((mut path, closed)) = d.draft_path() {
+                        if closed && !path.is_empty() {
+                            path.push(path[0]);
+                        }
+                        for w in path.windows(2) {
+                            consider(w[0], w[1]);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(drawing) = self.drawing_live(view) {
+            for it in &drawing.items {
+                match it {
+                    creabim_geom::PlanItem::Line { a, b, .. } => consider(*a, *b),
+                    creabim_geom::PlanItem::Polygon { points, .. } => {
+                        for k in 0..points.len() {
+                            consider(points[k], points[(k + 1) % points.len()]);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let Some((_, a, b)) = best else {
+            self.say("UCS: no line there.");
+            return;
+        };
+        let (o, x) = if p.distance(a) <= p.distance(b) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let d = x - o;
+        self.set_ucs(
+            crate::planview::Ucs {
+                origin: o,
+                angle: d.y.atan2(d.x),
+            },
+            "UCS on the object.",
+        );
+    }
+
+    fn ucs_names(&self) -> Vec<String> {
+        self.doc
+            .model()
+            .project_info()
+            .map(|(_, p)| p.ucs.iter().map(|u| u.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    fn saved_ucs(&self, name: &str) -> Option<crate::planview::Ucs> {
+        let (_, p) = self.doc.model().project_info()?;
+        let u = p.ucs.iter().find(|u| u.name.eq_ignore_ascii_case(name))?;
+        Some(crate::planview::Ucs {
+            origin: u.origin,
+            angle: u.angle.to_radians(),
+        })
+    }
+
+    /// Keep the current UCS in the project by `name` (replacing one of
+    /// that name), or take one out.
+    pub(super) fn store_ucs(&mut self, name: &str, keep: bool) {
+        let mut info = self
+            .doc
+            .model()
+            .project_info()
+            .map(|(_, p)| p.clone())
+            .unwrap_or_default();
+        info.ucs.retain(|u| !u.name.eq_ignore_ascii_case(name));
+        if keep {
+            info.ucs.push(creabim_core::NamedUcs {
+                name: name.to_string(),
+                origin: self.plan.ucs.origin,
+                angle: self.plan.ucs.angle.to_degrees(),
+            });
+        }
+        let tx = creabim_core::set_project(self.doc.model(), info);
+        if let Err(e) = self.doc.commit(tx) {
+            self.say(format!("Couldn't do that: {e}"));
+        }
+    }
+
+    /// The word typed for a command: a UCS's name, PLAN's or UCSICON's
+    /// option.
+    pub(super) fn cmd_word(&mut self, what: super::cmdline::WordFor, t: &str) {
+        use super::cmdline::WordFor as W;
+        let up = t.trim().to_uppercase();
+        match what {
+            W::UcsSave => {
+                if up.is_empty() {
+                    self.say("UCS: a name is needed.");
+                } else {
+                    self.store_ucs(t.trim(), true);
+                    self.say(format!("UCS saved as \"{}\".", t.trim()));
+                }
+            }
+            W::UcsRestore => match self.saved_ucs(t.trim()) {
+                Some(u) => self.set_ucs(u, &format!("UCS \"{}\".", t.trim())),
+                None => self.say(format!("No UCS named \"{}\".", t.trim())),
+            },
+            W::UcsDelete => {
+                if self.saved_ucs(t.trim()).is_some() {
+                    self.store_ucs(t.trim(), false);
+                    self.say(format!("UCS \"{}\" deleted.", t.trim()));
+                } else {
+                    self.say(format!("No UCS named \"{}\".", t.trim()));
+                }
+            }
+            W::Plan => {
+                let Some(v) = self.cmd_view().filter(|v| {
+                    matches!(self.view(*v).map(|x| &x.kind), Some(ViewKind::Plan { .. }))
+                }) else {
+                    self.say("PLAN works in a plan view.");
+                    return;
+                };
+                let angle = match up.as_str() {
+                    "" | "C" | "CURRENT" | "CORRENTE" => Some(self.plan.ucs.angle),
+                    "W" | "WORLD" | "GLOBALE" => Some(0.0),
+                    _ => self.saved_ucs(t.trim()).map(|u| u.angle),
+                };
+                match angle {
+                    Some(a) => {
+                        if a.abs() < 1e-12 {
+                            self.plan.view_rot.remove(&v);
+                        } else {
+                            self.plan.view_rot.insert(v, a);
+                        }
+                        self.say(format!(
+                            "PLAN: the plan turned so the X axis at {:.4}° reads level. PLAN W turns it back.",
+                            a.to_degrees().rem_euclid(360.0)
+                        ));
+                    }
+                    None => self.say(format!("No UCS named \"{}\".", t.trim())),
+                }
+            }
+            W::UcsIcon => match up.as_str() {
+                "" | "ON" => {
+                    self.plan.ucs_icon = true;
+                    self.say("UCS icon on.");
+                }
+                "OFF" => {
+                    self.plan.ucs_icon = false;
+                    self.say("UCS icon off.");
+                }
+                "OR" | "ORIGIN" | "ORIGINE" => {
+                    self.plan.ucs_icon_origin = true;
+                    self.say("UCS icon at the UCS's origin, when it is in view.");
+                }
+                "N" | "NOORIGIN" | "NOORIGINE" => {
+                    self.plan.ucs_icon_origin = false;
+                    self.say("UCS icon in the corner.");
+                }
+                _ => self.say("UCSICON: ON, OFF, ORigin or Noorigin."),
+            },
+        }
     }
 }

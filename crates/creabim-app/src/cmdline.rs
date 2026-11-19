@@ -69,6 +69,18 @@ pub enum Wants {
     Selection(crate::commands::Command),
     /// Objects to work on, then Enter: a command of the command line's own.
     SelectThen(&'static str),
+    /// A word: a name, or an option.
+    Word(WordFor),
+}
+
+/// What a word typed for a command is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WordFor {
+    UcsSave,
+    UcsRestore,
+    UcsDelete,
+    Plan,
+    UcsIcon,
 }
 
 /// What a command does with the points it gathered.
@@ -96,6 +108,8 @@ pub enum Finish {
     Mid2,
     ZoomWindow,
     Lengthen,
+    Ucs,
+    UcsObject,
 }
 
 impl Finish {
@@ -109,6 +123,7 @@ impl Finish {
                 | Finish::Pline
                 | Finish::HatchPick
                 | Finish::Lengthen
+                | Finish::Ucs
         )
     }
 }
@@ -126,6 +141,7 @@ pub enum NumberFor {
     DivideCount,
     MeasureLength,
     TtrRadius,
+    UcsZ,
 }
 
 /// A command, by its name or one of its aliases: English and Italian
@@ -208,12 +224,37 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("SECTION", "SECTION SEZIONE"),
     ("GRID", "GRID GRIGLIA ASSI"),
     ("NORTH", "NORTH NORD"),
+    ("UCS", "UCS SCU"),
+    ("UCSMAN", "UCSMAN UC GESTSCU"),
+    ("PLAN", "PLAN PIANTA"),
+    ("UCSICON", "UCSICON ICONASCU"),
 ];
 
 /// A point typed: `x,y` from the origin, `@dx,dy` from the last point,
 /// `@d<a` and `d<a` by distance and angle (degrees from X, anticlockwise),
 /// `#x,y` from the origin as well. Lengths read in the project's units.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn parse_point(text: &str, last: Option<DVec2>) -> Option<DVec2> {
+    parse_point_in(text, last, crate::planview::Ucs::default())
+}
+
+/// [`parse_point`] in a UCS, as AutoCAD reads points: coordinates and
+/// angles in the UCS, `*x,y` (or `@*`) in the world's. The point is given
+/// in the world's coordinates.
+pub fn parse_point_in(text: &str, last: Option<DVec2>, ucs: crate::planview::Ucs) -> Option<DVec2> {
+    let t = text.trim().replace(' ', "");
+    let world = t.starts_with('*') || t.starts_with("@*");
+    let ucs = if world {
+        crate::planview::Ucs::default()
+    } else {
+        ucs
+    };
+    let t = t.replacen('*', "", 1);
+    let local = parse_plain(&t, last.map(|l| ucs.local(l)))?;
+    Some(ucs.world(local))
+}
+
+fn parse_plain(text: &str, last: Option<DVec2>) -> Option<DVec2> {
     let t = text.trim().replace(' ', "");
     let (rel, t) = match t.strip_prefix('@') {
         Some(r) => (true, r.to_string()),
@@ -496,7 +537,12 @@ impl CreaBimApp {
         // a point: typed, or a distance alone along the pointer from the
         // last point (direct distance entry)
         let point = || -> Option<DVec2> {
-            if let Some(p) = parse_point(t, last) {
+            // in the UCS, in a plan
+            let ucs = match view.and_then(|v| self.view(v)).map(|v| &v.kind) {
+                Some(ViewKind::Plan { .. }) => self.plan.ucs,
+                _ => crate::planview::Ucs::default(),
+            };
+            if let Some(p) = parse_point_in(t, last, ucs) {
                 return Some(p);
             }
             let d = crate::units::parse(t)?;
@@ -665,6 +711,12 @@ impl CreaBimApp {
                 self.cmd_number_done(ctx, r.name, what, Some(v));
                 true
             }
+            Wants::Word(what) => {
+                let what = *what;
+                self.cmd.running = None;
+                self.cmd_word(what, t);
+                true
+            }
             Wants::SelectThen(what) => {
                 if t.is_empty() {
                     let what = *what;
@@ -765,7 +817,8 @@ impl CreaBimApp {
         let len = crate::units::len;
         match (then, pts) {
             (Finish::Distance, [a, b, ..]) => {
-                let d = *b - *a;
+                // in the UCS, as AutoCAD reports it
+                let d = DVec2::from_angle(-self.plan.ucs.angle).rotate(*b - *a);
                 self.say(format!(
                     "Distance = {}, Angle in XY plane = {:.4}°, Delta X = {}, Delta Y = {}",
                     len(d.length()),
@@ -774,7 +827,10 @@ impl CreaBimApp {
                     len(d.y)
                 ));
             }
-            (Finish::Id, [p, ..]) => self.say(format!("X = {}   Y = {}", len(p.x), len(p.y))),
+            (Finish::Id, [p, ..]) => {
+                let q = self.plan.ucs.local(*p);
+                self.say(format!("X = {}   Y = {}", len(q.x), len(q.y)))
+            }
             (Finish::Area, pts) if pts.len() >= 3 => {
                 let (a, p) = area_of(pts);
                 self.say(format!("Area = {:.4} m², Perimeter = {}", a, len(p)));
@@ -1206,6 +1262,26 @@ mod tests {
         assert_eq!(parse_point("@0,0", last), last);
         assert!(parse_point("@1000,0", None).is_none());
         assert!(parse_point("hello", last).is_none());
+    }
+
+    #[test]
+    fn points_typed_in_a_ucs_are_read_in_it() {
+        use crate::planview::Ucs;
+        // a UCS at (1, 1) turned 90°: its X runs along the world's Y
+        let u = Ucs {
+            origin: DVec2::new(1.0, 1.0),
+            angle: std::f64::consts::FRAC_PI_2,
+        };
+        let p = parse_point_in("1000,0", None, u).unwrap();
+        assert!((p - DVec2::new(1.0, 2.0)).length() < 1e-9);
+        let p = parse_point_in("@1000,0", Some(DVec2::new(1.0, 2.0)), u).unwrap();
+        assert!((p - DVec2::new(1.0, 3.0)).length() < 1e-9);
+        let p = parse_point_in("@1000<90", Some(DVec2::ZERO), u).unwrap();
+        assert!((p - DVec2::new(-1.0, 0.0)).length() < 1e-9);
+        // a star types in the world's coordinates
+        let p = parse_point_in("*1000,0", None, u).unwrap();
+        assert!((p - DVec2::new(1.0, 0.0)).length() < 1e-9);
+        assert!((u.local(u.world(DVec2::new(3.0, -2.0))) - DVec2::new(3.0, -2.0)).length() < 1e-9);
     }
 
     #[test]

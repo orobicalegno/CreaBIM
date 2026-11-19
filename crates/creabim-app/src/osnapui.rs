@@ -205,3 +205,117 @@ impl CreaBimApp {
         }
     }
 }
+
+impl CreaBimApp {
+    /// UCSMAN: the World, the previous and the saved UCSs; set one
+    /// current, save the current one by a name, delete one.
+    pub(super) fn ucs_manager_window(&mut self, ctx: &egui::Context) {
+        if !self.shell.ucs_manager {
+            return;
+        }
+        let mut open = true;
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        let saved: Vec<creabim_core::NamedUcs> = self
+            .doc
+            .model()
+            .project_info()
+            .map(|(_, p)| p.ucs.clone())
+            .unwrap_or_default();
+        let name_id = egui::Id::new("ucsman.name");
+        let mut name: String = ctx.data(|d| d.get_temp(name_id)).unwrap_or_default();
+        let mut pick: Option<crate::planview::Ucs> = None;
+        let mut delete: Option<String> = None;
+        let mut save = false;
+        let mut plan = false;
+        let cur = self.plan.ucs;
+        egui::Window::new("UCS")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .constrain_to(area)
+            .default_pos(area.left_top() + egui::vec2(24.0, 24.0))
+            .show(ctx, |ui| {
+                let row = |ui: &mut egui::Ui, label: &str, u: crate::planview::Ucs| {
+                    ui.label(format!(
+                        "{label}   origin {}, {}   X at {:.2}°{}",
+                        crate::units::len(u.origin.x),
+                        crate::units::len(u.origin.y),
+                        u.angle.to_degrees().rem_euclid(360.0),
+                        if u == cur { "   (current)" } else { "" }
+                    ))
+                };
+                egui::Grid::new("ucsman.grid")
+                    .num_columns(3)
+                    .show(ui, |ui| {
+                        let world = crate::planview::Ucs::default();
+                        row(ui, "World", world);
+                        if ui.button("Set current").clicked() {
+                            pick = Some(world);
+                        }
+                        ui.label("");
+                        ui.end_row();
+                        if let Some(prev) = self.plan.ucs_prev.last().copied() {
+                            row(ui, "Previous", prev);
+                            if ui.button("Set current").clicked() {
+                                pick = Some(prev);
+                            }
+                            ui.label("");
+                            ui.end_row();
+                        }
+                        for u in &saved {
+                            let v = crate::planview::Ucs {
+                                origin: u.origin,
+                                angle: u.angle.to_radians(),
+                            };
+                            row(ui, &u.name, v);
+                            if ui.button("Set current").clicked() {
+                                pick = Some(v);
+                            }
+                            if ui.button("Delete").clicked() {
+                                delete = Some(u.name.clone());
+                            }
+                            ui.end_row();
+                        }
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Save the current UCS as");
+                    ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0));
+                    if ui
+                        .add_enabled(!name.trim().is_empty(), egui::Button::new("Save"))
+                        .clicked()
+                    {
+                        save = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Turn the plan to the current UCS (PLAN)")
+                        .clicked()
+                    {
+                        plan = true;
+                    }
+                    ui.checkbox(&mut self.plan.ucs_icon, "UCS icon");
+                    ui.checkbox(&mut self.plan.ucs_icon_origin, "at its origin");
+                });
+            });
+        ctx.data_mut(|d| d.insert_temp(name_id, name.clone()));
+        if let Some(u) = pick {
+            self.set_ucs(u, "UCS set.");
+        }
+        if let Some(n) = delete {
+            self.store_ucs(&n, false);
+        }
+        if save {
+            self.store_ucs(name.trim(), true);
+            self.say(format!("UCS saved as \"{}\".", name.trim()));
+            ctx.data_mut(|d| d.remove::<String>(name_id));
+        }
+        if plan {
+            self.cmd_word(super::cmdline::WordFor::Plan, "");
+        }
+        if !open {
+            self.shell.ucs_manager = false;
+        }
+    }
+}

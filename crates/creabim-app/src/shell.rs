@@ -59,6 +59,8 @@ pub(super) struct Shell {
     pub drafting_settings: bool,
     /// The drafting layers' manager is open.
     pub layer_manager: bool,
+    /// The UCS manager (UCSMAN) is open.
+    pub ucs_manager: bool,
 }
 
 impl Default for Shell {
@@ -82,6 +84,7 @@ impl Default for Shell {
             tab_tool: None,
             drafting_settings: false,
             layer_manager: false,
+            ucs_manager: false,
         }
     }
 }
@@ -1088,6 +1091,26 @@ impl CreaBimApp {
                 ],
             )
             .icon("zoom-in"),
+            Item::sub(
+                "UCS",
+                vec![
+                    c("UCS", "Per origine e asse X", "UCS", "axis-3d"),
+                    c("UCS W", "Globale (WCS)", "UCS W", "axis-3d"),
+                    c("UCS P", "Precedente", "UCS P", "undo-2"),
+                    c("UCS OB", "Allinea a un oggetto", "UCS OB", "slash"),
+                    c("UCS Z", "Ruota attorno a Z", "UCS Z", "rotate-cw"),
+                    c("UCS V", "Parallelo alla vista", "UCS V", "frame"),
+                    c("UCS S", "Salva con nome", "UCS S", "save"),
+                    c("UCSMAN", "Gestione UCS…", "UC", "settings"),
+                    Item::Separator,
+                    c("PLAN", "Pianta allineata all'UCS", "PLAN", "rotate-3d"),
+                    c("PLAN W", "Pianta del WCS", "PLAN W", "rotate-3d"),
+                    Item::new("cmdline:UCSICON toggle", "Icona UCS")
+                        .checked(self.plan.ucs_icon)
+                        .icon("move"),
+                ],
+            )
+            .icon("axis-3d"),
             c("LAYER", "Layer", "LA", "layers"),
             c("OSNAP", "Impostazioni snap", "OS", "settings"),
             Item::new("cmdline:toggle", "Riga di comando")
@@ -1758,6 +1781,10 @@ impl CreaBimApp {
                         "Command line off: single keys are shortcuts again.".into()
                     };
                 } else {
+                    if arg == "UCSICON toggle" {
+                        self.plan.ucs_icon = !self.plan.ucs_icon;
+                        return;
+                    }
                     // "CIRCLE 3P": the command, then its option
                     let (c, option) = arg.split_once(' ').unwrap_or((arg, ""));
                     self.cmd_start(ctx, c);

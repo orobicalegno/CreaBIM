@@ -752,6 +752,32 @@ pub fn finish(
             .map_or(label.to_string(), |e| e.name.clone()),
         _ => label.to_string(),
     };
+    // a rectangle lies square to the UCS in a plan, as AutoCAD's RECTANG
+    let in_plan = matches!(
+        view_of(doc.model(), view).map(|v| &v.kind),
+        Some(creabim_core::ViewKind::Plan { .. })
+    );
+    if let (
+        true,
+        false,
+        DetailKind::Draft {
+            shape: creabim_core::DraftShape::Rectangle,
+            pen,
+        },
+    ) = (in_plan, state.ucs.angle == 0.0, item.kind)
+    {
+        if let [a, b, ..] = item.points[..] {
+            let u = state.ucs;
+            let (la, lb) = (u.local(a), u.local(b));
+            item.points = [la, DVec2::new(lb.x, la.y), lb, DVec2::new(la.x, lb.y)]
+                .map(|p| u.world(p))
+                .to_vec();
+            item.kind = DetailKind::Draft {
+                shape: creabim_core::DraftShape::Closed,
+                pen,
+            };
+        }
+    }
     // a rectangle or a polygon is kept as the closed outline it draws
     let e = Element::new(name, ElementKind::Detail(item.baked()));
     selection.only(e.id);

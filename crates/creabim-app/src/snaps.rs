@@ -71,6 +71,37 @@ pub enum SnapKind {
     Ortho,
 }
 
+thread_local! {
+    static UCS: std::cell::Cell<(DVec2, f64)> = const { std::cell::Cell::new((DVec2::ZERO, 0.0)) };
+}
+
+/// The user coordinate system snapping works in this frame: its origin
+/// and the angle of its X axis (radians). Ortho, polar and object snap
+/// tracking, and the snap grid, follow it, as in AutoCAD.
+pub fn set_ucs(origin: DVec2, angle: f64) {
+    UCS.with(|u| u.set((origin, angle)));
+}
+
+/// The UCS snapping works in: origin and X axis angle.
+pub fn ucs() -> (DVec2, f64) {
+    UCS.with(|u| u.get())
+}
+
+/// Back to the world's coordinates when dropped.
+pub struct UcsGuard;
+
+impl Drop for UcsGuard {
+    fn drop(&mut self) {
+        set_ucs(DVec2::ZERO, 0.0);
+    }
+}
+
+/// The UCS's X and Y directions.
+fn ucs_axes() -> (DVec2, DVec2) {
+    let x = DVec2::from_angle(ucs().1);
+    (x, x.perp())
+}
+
 static DIVISIONS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// The parts every edge snaps at, as ArchiCAD's special snaps: 0 off, else
@@ -568,10 +599,12 @@ pub struct Line {
 
 impl Line {
     fn axis(&self) -> DVec3 {
+        // along the UCS's axes
+        let (x, y) = ucs_axes();
         if self.along_x {
-            DVec3::X
+            x.extend(0.0)
         } else {
-            DVec3::Y
+            y.extend(0.0)
         }
     }
 
@@ -1409,7 +1442,12 @@ impl Snapper {
                     if a.through == Through::From && b.through == Through::From {
                         continue;
                     }
-                    let p = DVec3::new(b.at.x, a.at.y, a.at.z);
+                    // where the line along X through a meets the one
+                    // along Y through b
+                    let (ux, uy) = ucs_axes();
+                    let rel = (b.at - a.at).truncate();
+                    let p = a.at + (ux * rel.dot(ux)).extend(0.0);
+                    let _ = uy;
                     if let Some(d) = near(p) {
                         if best.is_none_or(|(bd, ..)| d < bd) {
                             best = Some((d, p, *a, *b));
@@ -1515,11 +1553,14 @@ impl Snapper {
         // Ortho: square to X or Y from the start point, whichever is nearer
         // the pointer; object snaps above still win
         if let (Some(f), Some(free), true) = (from, free, cfg.allows(SnapKind::Ortho)) {
-            let d = free - f;
-            let p = if d.x.abs() >= d.y.abs() {
-                DVec3::new(f.x + grid_round(d.x, step), f.y, f.z)
+            // along the UCS's X or Y
+            let (ux, uy) = ucs_axes();
+            let d = (free - f).truncate();
+            let (dx, dy) = (d.dot(ux), d.dot(uy));
+            let p = if dx.abs() >= dy.abs() {
+                f + (ux * grid_round(dx, step)).extend(0.0)
             } else {
-                DVec3::new(f.x, f.y + grid_round(d.y, step), f.z)
+                f + (uy * grid_round(dy, step)).extend(0.0)
             };
             return Some(Guided::plain(
                 Snap {
@@ -1605,7 +1646,14 @@ impl Snapper {
         free.map(|p| {
             Guided::plain(
                 Snap {
-                    p: DVec3::new(grid_round(p.x, step), grid_round(p.y, step), p.z),
+                    // the snap grid lies in the UCS
+                    p: {
+                        let (o, _) = ucs();
+                        let (ux, uy) = ucs_axes();
+                        let q = p.truncate() - o;
+                        (o + ux * grid_round(q.dot(ux), step) + uy * grid_round(q.dot(uy), step))
+                            .extend(p.z)
+                    },
                     kind: SnapKind::Grid,
                     host: None,
                 },
@@ -2442,12 +2490,13 @@ pub fn temp_guides(
             Reference::Point { p, kind } => {
                 let p = p.truncate();
                 if otrack {
-                    line(&mut out, p, DVec2::X, GuideKind::Horizontal, p);
-                    line(&mut out, p, DVec2::Y, GuideKind::Vertical, p);
+                    let (ux, uy) = ucs_axes();
+                    line(&mut out, p, ux, GuideKind::Horizontal, p);
+                    line(&mut out, p, uy, GuideKind::Vertical, p);
                 }
                 if otrack && polar {
                     for a in &angles {
-                        let d = DVec2::from_angle(a.to_radians());
+                        let d = DVec2::from_angle(a.to_radians() + ucs().1);
                         line(&mut out, p, d, GuideKind::Angle(*a), p);
                     }
                 }
@@ -2511,7 +2560,7 @@ pub fn temp_guides(
             line(
                 &mut out,
                 f,
-                DVec2::from_angle(a.to_radians()),
+                DVec2::from_angle(a.to_radians() + ucs().1),
                 GuideKind::Angle(*a),
                 f,
             );
@@ -3149,5 +3198,37 @@ mod tests {
         assert!(centres
             .iter()
             .any(|c| c.distance(DVec3::new(0.0, 0.0, 1.0)) < 1e-6));
+    }
+
+    #[cfg(test)]
+    mod ucs_tests {
+        use super::*;
+
+        #[test]
+        fn ortho_runs_along_the_ucs() {
+            let s = Snapper::new();
+            let cfg = SnapSettings {
+                ortho: true,
+                axis: false,
+                references: false,
+                ..SnapSettings::AUTOCAD
+            };
+            let project = |p: DVec3| Some(Pos2::new(p.x as f32 * 100.0, -p.y as f32 * 100.0));
+            set_ucs(DVec2::ZERO, std::f64::consts::FRAC_PI_4);
+            let _back = UcsGuard;
+            // the pointer up and to the right: on the UCS's X, at 45°
+            let free = DVec3::new(2.0, 1.8, 0.0);
+            let got = s
+                .snap(
+                    &cfg,
+                    project(free).unwrap(),
+                    &project,
+                    Some(DVec3::ZERO),
+                    Some(free),
+                )
+                .unwrap();
+            assert_eq!(got.kind, SnapKind::Ortho);
+            assert!((got.p.x - got.p.y).abs() < 1e-9, "{:?}", got.p);
+        }
     }
 }

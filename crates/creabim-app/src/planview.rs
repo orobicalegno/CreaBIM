@@ -463,6 +463,15 @@ pub struct PlanState {
     pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
     /// What a command shows as it goes (a polyline with its arcs).
     pub cmd_preview: Option<(ElementId, Vec<DVec2>)>,
+    /// The UCS plans work in, the ones before it (UCS Previous), and how
+    /// far each plan view is turned (PLAN).
+    pub ucs: Ucs,
+    pub ucs_prev: Vec<Ucs>,
+    pub view_rot: HashMap<ElementId, f64>,
+    /// The UCS icon: shown, and at the UCS's origin when it is in view
+    /// (else in the corner).
+    pub ucs_icon: bool,
+    pub ucs_icon_origin: bool,
     /// Which of a polyline's clicked points an arc led to.
     pub pline_arcs: Vec<bool>,
     /// The one object snap the next pick uses (AutoCAD's override).
@@ -703,6 +712,11 @@ impl Default for PlanState {
             cmd_finish: false,
             cmd_pick: None,
             cmd_preview: None,
+            ucs: Ucs::default(),
+            ucs_prev: vec![],
+            view_rot: HashMap::new(),
+            ucs_icon: true,
+            ucs_icon_origin: true,
             pline_arcs: vec![],
             snap_once: None,
             snap_once_spent: false,
@@ -849,17 +863,67 @@ pub struct Xf {
     pub rect: Rect,
     pub center: DVec2,
     pub scale: f32,
+    /// How far the view is turned, radians: the drawing's direction at
+    /// this angle reads level on screen (AutoCAD's PLAN to a UCS).
+    pub rot: f64,
 }
 
 impl Xf {
     pub fn to_screen(&self, p: DVec2) -> Pos2 {
-        let d = (p - self.center).as_vec2() * self.scale;
+        let v = p - self.center;
+        let v = if self.rot == 0.0 {
+            v
+        } else {
+            DVec2::from_angle(-self.rot).rotate(v)
+        };
+        let d = v.as_vec2() * self.scale;
         self.rect.center() + Vec2::new(d.x, -d.y)
     }
 
     pub fn to_world(&self, p: Pos2) -> DVec2 {
         let d = (p - self.rect.center()) / self.scale;
-        self.center + DVec2::new(d.x as f64, -d.y as f64)
+        let v = DVec2::new(d.x as f64, -d.y as f64);
+        let v = if self.rot == 0.0 {
+            v
+        } else {
+            DVec2::from_angle(self.rot).rotate(v)
+        };
+        self.center + v
+    }
+
+    /// A box of the drawing as the screen box round it.
+    pub fn screen_box(&self, lo: DVec2, hi: DVec2) -> Rect {
+        let c = [lo, DVec2::new(hi.x, lo.y), hi, DVec2::new(lo.x, hi.y)].map(|p| self.to_screen(p));
+        let mut r = Rect::from_two_pos(c[0], c[1]);
+        r.extend_with(c[2]);
+        r.extend_with(c[3]);
+        r
+    }
+}
+
+/// A user coordinate system in a plan: its origin and the angle of its
+/// X axis (radians), as AutoCAD's UCS in 2D.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ucs {
+    pub origin: DVec2,
+    pub angle: f64,
+}
+
+impl Ucs {
+    pub fn is_world(&self) -> bool {
+        self.origin == DVec2::ZERO && self.angle == 0.0
+    }
+    /// A point of the UCS in the drawing's (world) coordinates.
+    pub fn world(&self, p: DVec2) -> DVec2 {
+        self.origin + DVec2::from_angle(self.angle).rotate(p)
+    }
+    /// A world point in the UCS's coordinates.
+    pub fn local(&self, p: DVec2) -> DVec2 {
+        DVec2::from_angle(-self.angle).rotate(p - self.origin)
+    }
+    /// A direction of the UCS in the world's.
+    pub fn dir(&self, d: DVec2) -> DVec2 {
+        DVec2::from_angle(self.angle).rotate(d)
     }
 }
 
@@ -897,6 +961,18 @@ pub fn show(
         painter.rect_filled(rect, 0.0, bg);
     }
 
+    // the UCS: snaps, the grid and the crosshairs follow it in a plan;
+    // the plan itself turns as PLAN set it
+    let is_plan = matches!(kind, PaneKind::Plan { .. });
+    let rot = if is_plan && style.camera.is_none() {
+        state.view_rot.get(&view).copied().unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let _ucs = crate::snaps::UcsGuard;
+    if is_plan {
+        crate::snaps::set_ucs(state.ucs.origin, state.ucs.angle);
+    }
     let (mut center, mut scale) = match style.camera {
         Some(c) => c,
         None => {
@@ -952,6 +1028,7 @@ pub fn show(
                 rect,
                 center,
                 scale,
+                rot,
             };
             let before = xf.to_world(at);
             scale = (scale * k).clamp(2.0, 2000.0);
@@ -959,6 +1036,7 @@ pub fn show(
                 rect,
                 center,
                 scale,
+                rot,
             };
             center += before - xf.to_world(at);
         }
@@ -966,18 +1044,20 @@ pub fn show(
         || response.dragged_by(egui::PointerButton::Middle)
     {
         let d = response.drag_delta() / scale;
-        center -= DVec2::new(d.x as f64, -d.y as f64);
+        center -= DVec2::from_angle(rot).rotate(DVec2::new(d.x as f64, -d.y as f64));
     }
     if response.hovered() {
         // a touchpad's two fingers pan; a wheel and a pinch zoom (MU24)
         let (pan, scroll) = wheel(ui);
-        center -= DVec2::new(pan.x as f64, -pan.y as f64) / scale as f64;
+        center -=
+            DVec2::from_angle(rot).rotate(DVec2::new(pan.x as f64, -pan.y as f64)) / scale as f64;
         if scroll != 0.0 {
             if let Some(hover) = response.hover_pos() {
                 let xf = Xf {
                     rect,
                     center,
                     scale,
+                    rot,
                 };
                 let before = xf.to_world(hover);
                 scale = (scale * (1.0 + scroll * 0.002)).clamp(2.0, 2000.0);
@@ -985,6 +1065,7 @@ pub fn show(
                     rect,
                     center,
                     scale,
+                    rot,
                 };
                 center += before - xf.to_world(hover);
             }
@@ -1023,17 +1104,22 @@ pub fn show(
         rect,
         center,
         scale,
+        rot,
     };
 
     if style.decorations && kind != PaneKind::Schedule {
         let (grid, axes) = plan_look();
         if grid {
-            draw_metric_grid(&painter, &xf);
+            let ucs = if is_plan { state.ucs } else { Ucs::default() };
+            draw_metric_grid(&painter, &xf, ucs);
         }
         // the origin in a plan, faint: where the building is anchored, red
         // along X and green along Y as in 3D (MU40)
         if axes && matches!(kind, PaneKind::Plan { .. }) {
             draw_origin_axes(&painter, &xf);
+        }
+        if is_plan && state.ucs_icon {
+            draw_ucs_icon(&painter, &xf, state.ucs, state.ucs_icon_origin);
         }
     }
     // a point asked for: a cross follows the pointer, a click gives it
@@ -2142,10 +2228,7 @@ pub fn show(
                         return None;
                     }
                     let (lo, hi) = it.bounds()?;
-                    Some((
-                        it.id(),
-                        Rect::from_two_pos(xf.to_screen(lo), xf.to_screen(hi)),
-                    ))
+                    Some((it.id(), xf.screen_box(lo, hi)))
                 });
                 let ids = boxsel::pick(p0, now, parts)
                     .into_iter()
@@ -5542,7 +5625,8 @@ fn section_letter(n: usize) -> String {
 /// `size` per cent of the pane (100: right across it, CURSORSIZE), and
 /// the pickbox square at the centre while nothing asks for a point. They
 /// take the pointer's place, unless a grip or a pan asked for another one.
-pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox: bool) {
+/// `angle` turns them to the UCS (radians, anticlockwise on screen).
+pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox: bool, angle: f32) {
     let Some(p) = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p)) else {
         return;
     };
@@ -5579,22 +5663,13 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
     };
     // a gap round the pickbox, as AutoCAD leaves one
     let gap = if pickbox { 5.0 } else { 0.0 };
-    top.line_segment(
-        [egui::pos2(p.x - half, p.y), egui::pos2(p.x - gap, p.y)],
-        stroke,
-    );
-    top.line_segment(
-        [egui::pos2(p.x + gap, p.y), egui::pos2(p.x + half, p.y)],
-        stroke,
-    );
-    top.line_segment(
-        [egui::pos2(p.x, p.y - half), egui::pos2(p.x, p.y - gap)],
-        stroke,
-    );
-    top.line_segment(
-        [egui::pos2(p.x, p.y + gap), egui::pos2(p.x, p.y + half)],
-        stroke,
-    );
+    // along the UCS's X and Y as the screen shows them
+    let ux = Vec2::new(angle.cos(), -angle.sin());
+    let uy = Vec2::new(-ux.y, ux.x);
+    let uy = Vec2::new(uy.x, uy.y);
+    for d in [ux, -ux, uy, -uy] {
+        top.line_segment([p + d * gap, p + d * half], stroke);
+    }
     if pickbox {
         top.rect_stroke(
             Rect::from_center_size(p, egui::vec2(9.0, 9.0)),
@@ -5625,22 +5700,25 @@ fn plan_look() -> (bool, bool) {
 /// well down so they place the building without competing with it.
 fn draw_origin_axes(painter: &egui::Painter, xf: &Xf) {
     let r = xf.rect;
+    let painter = painter.with_clip_rect(r);
     let o = xf.to_screen(DVec2::ZERO);
-    if (r.top()..=r.bottom()).contains(&o.y) {
-        painter.line_segment(
-            [egui::pos2(r.left(), o.y), egui::pos2(r.right(), o.y)],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(214, 72, 72, 70)),
-        );
-    }
-    if (r.left()..=r.right()).contains(&o.x) {
-        painter.line_segment(
-            [egui::pos2(o.x, r.top()), egui::pos2(o.x, r.bottom())],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(70, 160, 80, 70)),
-        );
+    // the world's X and Y as the screen shows them, turned with the view
+    let big = 2.0 * (r.width() + r.height()) + o.distance(r.center());
+    for (d, c) in [
+        (DVec2::X, Color32::from_rgba_unmultiplied(214, 72, 72, 70)),
+        (DVec2::Y, Color32::from_rgba_unmultiplied(70, 160, 80, 70)),
+    ] {
+        let v = xf.to_screen(d) - xf.to_screen(DVec2::ZERO);
+        let v = if v.length() > 1e-6 {
+            v.normalized()
+        } else {
+            continue;
+        };
+        painter.line_segment([o - v * big, o + v * big], Stroke::new(1.0, c));
     }
 }
 
-fn draw_metric_grid(painter: &egui::Painter, xf: &Xf) {
+fn draw_metric_grid(painter: &egui::Painter, xf: &Xf, ucs: Ucs) {
     let step = if xf.scale > 30.0 {
         1.0
     } else if xf.scale > 6.0 {
@@ -5648,30 +5726,80 @@ fn draw_metric_grid(painter: &egui::Painter, xf: &Xf) {
     } else {
         25.0
     };
-    let lo = xf.to_world(xf.rect.left_bottom());
-    let hi = xf.to_world(xf.rect.right_top());
+    // the grid lies in the UCS, as AutoCAD's: its box of the view
+    let r = xf.rect;
+    let corners = [
+        r.left_top(),
+        r.right_top(),
+        r.left_bottom(),
+        r.right_bottom(),
+    ]
+    .map(|p| ucs.local(xf.to_world(p)));
+    let lo = corners
+        .iter()
+        .fold(DVec2::splat(f64::MAX), |a, p| a.min(*p));
+    let hi = corners
+        .iter()
+        .fold(DVec2::splat(f64::MIN), |a, p| a.max(*p));
     let stroke = Stroke::new(1.0, Color32::from_gray(236));
+    let at = |p: DVec2| xf.to_screen(ucs.world(p));
+    let painter = painter.with_clip_rect(r);
     let mut x = (lo.x / step).floor() * step;
-    while x <= hi.x {
-        painter.line_segment(
-            [
-                xf.to_screen(DVec2::new(x, lo.y)),
-                xf.to_screen(DVec2::new(x, hi.y)),
-            ],
-            stroke,
-        );
+    let mut n = 0;
+    while x <= hi.x && n < 2000 {
+        painter.line_segment([at(DVec2::new(x, lo.y)), at(DVec2::new(x, hi.y))], stroke);
         x += step;
+        n += 1;
     }
     let mut y = (lo.y / step).floor() * step;
-    while y <= hi.y {
-        painter.line_segment(
-            [
-                xf.to_screen(DVec2::new(lo.x, y)),
-                xf.to_screen(DVec2::new(hi.x, y)),
-            ],
-            stroke,
-        );
+    while y <= hi.y && n < 4000 {
+        painter.line_segment([at(DVec2::new(lo.x, y)), at(DVec2::new(hi.x, y))], stroke);
         y += step;
+        n += 1;
+    }
+}
+
+/// AutoCAD's UCS icon: two arrows, X and Y, along the UCS's axes, at its
+/// origin when that is in view (else in the lower left corner), with a
+/// square at the corner when it is the world's.
+pub fn draw_ucs_icon(painter: &egui::Painter, xf: &Xf, ucs: Ucs, at_origin: bool) {
+    let r = xf.rect;
+    let corner = r.left_bottom() + Vec2::new(28.0, -28.0);
+    let o = xf.to_screen(ucs.origin);
+    let inside = r.shrink(30.0).contains(o);
+    let base = if at_origin && inside { o } else { corner };
+    let ink = Color32::from_rgb(60, 60, 60);
+    let s = Stroke::new(1.5, ink);
+    let len = 34.0;
+    let dir = |d: DVec2| {
+        let a = xf.to_screen(ucs.origin) - xf.to_screen(ucs.origin - ucs.dir(d));
+        if a.length() > 1e-6 {
+            a.normalized()
+        } else {
+            Vec2::X
+        }
+    };
+    for (d, name) in [(DVec2::X, "X"), (DVec2::Y, "Y")] {
+        let v = dir(d);
+        let tip = base + v * len;
+        painter.line_segment([base, tip], s);
+        let side = Vec2::new(-v.y, v.x) * 4.0;
+        painter.line_segment([tip, tip - v * 8.0 + side], s);
+        painter.line_segment([tip, tip - v * 8.0 - side], s);
+        painter.text(
+            tip + v * 9.0,
+            egui::Align2::CENTER_CENTER,
+            name,
+            egui::FontId::proportional(11.0),
+            ink,
+        );
+    }
+    if ucs.is_world() {
+        let (x, y) = (dir(DVec2::X) * 7.0, dir(DVec2::Y) * 7.0);
+        painter.add(egui::Shape::closed_line(
+            vec![base, base + x, base + x + y, base + y],
+            Stroke::new(1.0, ink),
+        ));
     }
 }
 
@@ -6015,7 +6143,8 @@ pub fn draw_item_with(
                 text,
                 px,
                 colour,
-                *angle,
+                // as the view turns, so does it
+                *angle - xf.rot,
                 *align,
                 &look,
             );
@@ -7875,6 +8004,7 @@ mod tests {
             rect: left,
             center: DVec2::new(32.0, 1.5),
             scale: 100.0,
+            rot: 0.0,
         };
         let end = xf.to_screen(DVec2::new(34.0, 0.0));
         let mut t = 0.0;
@@ -8019,6 +8149,7 @@ mod tests {
             rect,
             center: DVec2::new(33.0, 0.5),
             scale: 100.0,
+            rot: 0.0,
         };
         let mut t = 0.0;
         let mut frame = |events: Vec<egui::Event>,
@@ -8436,6 +8567,7 @@ mod tests {
             rect: Rect::from_min_size(Pos2::ZERO, Vec2::splat(1000.0)),
             center: first,
             scale: 100.0,
+            rot: 0.0,
         };
         let snapper = Snapper::from_drawing(&[], &[]);
         let cfg = snaps::SnapSettings::default();
@@ -8495,6 +8627,7 @@ mod tests {
             rect: Rect::from_min_size(Pos2::ZERO, Vec2::splat(1000.0)),
             center: DVec2::new(20.0, 5.0),
             scale: 100.0,
+            rot: 0.0,
         };
         let cursor = xf.to_screen(DVec2::new(21.03, 6.98));
         let cfg = snaps::SnapSettings::default();

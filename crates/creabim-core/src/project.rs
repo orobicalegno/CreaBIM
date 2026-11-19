@@ -45,6 +45,20 @@ pub struct ProjectInfo {
     /// The project's own profiles (MU27 block 5), for sweeps.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<crate::profiles::NamedProfile>,
+    /// User coordinate systems saved by name (AutoCAD's UCS Save), for
+    /// plans.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ucs: Vec<NamedUcs>,
+}
+
+/// A user coordinate system kept by name: its origin in plan
+/// coordinates and the angle of its X axis, degrees anticlockwise.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NamedUcs {
+    pub name: String,
+    pub origin: glam::DVec2,
+    pub angle: f64,
 }
 
 /// One item of the project's notepad.
