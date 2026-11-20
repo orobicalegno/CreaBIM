@@ -621,6 +621,19 @@ impl CreaBimApp {
                         }
                     };
                     for (it, layer) in items {
+                        // the drawing's texts come as notes where they stood
+                        if let creabim_core::titleblock::TitleItem::Text { at, text, .. } = &it {
+                            if !text.trim().is_empty() {
+                                let n = creabim_core::Note::new(
+                                    view,
+                                    r.place(*at / 1000.0),
+                                    text.clone(),
+                                );
+                                tx = tx.insert(Element::new("Note", ElementKind::Note(n)));
+                                parts += 1;
+                            }
+                            continue;
+                        }
                         let creabim_core::titleblock::TitleItem::Line { points, .. } = it else {
                             continue;
                         };

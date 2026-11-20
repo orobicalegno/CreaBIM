@@ -1222,6 +1222,15 @@ impl Snapper {
             let mut seen: Vec<(DVec3, f64)> = vec![];
             for sg in segments() {
                 let Some((c, r, ..)) = sg.arc else { continue };
+                // only circles passing near the pointer can touch there:
+                // the rest are passed over before anything costly (an
+                // exploded DXF has thousands of arcs)
+                let (Some(sc), Some(se)) = (project(c), project(c + DVec3::X * r)) else {
+                    continue;
+                };
+                if (sc.distance(cursor) - sc.distance(se)).abs() > aperture() {
+                    continue;
+                }
                 if seen
                     .iter()
                     .any(|(k, q)| k.distance(c) < 1e-9 && (q - r).abs() < 1e-9)

@@ -473,6 +473,8 @@ pub struct PlanState {
     /// Until when the view counts as moving (a wheel turn, a pan): the
     /// hatches wait till then.
     pub nav_until: f64,
+    /// The drawing as last drawn, reused while zooming and panning.
+    pub nav_mesh: Option<NavMesh>,
     /// The UCS plans work in, the ones before it (UCS Previous), and how
     /// far each plan view is turned (PLAN).
     pub ucs: Ucs,
@@ -726,6 +728,7 @@ impl Default for PlanState {
             cmd_pick: None,
             cmd_preview: None,
             nav_until: 0.0,
+            nav_mesh: None,
             ucs: Ucs::default(),
             ucs_prev: vec![],
             view_rot: HashMap::new(),
@@ -871,6 +874,17 @@ impl PlanState {
             || !self.details.path.is_empty()
             || self.temp.editing.is_some()
     }
+}
+
+/// A plan's drawing as last drawn, as triangles, moved and scaled while
+/// the view is zoomed or panned (see [`show`]).
+pub struct NavMesh {
+    key: (ElementId, u64, usize, u64),
+    rect: Rect,
+    center: DVec2,
+    scale: f32,
+    rot: f64,
+    meshes: Vec<egui::Mesh>,
 }
 
 pub struct Xf {
@@ -1080,7 +1094,7 @@ pub fn show(
         // a touchpad's two fingers pan; a wheel and a pinch zoom (MU24)
         let (pan, scroll) = wheel(ui);
         if pan != Vec2::ZERO || scroll != 0.0 {
-            state.nav_until = ui.input(|i| i.time) + 0.18;
+            state.nav_until = ui.input(|i| i.time) + 0.35;
         }
         center -=
             DVec2::from_angle(rot).rotate(DVec2::new(pan.x as f64, -pan.y as f64)) / scale as f64;
@@ -1145,13 +1159,13 @@ pub fn show(
     if response.dragged_by(egui::PointerButton::Middle)
         || response.dragged_by(egui::PointerButton::Secondary)
     {
-        state.nav_until = now + 0.18;
+        state.nav_until = now + 0.35;
     }
     let moving = now < state.nav_until;
     NAVIGATING.with(|n| n.set(moving));
     if moving {
         ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(200));
+            .request_repaint_after(std::time::Duration::from_millis(380));
     }
 
     if style.decorations && kind != PaneKind::Schedule {
@@ -1303,7 +1317,9 @@ pub fn show(
     // pre-selection: what a click here would take, and what else is
     // under the pointer (Tab cycles them)
     let pane = Pane::View(view);
-    if !response.dragged() {
+    // nothing is looked up under the pointer while the view zooms or pans
+    let zooming = ui.input(|i| i.time) < state.nav_until;
+    if !response.dragged() && !zooming {
         // (the Align tool takes faces in a 3D view, so Tab reaches them)
         let reading = (matches!(tool, Tool::Select | Tool::Tag)
             || (tool == Tool::Align && kind == PaneKind::Axonometric))
@@ -1345,7 +1361,78 @@ pub fn show(
     faint.set_opacity(0.22);
     // the view's graphic overrides, as on its sheets (MU27)
     let overrides = view_overrides(doc.model(), view);
-    for item in &plan.items {
+    // what the pane shows of the world, a little wider: items wholly
+    // outside it aren't drawn, nor lines and text too small to see (a big
+    // exploded DXF is tens of thousands of them, AutoCAD skips them too)
+    let seen = {
+        let c = [
+            xf.to_world(rect.left_top()),
+            xf.to_world(rect.right_top()),
+            xf.to_world(rect.left_bottom()),
+            xf.to_world(rect.right_bottom()),
+        ];
+        let lo = c.iter().fold(c[0], |a, p| a.min(*p));
+        let hi = c.iter().fold(c[0], |a, p| a.max(*p));
+        let pad = DVec2::splat(8.0 / xf.scale as f64);
+        (lo - pad, hi + pad)
+    };
+    let px = 1.0 / xf.scale as f64;
+    // while the view is zoomed or panned, the drawing as last drawn is
+    // moved and scaled on screen rather than drawn again item by item (a
+    // big DXF took a fifth of a second a frame); it is drawn afresh when
+    // it has grown or shrunk twice over, and when the motion stops
+    // the same is done when nothing at all has changed (the pointer moved,
+    // the crosshair with it): the triangles are drawn as they were
+    let moving = ui.input(|i| i.time) < state.nav_until;
+    let nav_key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        selection.active.hash(&mut h);
+        selection.others.hash(&mut h);
+        state.spotlight.len().hash(&mut h);
+        (xray, ghost).hash(&mut h);
+        (view, doc.model().revision(), plan.items.len(), h.finish())
+    };
+    let reuse = state.nav_mesh.as_ref().is_some_and(|c| {
+        c.key == nav_key
+            && c.rect == rect
+            && c.rot == xf.rot
+            && if moving {
+                (0.5..2.0).contains(&(xf.scale / c.scale))
+            } else {
+                c.scale == xf.scale && c.center == xf.center
+            }
+    });
+    let layer = painter.layer_id();
+    let from = ui
+        .ctx()
+        .graphics(|g| g.get(layer).map(|l| l.next_idx().0))
+        .unwrap_or(0);
+    if reuse {
+        if let Some(c) = &state.nav_mesh {
+            // a point drawn at `p` then is at `a0 + p k` now
+            let old = Xf {
+                rect: c.rect,
+                center: c.center,
+                scale: c.scale,
+                rot: c.rot,
+            };
+            let a0 = xf.to_screen(old.to_world(Pos2::ZERO)).to_vec2();
+            let k = xf.scale / c.scale;
+            let clip = painter.clip_rect();
+            for m in &c.meshes {
+                let mut m = m.clone();
+                for v in &mut m.vertices {
+                    v.pos = (v.pos.to_vec2() * k + a0).to_pos2();
+                }
+                painter.with_clip_rect(clip).add(egui::Shape::mesh(m));
+            }
+        }
+    }
+    for item in plan.items.iter().filter(|_| !reuse) {
+        if !worth_drawing(item, seen, px, mm) {
+            continue;
+        }
         let lit = state.spotlight.contains(&item.id());
         let selected = selection.contains(item.id()) || lit;
         if ghost && !selected {
@@ -1361,6 +1448,45 @@ pub fn show(
         } else {
             draw_item(&painter, &xf, item, selected, mm);
         }
+    }
+    if reuse && !moving {
+        // drawn as it was
+    } else if !reuse {
+        // keep what was just drawn, as triangles, for the frames to come;
+        // the shapes give way to those same triangles, so the drawing is
+        // not made into triangles twice
+        let ctx = ui.ctx().clone();
+        let shapes: Vec<egui::epaint::ClippedShape> = ctx.graphics(|g| {
+            g.get(layer)
+                .map(|l| l.all_entries().skip(from).cloned().collect())
+                .unwrap_or_default()
+        });
+        let end = from + shapes.len();
+        let meshes: Vec<egui::Mesh> = ctx
+            .tessellate(shapes, ctx.pixels_per_point())
+            .into_iter()
+            .filter_map(|p| match p.primitive {
+                egui::epaint::Primitive::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        ctx.graphics_mut(|g| {
+            let list = g.entry(layer);
+            for i in from..end {
+                list.reset_shape(egui::layers::ShapeIdx(i));
+            }
+        });
+        for m in &meshes {
+            painter.add(egui::Shape::mesh(m.clone()));
+        }
+        state.nav_mesh = Some(NavMesh {
+            key: nav_key,
+            rect,
+            center: xf.center,
+            scale: xf.scale,
+            rot: xf.rot,
+            meshes,
+        });
     }
     // the references drawn over the model, then the outline of each one
     // selected or hovered, which is where it is picked (MU19)
@@ -1640,9 +1766,10 @@ pub fn show(
         }
     }
     let guides = if host.is_some() { vec![] } else { guides };
+    let zooming = ui.input(|i| i.time) < state.nav_until;
     let tracked = response
         .hover_pos()
-        .filter(|_| host.is_none())
+        .filter(|_| host.is_none() && !zooming)
         .and_then(|p| {
             let _p = crate::app::Perf::new("plan snaps: guided");
             let snapper = &state.snaps.get(&view)?.2;
@@ -6026,6 +6153,46 @@ pub fn view_overrides(model: &creabim_core::Model, view: ElementId) -> HashMap<E
     out
 }
 
+/// Is `item` in sight (`seen`, a world box) and big enough to show, one
+/// screen pixel being `px` world units? Only lines, arcs, outlines, fills
+/// and text are judged; the rest always draw.
+fn worth_drawing(item: &PlanItem, seen: (DVec2, DVec2), px: f64, mm: f64) -> bool {
+    let (lo, hi) = match item {
+        PlanItem::Line { a, b, .. } => (a.min(*b), a.max(*b)),
+        PlanItem::Arc { center, radius, .. } => (
+            *center - DVec2::splat(*radius),
+            *center + DVec2::splat(*radius),
+        ),
+        PlanItem::Polygon { points, .. }
+        | PlanItem::Fill { points, .. }
+        | PlanItem::Tint { points, .. } => {
+            let Some(first) = points.first() else {
+                return false;
+            };
+            points
+                .iter()
+                .fold((*first, *first), |(l, h), p| (l.min(*p), h.max(*p)))
+        }
+        PlanItem::Text { at, text, size, .. } => {
+            let h = size * mm;
+            // under a pixel and a half tall it reads as nothing
+            if h < 1.5 * px {
+                return false;
+            }
+            let r = DVec2::splat(h * (text.chars().count() as f64 + 2.0));
+            (*at - r, *at + r)
+        }
+        _ => return true,
+    };
+    if hi.x < seen.0.x || lo.x > seen.1.x || hi.y < seen.0.y || lo.y > seen.1.y {
+        return false;
+    }
+    // smaller than a third of a pixel either way: a speck
+    // (one with no size at all is a point's mark: drawn)
+    let span = (hi - lo).max_element();
+    span == 0.0 || span >= px * 0.35
+}
+
 pub fn draw_item(painter: &egui::Painter, xf: &Xf, item: &PlanItem, selected: bool, mm: f64) {
     draw_item_with(painter, xf, item, selected, mm, &Ovr::default());
 }
@@ -8913,5 +9080,48 @@ mod tests {
         }
         // a second run finds nothing left to tag
         assert_eq!(tag_fixtures(&mut doc, plan).unwrap(), 0);
+    }
+}
+
+#[cfg(test)]
+mod lod_tests {
+    use super::*;
+
+    #[test]
+    fn lines_out_of_sight_or_too_small_are_not_drawn() {
+        let id = ElementId::new();
+        let line = |a: DVec2, b: DVec2| PlanItem::Line {
+            id,
+            pen: Pen::Projection,
+            a,
+            b,
+        };
+        let seen = (DVec2::ZERO, DVec2::splat(10.0));
+        // one pixel is 0.01 units
+        assert!(worth_drawing(
+            &line(DVec2::ONE, DVec2::splat(2.0)),
+            seen,
+            0.01,
+            1.0
+        ));
+        assert!(!worth_drawing(
+            &line(DVec2::splat(20.0), DVec2::splat(30.0)),
+            seen,
+            0.01,
+            1.0
+        ));
+        assert!(!worth_drawing(
+            &line(DVec2::ONE, DVec2::ONE + DVec2::splat(0.001)),
+            seen,
+            0.01,
+            1.0
+        ));
+        // a line crossing the view with both ends outside it still draws
+        assert!(worth_drawing(
+            &line(DVec2::new(-5.0, 5.0), DVec2::new(15.0, 5.0)),
+            seen,
+            0.01,
+            1.0
+        ));
     }
 }

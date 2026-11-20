@@ -337,10 +337,11 @@ pub fn pick_open() -> Option<String> {
             "Everything Volumen reads",
             &[
                 "creabim", "json", "ifc", "ifcx", "blend", "FCStd", "fcstd", "FCMat", "fcmat",
-                "gltf", "glb",
+                "gltf", "glb", "dxf", "DXF",
             ],
         )
         .add_filter("Volumen project", &["creabim"])
+        .add_filter("DXF drawing (under the plan)", &["dxf", "DXF"])
         .add_filter("IFC", &["ifc", "ifcx"])
         .add_filter("Blender and FreeCAD (linked)", &["blend", "FCStd", "fcstd"])
         .add_filter(

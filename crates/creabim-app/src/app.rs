@@ -139,13 +139,13 @@ pub struct CreaBimApp {
     /// The area being drawn now.
     pub(super) area_now: usize,
     /// Generated drawings by view, with the model revision they were made at.
-    drawings: HashMap<ElementId, (u64, Drawing)>,
+    drawings: HashMap<ElementId, (u64, std::sync::Arc<Drawing>)>,
     /// Drawings and the 3D scene being built off the UI thread.
     builds: crate::builds::Builds,
     /// Each view's looks on sheets, with the model revision they are for.
     looks: HashMap<ElementId, (u64, std::sync::Arc<creabim_geom::looks::Looks>)>,
     /// The same for views seen in X-ray, which their sheets don't follow.
-    xray_drawings: HashMap<ElementId, (u64, Drawing)>,
+    xray_drawings: HashMap<ElementId, (u64, std::sync::Arc<Drawing>)>,
     /// The theme the 3D view's wires were last drawn for (MU31).
     dark_3d: bool,
     /// The Divide window (MU34 B2).
@@ -624,6 +624,11 @@ impl CreaBimApp {
             }
             return;
         }
+        // a CAD drawing goes under the plan shown, as a reference
+        if lower.ends_with(".dxf") {
+            self.import_dxf(path);
+            return;
+        }
         if !crate::files::is_project(path) {
             self.link_file(path);
             return;
@@ -728,6 +733,45 @@ impl CreaBimApp {
     }
 
     /// Bring a file's objects in as linked elements.
+    /// File › Import DXF, or a DXF opened: under the plan or section
+    /// shown, else the first floor plan.
+    fn import_dxf(&mut self, path: &str) {
+        let v = self.active_view.filter(|v| {
+            matches!(
+                self.view(*v).map(|v| &v.kind),
+                Some(ViewKind::Plan { .. } | ViewKind::Section { .. })
+            )
+        });
+        let v = v.or_else(|| {
+            self.doc.model().iter().find_map(|e| match &e.kind {
+                ElementKind::View(view) if matches!(view.kind, ViewKind::Plan { .. }) => Some(e.id),
+                _ => None,
+            })
+        });
+        let Some(v) = v else {
+            self.status =
+                "A DXF goes under a plan: make a floor plan first (View › New view).".into();
+            return;
+        };
+        self.active_view = Some(v);
+        self.add_reference(
+            v,
+            creabim_core::RefSource::Dxf {
+                path: path.to_string(),
+            },
+        );
+    }
+
+    pub(super) fn import_dxf_dialog(&mut self) {
+        if let Some(p) = rfd::FileDialog::new()
+            .set_title("Import a DXF drawing under the plan")
+            .add_filter("DXF", &["dxf"])
+            .pick_file()
+        {
+            self.import_dxf(&p.display().to_string());
+        }
+    }
+
     fn link_file(&mut self, path: &str) {
         let full = std::fs::canonicalize(path)
             .map(|p| p.display().to_string())
@@ -879,7 +923,7 @@ impl CreaBimApp {
         sheets::placed_views_with(
             model,
             sheet,
-            &mut |v| cache.get(&v).map(|(_, d)| d.clone()),
+            &mut |v| cache.get(&v).map(|(_, d)| (**d).clone()),
             &mut |id, v| match looks.get(&id) {
                 Some((r, l)) if *r == rev => l.clone(),
                 _ => {
@@ -924,12 +968,12 @@ impl CreaBimApp {
         };
         if let Some((r, d)) = cache.get(&id) {
             if *r == revision {
-                return Some(d.clone());
+                return Some((**d).clone());
             }
         }
         let t = std::time::Instant::now();
         let d = creabim_geom::section::view_drawing_with(self.doc.model(), id, xray)?;
-        cache.insert(id, (revision, d.clone()));
+        cache.insert(id, (revision, std::sync::Arc::new(d.clone())));
         self.builds
             .record((id, xray), t.elapsed().as_secs_f64() * 1000.0);
         Some(d)
@@ -939,7 +983,7 @@ impl CreaBimApp {
     /// up to date or cheap to build, else the last one finished while a
     /// worker builds the new one (see [`crate::builds`]). Exports and
     /// anything measured from a drawing use [`Self::drawing`].
-    fn drawing_live(&mut self, id: ElementId) -> Option<Drawing> {
+    fn drawing_live(&mut self, id: ElementId) -> Option<std::sync::Arc<Drawing>> {
         let _pf = Perf::new("drawing_live: take finished");
         let finished = self.builds.finished();
         drop(_pf);
@@ -952,7 +996,7 @@ impl CreaBimApp {
             match b.drawing {
                 // a drawing older than the one held (built on the spot meanwhile) is dropped
                 Some(d) if cache.get(&b.key.0).is_none_or(|(r, _)| *r < b.revision) => {
-                    cache.insert(b.key.0, (b.revision, d));
+                    cache.insert(b.key.0, (b.revision, std::sync::Arc::new(d)));
                 }
                 _ => {}
             }
@@ -989,7 +1033,13 @@ impl CreaBimApp {
             }
             _ => {
                 let _pb = Perf::new("drawing_live: build here");
-                self.drawing(id)
+                self.drawing(id)?;
+                let cache = if xray {
+                    &self.xray_drawings
+                } else {
+                    &self.drawings
+                };
+                cache.get(&id).map(|(_, d)| d.clone())
             }
         }
     }
@@ -2983,7 +3033,7 @@ impl CreaBimApp {
                     kind,
                     ViewKind::Axonometric { .. } | ViewKind::Schedule { .. }
                 ) {
-                    Drawing::default()
+                    std::sync::Arc::new(Drawing::default())
                 } else {
                     plan
                 };
@@ -7024,14 +7074,19 @@ impl CreaBimApp {
             let Some(mut drawing) = self.drawing_live(view) else {
                 return;
             };
+            // shared, not copied: a big drawing (an exploded DXF) cost a
+            // copy each frame; only one with something left out is copied
+            let drawing_ref = &mut drawing;
             drop(_pp);
             let _pr = Perf::new("show_plan: hidden and guides");
             if !self.hidden.is_empty() {
-                drawing.items.retain(|it| !self.hidden.contains(&it.id()));
+                std::sync::Arc::make_mut(drawing_ref)
+                    .items
+                    .retain(|it| !self.hidden.contains(&it.id()));
             }
             if self.shell.settings.guides_hidden {
                 // kept in the model, left out of every view (and so not snapped to)
-                drawing.items.retain(|it| {
+                std::sync::Arc::make_mut(drawing_ref).items.retain(|it| {
                     !matches!(
                         it,
                         PlanItem::Line {
@@ -8232,8 +8287,18 @@ impl CreaBimApp {
         }
         let r_source_dxf = matches!(source, creabim_core::RefSource::Dxf { .. });
         let mut r = creabim_core::Reference::new(source, vec![v]);
+        let mut moved = false;
         if let Some(b) = crate::trace::bounds_of(&r.source, &shown) {
             r.in_place(b);
+            // a CAD drawing far from the model (survey or map coordinates,
+            // or an origin a long way off) would sit out of sight: it comes
+            // over the model, to be moved into place
+            if r_source_dxf {
+                if let Some(at) = far_drawing(model, b) {
+                    r.at = at;
+                    moved = true;
+                }
+            }
         }
         // a picture keeps its own colours; lines take the first colour
         if matches!(shown, crate::trace::Shown::Picture(_)) {
@@ -8252,6 +8317,16 @@ impl CreaBimApp {
             self.selection.only(id);
             self.prop_tab = PropTab::Element;
             self.status = "Reference added. Drag its middle to move it, a corner to scale it, the round grip to turn it; Calibrate sets an exact size. Alt+F2 hides it.".into();
+            if r_source_dxf {
+                // show it: the view fits its drawing again
+                self.plan.cameras.remove(&v);
+                self.plan.area_cameras.retain(|(_, view), _| *view != v);
+                self.status = if moved {
+                    "DXF added under this plan. It was drawn far from the model, so it was brought over it: drag its middle (or MOVE) to put it in place; Calibrate sets an exact size.".into()
+                } else {
+                    "DXF added under this plan, at its own coordinates. Drag its middle to move it; Properties › Element sets its colour and strength; EXPLODE turns it into drafting lines.".into()
+                };
+            }
             if r_source_dxf && crate::trace::DXF_CAPPED.load(std::sync::atomic::Ordering::Relaxed) {
                 self.status = format!(
                     "Reference added, but only in part: the file makes more than {} items (blocks in arrays inside arrays), so reading stopped there.",
@@ -11649,6 +11724,20 @@ impl eframe::App for CreaBimApp {
         // here, in case leaving went unreported) the bars forget the
         // button they last showed, so it shows again on the next hover
         let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
+        // while a plan is zoomed or panned its lines go out without their
+        // soft edges: half the triangles for a big drawing, and they come
+        // back the moment it stops
+        let moving = now < self.plan.nav_until;
+        if ctx.tessellation_options(|o| o.feathering) == moving {
+            ctx.tessellation_options_mut(|o| o.feathering = !moving);
+        }
+        if std::env::var_os("CREABIM_PERF").is_some() {
+            // the whole time from frame to frame, painting included
+            let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
+            if dt > 2.0 {
+                eprintln!("frame to frame: {dt:.1} ms");
+            }
+        }
         for e in events {
             match e {
                 egui::Event::PointerGone => self.pointer_away = true,
@@ -13425,4 +13514,33 @@ pub(crate) fn fold_handle(
             clicked = resp.on_hover_text(tip).clicked();
         });
     clicked
+}
+
+/// Where a DXF spanning `b` should go when it lies far from the model
+/// (more than 100 m from what the model fills, or from the origin in an
+/// empty one): the model's middle. None: it is near enough to stay.
+fn far_drawing(model: &Model, b: [glam::DVec2; 2]) -> Option<glam::DVec2> {
+    let mut lo = glam::DVec2::splat(f64::MAX);
+    let mut hi = glam::DVec2::splat(f64::MIN);
+    for e in model.iter() {
+        if matches!(e.kind, ElementKind::View(_) | ElementKind::Reference(_)) {
+            continue;
+        }
+        if let Some((a, c)) = creabim_core::parts::element_bounds(model, e) {
+            if a.is_finite() && c.is_finite() {
+                lo = lo.min(a.truncate());
+                hi = hi.max(c.truncate());
+            }
+        }
+    }
+    if lo.x > hi.x {
+        lo = glam::DVec2::ZERO;
+        hi = glam::DVec2::ZERO;
+    }
+    let margin = 100.0;
+    let apart = b[0].x > hi.x + margin
+        || b[1].x < lo.x - margin
+        || b[0].y > hi.y + margin
+        || b[1].y < lo.y - margin;
+    apart.then_some((lo + hi) / 2.0)
 }

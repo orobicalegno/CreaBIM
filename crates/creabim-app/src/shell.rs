@@ -873,8 +873,11 @@ impl CreaBimApp {
             Item::new("open", "Open…")
                 .key("Ctrl+O")
                 .icon("folder-open")
-                .hint("Open a .creabim, .ifc or .ifcx file. Other files (.blend, .FCStd) are linked into this project."),
+                .hint("Open a .creabim, .ifc or .ifcx file; a .dxf goes under the plan shown. Other files (.blend, .FCStd) are linked into this project."),
             Item::sub("Open recent", recent).icon("folder"),
+            Item::new("import.dxf", "Import DXF…")
+                .icon("underlay")
+                .hint("A CAD drawing (DXF) under the plan shown, to trace over; EXPLODE turns it into drafting lines. A DWG: save it as DXF first."),
         ];
         if self.shell.web.is_none() {
             items.push(
@@ -2126,6 +2129,7 @@ impl CreaBimApp {
                 }
             }
             "open" => self.open_dialog(),
+            "import.dxf" => self.import_dxf_dialog(),
             "open.path" => {
                 let path = self.path.clone();
                 self.open_path(&path);
@@ -4424,7 +4428,29 @@ impl CreaBimApp {
                     let z = |e: &Element| model.level(e.id).map_or(0.0, |l| l.elevation);
                     items.sort_by(|a, b| z(b).total_cmp(&z(a)));
                 }
+                // a group of thousands (an exploded DXF's lines) lists its
+                // first few hundred and the selected ones: the whole list
+                // was built and sent to the page on every frame
+                const ROWS: usize = 300;
+                let more = items.len().saturating_sub(ROWS);
+                if more > 0 {
+                    let mut kept: Vec<&Element> = items[..ROWS].to_vec();
+                    kept.extend(
+                        items[ROWS..]
+                            .iter()
+                            .filter(|e| self.selection.contains(e.id))
+                            .take(ROWS),
+                    );
+                    items = kept;
+                }
                 let mut rows: Vec<Value> = items.iter().map(|e| row(e, opens)).collect();
+                if more > 0 {
+                    rows.push(json!({
+                        "id": "", "name": format!("… and {more} more"), "icon": "ellipsis",
+                        "sel": false, "active": false,
+                        "hint": "Too many to list: pick them in the view, or use Select › Select similar",
+                    }));
+                }
                 // a 3D view's crop boxes say whose they are
                 for (r, e) in rows.iter_mut().zip(&items) {
                     if let ElementKind::CropBox(c) = &e.kind {
