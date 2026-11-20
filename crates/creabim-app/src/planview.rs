@@ -458,6 +458,10 @@ pub struct PlanState {
     pub osnap_menu_request: Option<egui::Pos2>,
     /// The north icon was double-clicked: set the north.
     pub north_request: bool,
+    /// A TRIM or EXTEND window being dragged (screen corners), and one
+    /// finished, to act on (view, corners).
+    pub fence: Option<(Pos2, Pos2)>,
+    pub fence_done: Option<(ElementId, Pos2, Pos2)>,
     /// A point typed on the command line, for this view's tool to take as
     /// a click there (drawing coordinates), exactly, with no snap.
     pub forced_point: Option<(ElementId, DVec2)>,
@@ -724,6 +728,8 @@ impl Default for PlanState {
             rested: (None, vec![]),
             osnap_menu_request: None,
             north_request: false,
+            fence: None,
+            fence_done: None,
             forced_point: None,
             last_point: None,
             cursor_at: None,
@@ -1042,13 +1048,48 @@ pub fn show(
     {
         state.right_down = ui.input(|i| i.time);
     }
+    // TRIM and EXTEND take a window too, as AutoCAD's: a click trims the
+    // stretch under it, a drag across lines trims each where it is crossed
+    let fencing = tool == Tool::Detail
+        && matches!(
+            state.details.edit,
+            Some(crate::detailtool::DraftEdit::Trim | crate::detailtool::DraftEdit::Extend)
+        );
     let pick = if tool == Tool::Select
+        || fencing
         || !matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
     {
         response.clicked()
     } else {
         pressed
     };
+    if fencing {
+        if response.drag_started_by(egui::PointerButton::Primary) {
+            state.fence = response.interact_pointer_pos().map(|p| (p, p));
+        }
+        if let (Some((a, _)), Some(p)) = (state.fence, response.interact_pointer_pos()) {
+            if response.dragged_by(egui::PointerButton::Primary) {
+                state.fence = Some((a, p));
+            }
+        }
+        if response.drag_stopped() {
+            if let Some((a, b)) = state.fence.take() {
+                if a.distance(b) > 4.0 {
+                    state.fence_done = Some((view, a, b));
+                }
+            }
+        }
+        if let Some((a, b)) = state.fence {
+            let r = Rect::from_two_pos(a, b);
+            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(80, 200, 120, 30));
+            painter.rect_stroke(
+                r,
+                0.0,
+                Stroke::new(1.0, Color32::from_rgb(60, 160, 90)),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
 
     // orbit a 3D view by dragging it
     if kind == PaneKind::Axonometric && response.dragged_by(egui::PointerButton::Primary) {
@@ -3213,6 +3254,15 @@ pub fn show(
         }
         return None;
     }
+    // a TRIM or EXTEND window let go: every line it crosses
+    if let Some((v, a, b)) = state.fence_done.take() {
+        if v == view {
+            let (wa, wb) = (xf.to_world(a), xf.to_world(b));
+            if let Err(e) = crate::detailtool::fence_edit(doc, view, wa, wb, state) {
+                state.status = Some(format!("Couldn't do that: {e}"));
+            }
+        }
+    }
     if pick || forced.is_some() {
         state.tracker.clear();
         let p = hover_world?;
@@ -4195,6 +4245,23 @@ fn under_pointer(
     }
     // underlays and guides drawn from elsewhere are not picked here
     under.retain(|id| doc.model().get(*id).is_some());
+    // drafting over drafting: the last made is picked first, as AutoCAD's
+    // draw order (the slots they hold among the rest are kept)
+    {
+        let model = doc.model();
+        let drafting = |id: &ElementId| {
+            matches!(
+                model.get(*id).map(|e| &e.kind),
+                Some(ElementKind::Detail(_) | ElementKind::Note(_))
+            )
+        };
+        let slots: Vec<usize> = (0..under.len()).filter(|i| drafting(&under[*i])).collect();
+        let mut ids: Vec<ElementId> = slots.iter().map(|i| under[*i]).collect();
+        ids.sort_by_key(|id| std::cmp::Reverse(model.order_of(*id).unwrap_or(0)));
+        for (slot, id) in slots.into_iter().zip(ids) {
+            under[slot] = id;
+        }
+    }
     if state.xray.contains(&view) {
         xray_order(doc.model(), &mut under);
     }
@@ -5073,6 +5140,45 @@ pub fn joined_with(doc: &Document, id: ElementId) -> Vec<ElementId> {
 
 /// Rebuild a view's snaps when the model changed, but not during a drag,
 /// which changes the model every frame.
+/// A cheap print of a drawing's geometry: it changes when a line is
+/// added, taken away or moved.
+fn drawing_print(items: &[PlanItem]) -> u64 {
+    let mut h: u64 = items.len() as u64;
+    let mut mix = |v: f64| {
+        h = h.rotate_left(5) ^ v.to_bits();
+        h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    };
+    for it in items {
+        match it {
+            PlanItem::Line { a, b, .. } => {
+                mix(a.x);
+                mix(a.y);
+                mix(b.x);
+                mix(b.y);
+            }
+            PlanItem::Arc { center, radius, .. } => {
+                mix(center.x);
+                mix(center.y);
+                mix(*radius);
+            }
+            PlanItem::Polygon { points, .. } => {
+                if let (Some(p), Some(q)) = (points.first(), points.last()) {
+                    mix(p.x);
+                    mix(p.y);
+                    mix(q.x);
+                    mix(q.y);
+                }
+            }
+            PlanItem::Text { at, .. } => {
+                mix(at.x);
+                mix(at.y);
+            }
+            _ => {}
+        }
+    }
+    h
+}
+
 fn refresh_snaps(
     state: &mut PlanState,
     model: &creabim_core::Model,
@@ -5080,7 +5186,11 @@ fn refresh_snaps(
     plan: &Drawing,
     exclude: &[ElementId],
 ) {
-    let revision = model.revision();
+    // the model's revision and what the drawing holds: a drawing built by
+    // a worker comes a few frames after the change, and the snaps must be
+    // built again from it (they were built from the drawing before, and an
+    // object just drawn never snapped)
+    let revision = model.revision() ^ drawing_print(&plan.items).rotate_left(17);
     let dragging = state.grip.is_some()
         || state
             .modal

@@ -582,6 +582,7 @@ impl CreaBimApp {
         let mut crosshair = self.shell.settings.crosshair;
         let mut command_line = self.shell.settings.command_line;
         let mut cursor_size = self.shell.settings.cursor_size;
+        let mut autosave = self.shell.settings.autosave_minutes;
         let mut interaction = self.shell.settings.interaction.clone();
         let mut edge_w = self.shell.settings.edit_edge_width;
         let mut vert_s = self.shell.settings.edit_vertex_size;
@@ -848,6 +849,17 @@ impl CreaBimApp {
                                         yours(ui);
                                     }
                                     4 => {
+                                        crate::props::section(ui, "Automatic save");
+                                        let mut on = autosave > 0;
+                                        if ui.checkbox(&mut on, "Save a copy automatically")
+                                            .on_hover_text("As AutoCAD's SAVETIME: a copy of the project is saved beside it as <name>.autosave.creabim (an unsaved project's in the system's temporary folder). Your own file is only written when you save.")
+                                            .changed()
+                                        {
+                                            autosave = if on { 10 } else { 0 };
+                                        }
+                                        crate::props::row(ui, "Every", |ui| {
+                                            ui.add_enabled(autosave > 0, egui::Slider::new(&mut autosave, 1..=120).suffix(" min"))
+                                        });
                                         crate::props::section(ui, "This project");
                                         crate::props::row(ui, "Units", |ui| {
                                             egui::ComboBox::from_id_salt("settings.units").icon(crate::props::combo_icon)
@@ -903,6 +915,10 @@ impl CreaBimApp {
             crate::handles::set_edit_display(edge_w, vert_s);
             self.shell.settings.edit_edge_width = edge_w;
             self.shell.settings.edit_vertex_size = vert_s;
+            self.shell.settings.store();
+        }
+        if autosave != self.shell.settings.autosave_minutes {
+            self.shell.settings.autosave_minutes = autosave;
             self.shell.settings.store();
         }
         if interaction != self.shell.settings.interaction {

@@ -242,12 +242,24 @@ pub struct Settings {
     /// How long their lines are, per cent of the view (CURSORSIZE; 100
     /// runs right across it).
     pub cursor_size: f32,
+    /// Save a copy of the project every so many minutes (AutoCAD's
+    /// SAVETIME); 0 is off. The copy goes beside the project as
+    /// `<name>.autosave.creabim`, never over the project itself.
+    #[serde(default = "autosave_default")]
+    pub autosave_minutes: u32,
+    /// Perspective views keep vertical edges vertical (two-point).
+    #[serde(default)]
+    pub correct_verticals: bool,
     /// The colour of what is worked on (selection, grips, ghosts): "orange",
     /// the default, or "theme" for the theme's accent (MU39).
     pub interaction: String,
     /// Edit mode's wires and corner dots, in points.
     pub edit_edge_width: f32,
     pub edit_vertex_size: f32,
+}
+
+fn autosave_default() -> u32 {
+    10
 }
 
 impl Default for Settings {
@@ -292,6 +304,8 @@ impl Default for Settings {
             crosshair: true,
             command_line: true,
             cursor_size: 100.0,
+            autosave_minutes: 10,
+            correct_verticals: false,
             interaction: "orange".into(),
             edit_edge_width: 1.0,
             edit_vertex_size: 4.0,

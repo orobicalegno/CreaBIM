@@ -1510,6 +1510,9 @@ impl CreaBimApp {
             Item::new("nav.ortho", "Orthographic")
                 .checked(self.camera.ortho)
                 .hint("Parallel projection, without perspective"),
+            Item::new("nav.verticals", "Correct verticals")
+                .checked(self.camera.verticals)
+                .hint("Two-point perspective (keystone correction, as a shift lens): vertical edges stay vertical when the camera looks up or down"),
             Item::new("nav.camera", "Save as a camera")
                 .icon("camera")
                 .hint("A perspective view seen as the 3D window sees it now, kept under 3D views and shown in plans"),
@@ -2255,6 +2258,16 @@ impl CreaBimApp {
             }
             "nav.orbitsel" => self.orbit_selection = !self.orbit_selection,
             "nav.ortho" => self.camera.ortho = !self.camera.ortho,
+            "nav.verticals" => {
+                self.camera.verticals = !self.camera.verticals;
+                self.shell.settings.correct_verticals = self.camera.verticals;
+                self.shell.settings.store();
+                self.status = if self.camera.verticals {
+                    "Verticals corrected: vertical edges stay vertical in perspective (two-point perspective).".into()
+                } else {
+                    "Verticals as the camera sees them (three-point perspective).".into()
+                };
+            }
             "nav.walk" => self.toggle_walk(),
             "nav.camera" => self.camera_from_3d(),
             "nav.zoomin" => self.camera.zoom(2.0),

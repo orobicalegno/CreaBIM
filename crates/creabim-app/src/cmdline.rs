@@ -92,6 +92,8 @@ pub enum WordFor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Finish {
     Distance,
+    /// OFFSET's distance, from two points clicked.
+    OffsetDist,
     Id,
     Area,
     Circle2P,
@@ -678,6 +680,19 @@ impl CreaBimApp {
                     app.cmd.running = None;
                     app.cmd_finish_points(then, &pts);
                 };
+                // OFFSET: a distance typed, or Enter for the one shown
+                if r.name == "OFFSET" {
+                    let typed = if t.is_empty() {
+                        Some(None)
+                    } else {
+                        crate::units::parse(t).map(Some)
+                    };
+                    if let Some(v) = typed {
+                        self.plan.cmd_pick = None;
+                        self.cmd_number_done(ctx, r.name, NumberFor::OffsetDistance, v);
+                        return true;
+                    }
+                }
                 if t.is_empty() {
                     if n == 0 {
                         done(self);
@@ -827,6 +842,20 @@ impl CreaBimApp {
     pub(super) fn cmd_finish_points(&mut self, then: Finish, pts: &[DVec2]) {
         let len = crate::units::len;
         match (then, pts) {
+            (Finish::OffsetDist, [a, b, ..]) => {
+                let d = a.distance(*b);
+                self.plan.details.offset = d.max(0.0);
+                self.plan.cmd_pick = None;
+                self.plan
+                    .details
+                    .pick_edit(crate::detailtool::DraftEdit::Offset);
+                self.cmd.running = None;
+                self.say(format!(
+                    "OFFSET: {}. {}",
+                    len(d),
+                    crate::detailtool::DraftEdit::Offset.hint()
+                ));
+            }
             (Finish::Distance, [a, b, ..]) => {
                 // in the UCS, as AutoCAD reports it
                 let d = DVec2::from_angle(-self.plan.ucs.angle).rotate(*b - *a);
@@ -1076,10 +1105,12 @@ impl CreaBimApp {
             "OFFSET" => {
                 self.pick_tool(ctx, Tool::Detail);
                 let r = crate::units::len(self.plan.details.offset);
-                self.ask(
+                // typed, or measured by two clicks on the drawing
+                self.cmd_pick_start(
                     name,
-                    format!("Specify offset distance <{r}>:"),
-                    Wants::Number(NumberFor::OffsetDistance),
+                    &format!("Specify offset distance, or two points <{r}>:"),
+                    2,
+                    Finish::OffsetDist,
                 );
             }
             "ARRAY" => edit(self, ctx, D::Array),

@@ -363,6 +363,126 @@ fn linework(model: &Model, view: ElementId) -> Vec<(Element, DetailItem)> {
         .collect()
 }
 
+/// TRIM or EXTEND over a window (AutoCAD's crossing, quick mode): each
+/// line the box from `a` to `b` crosses is trimmed where it passes through
+/// the box (or extended at its end inside it), as one undo step.
+pub fn fence_edit(
+    doc: &mut Document,
+    view: ElementId,
+    a: DVec2,
+    b: DVec2,
+    state: &mut PlanState,
+) -> Result<(), ModelError> {
+    use creabim_core::draftedit as de;
+    let Some(edit) = state.details.edit else {
+        return Ok(());
+    };
+    let (lo, hi) = (a.min(b), a.max(b));
+    let inside = |p: DVec2| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
+    let edges = [
+        (lo, DVec2::new(hi.x, lo.y)),
+        (DVec2::new(hi.x, lo.y), hi),
+        (hi, DVec2::new(lo.x, hi.y)),
+        (DVec2::new(lo.x, hi.y), lo),
+    ];
+    let lines = linework(doc.model(), view);
+    let others = |i: usize| -> Vec<&DetailItem> {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| *k != i)
+            .map(|(_, l)| &l.1)
+            .collect()
+    };
+    // where a piece's path passes through the box: the middle of the
+    // first stretch of it inside (for an end inside, that end)
+    let through = |d: &DetailItem| -> Option<DVec2> {
+        let (path, closed) = d.draft_path()?;
+        let mut path = path;
+        if closed {
+            path.push(*path.first()?);
+        }
+        for w in path.windows(2) {
+            let (p, q) = (w[0], w[1]);
+            let mut ts: Vec<f64> = vec![];
+            if inside(p) {
+                ts.push(0.0);
+            }
+            if inside(q) {
+                ts.push(1.0);
+            }
+            for (c, e) in edges {
+                let (r, s2) = (q - p, e - c);
+                let den = r.perp_dot(s2);
+                if den.abs() < 1e-15 {
+                    continue;
+                }
+                let t = (c - p).perp_dot(s2) / den;
+                let u = (c - p).perp_dot(r) / den;
+                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                    ts.push(t);
+                }
+            }
+            if ts.len() >= 2 {
+                ts.sort_by(f64::total_cmp);
+                let t = (ts[0] + ts[ts.len() - 1]) / 2.0;
+                return Some(p + (q - p) * t);
+            }
+        }
+        None
+    };
+    let mut tx = Transaction::new(match edit {
+        DraftEdit::Extend => "Extend lines",
+        _ => "Trim lines",
+    });
+    let mut n = 0;
+    for (i, (e, d)) in lines.iter().enumerate() {
+        let Some(at) = through(d) else { continue };
+        match edit {
+            DraftEdit::Extend => {
+                if let Some(longer) = de::extend(d, &others(i), at) {
+                    let mut after = e.clone();
+                    after.kind = ElementKind::Detail(longer);
+                    tx = tx.replace(e.clone(), after);
+                    n += 1;
+                }
+            }
+            _ => {
+                if let Some(mut left) = de::trim(d, &others(i), at) {
+                    if left.is_empty() {
+                        tx = tx.remove_cascade(doc.model(), e.id);
+                    } else {
+                        let mut after = e.clone();
+                        after.kind = ElementKind::Detail(left.remove(0));
+                        tx = tx.replace(e.clone(), after);
+                        for rest in left {
+                            tx = tx
+                                .insert(Element::new(rest.kind.label(), ElementKind::Detail(rest)));
+                        }
+                    }
+                    n += 1;
+                }
+            }
+        }
+    }
+    state.status = Some(if n == 0 {
+        "Nothing crossed by the window could be trimmed or extended.".into()
+    } else {
+        format!(
+            "{} {n} lines. Drag another window, or click a stretch.",
+            if edit == DraftEdit::Extend {
+                "Extended"
+            } else {
+                "Trimmed"
+            }
+        )
+    });
+    if n == 0 {
+        return Ok(());
+    }
+    doc.commit(tx).map(|_| ())
+}
+
 /// A click while editing linework in `view`: `raw` is where the pointer
 /// is, to pick a line by, and `p` that point snapped, for a side or a
 /// centre.
@@ -429,6 +549,13 @@ fn edit_click(
                 return Ok(());
             };
             let mut tx = Transaction::new("Trim line");
+            // nothing left (a line from one crossing to the next): it goes,
+            // as in AutoCAD
+            if left.is_empty() {
+                state.status = Some("Trimmed away. Click another stretch.".into());
+                let tx = tx.remove_cascade(doc.model(), lines[i].0.id);
+                return doc.commit(tx);
+            }
             let kept = left.remove(0);
             tx = tx.replace(lines[i].0.clone(), changed(&lines[i].0, kept));
             for d in left {

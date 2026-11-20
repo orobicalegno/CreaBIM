@@ -1087,17 +1087,29 @@ impl CreaBimApp {
                         _ => None,
                     })
                     .collect();
-                if moved.is_empty() {
-                    self.say("STRETCH: no linework in the window.");
+                // the model too, in a plan: walls, slabs, roofs, rooms by
+                // their ends and corners in the window, the rest whole
+                let level = match self.view(view).map(|v| &v.kind) {
+                    Some(creabim_core::ViewKind::Plan { level, .. }) => Some(Some(*level)),
+                    _ => None,
+                };
+                let (mut tx, bim) = match level {
+                    Some(l) => creabim_core::stretchbim::stretch(self.doc.model(), l, lo, hi, by),
+                    None => (Transaction::new("Stretch"), 0),
+                };
+                if moved.is_empty() && bim == 0 {
+                    self.say("STRETCH: nothing in the window.");
                 } else {
-                    let mut tx = Transaction::new("Stretch");
                     for (e, d) in &moved {
                         let mut after = e.clone();
                         after.kind = ElementKind::Detail(d.clone());
                         tx = tx.replace(e.clone(), after);
                     }
                     match self.doc.commit(tx) {
-                        Ok(_) => self.say(format!("STRETCH: {} pieces stretched.", moved.len())),
+                        Ok(_) => self.say(format!(
+                            "STRETCH: {} pieces of linework and {bim} elements stretched.",
+                            moved.len()
+                        )),
                         Err(e) => self.say(format!("Couldn't do that: {e}")),
                     }
                 }

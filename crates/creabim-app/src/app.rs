@@ -331,6 +331,8 @@ pub struct CreaBimApp {
     crop_pick: Option<ElementId>,
     /// The other open projects, for the Window menu.
     others: Vec<openprojects::OpenProject>,
+    /// When the last automatic copy was saved, and of which revision.
+    autosaved: (std::time::Instant, Option<u64>),
     /// Opening a project keeps the shown one open (off until the app has
     /// started, and in tests).
     multi: bool,
@@ -417,6 +419,7 @@ impl CreaBimApp {
         if let Some(root) = settings.areas.clone() {
             app.areas.root = root;
         }
+        app.camera.verticals = settings.correct_verticals;
         app.shell.settings = settings;
         app.load_model(creabim_core::starter::starter_house());
         app.status = STARTER_LOADED.into();
@@ -543,6 +546,7 @@ impl CreaBimApp {
             last_export_dir: None,
             crop_pick: None,
             others: Vec::new(),
+            autosaved: (std::time::Instant::now(), None),
             multi: false,
             outside_said: None,
             outside_bounds: None,
@@ -1891,6 +1895,27 @@ impl CreaBimApp {
             Command::SelectNone => {
                 self.selection.clear();
                 self.face = None;
+            }
+            // inside a command (LINE, PLINE, a shape being drawn, points
+            // being picked) Undo takes back the last point, as AutoCAD's U
+            Command::Undo
+                if !self.plan.details.path.is_empty()
+                    || self
+                        .plan
+                        .cmd_pick
+                        .as_ref()
+                        .is_some_and(|(_, p)| !p.is_empty()) =>
+            {
+                if self.plan.details.path.pop().is_some() {
+                    if self.plan.pline_arcs.len() > self.plan.details.path.len().saturating_sub(1) {
+                        self.plan.pline_arcs.pop();
+                    }
+                } else if let Some((_, p)) = &mut self.plan.cmd_pick {
+                    p.pop();
+                }
+                self.say(
+                    "Undo: the last point is taken back. Ctrl+Z again takes back the one before.",
+                );
             }
             Command::Undo => {
                 let label = self.doc.undo_label().map(str::to_owned);
@@ -11761,502 +11786,25 @@ impl eframe::App for CreaBimApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let _perf = Perf::new("frame");
-        // never lose work to a close: unsaved changes ask first, those of
-        // a project waiting in the Window menu too (shown to ask)
-        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && !self.unsaved() {
-            if let Some(i) = self.open_projects().iter().position(|(_, u)| *u) {
-                self.switch_project(i);
-            }
-        }
-        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && self.unsaved() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.close_ask = true;
-        }
-        let ctx = ui.ctx().clone();
-        // on the drawing area a bar's tooltip goes: the bar never hears the
-        // pointer leave it. Back from a bar (or after a pause in the moves
-        // here, in case leaving went unreported) the bars forget the
-        // button they last showed, so it shows again on the next hover
-        let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
-        // while a plan is zoomed or panned its lines go out without their
-        // soft edges: half the triangles for a big drawing, and they come
-        // back the moment it stops
-        let moving = now < self.plan.nav_until;
-        if ctx.tessellation_options(|o| o.feathering) == moving {
-            ctx.tessellation_options_mut(|o| o.feathering = !moving);
-        }
-        if std::env::var_os("CREABIM_PERF").is_some() {
-            // the whole time from frame to frame, painting included
-            let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
-            if dt > 2.0 {
-                eprintln!("frame to frame: {dt:.1} ms");
-            }
-        }
-        for e in events {
-            match e {
-                egui::Event::PointerGone => self.pointer_away = true,
-                egui::Event::PointerMoved(_) => {
-                    self.shell.drop_web_tip();
-                    if self.pointer_away || now - self.pointer_seen > TIP_PAUSE {
-                        if let Some(web) = &self.shell.web {
-                            web.run_all("window.CB && CB.away && CB.away()");
-                        }
-                    }
-                    self.pointer_away = false;
-                    self.pointer_seen = now;
-                }
-                _ => {}
-            }
-        }
-        crate::trace::hold(ctx.input(|i| i.pointer.any_down()));
-        let m = ctx.input(|i| i.modifiers);
-        shell::MODS.store(
-            m.shift as u8 | (m.command as u8) << 1 | (m.alt as u8) << 2,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        // the colour of what is worked on: orange, or the theme's accent;
-        // the 3D view's highlight is built again when it changes (MU39)
-        let ink = if self.shell.settings.interaction == "theme" {
-            self.shell.theme.selection()
-        } else {
-            crate::theme::ORANGE
-        };
-        crate::planview::set_plan_look(
-            self.shell.settings.plan_grid,
-            self.shell.settings.axis_lines,
-        );
-        crate::snaps::begin_marks();
-        self.drop_locked_from_selection();
-        crate::snaps::set_autosnap(
-            self.shell.settings.marker_size,
-            self.shell.settings.snap_tooltip,
-            self.shell.settings.aperture,
-        );
-        // the object snaps and tracking as set, kept for the next session
-        let kept = crate::snaps::SnapSettings {
-            increment: false,
-            ..self.plan.snap
-        };
-        if self.shell.settings.osnap != Some(kept)
-            || self.shell.settings.polar_angle != self.plan.guide_step
-        {
-            self.shell.settings.osnap = Some(kept);
-            self.shell.settings.polar_angle = self.plan.guide_step;
-            self.shell.settings.store();
-        }
-        if ink != crate::theme::interaction() {
-            crate::theme::set_interaction(ink);
-            self.geometry_key = None;
-            self.selection_key = None;
-        }
-        // the ghost the pointer's view drew last frame, for the others
-        let at = |g: &Option<(Option<usize>, crate::ghost::Ghost)>| {
-            g.as_ref()
-                .and_then(|(_, g)| g.parts.first()?.points.first().copied())
-        };
-        let moved = at(&self.plan.ghost_now) != at(&self.plan.ghost_shared);
-        self.plan.ghost_shared = self.plan.ghost_now.take();
-        // the other views catch up once the pointer stops
-        if moved {
-            ctx.request_repaint();
-        }
-        // Divide's marks, for every view to draw this frame (MU38)
-        let _pd = Perf::new("pre-frame");
-        (self.plan.divide_marks, self.plan.divide_labels) = self.divide_marks();
-        self.plan.divide_guides = self.divide.s.make == creabim_core::divide::Make::Guides;
-        // while a point is asked for, the selection stays as it was
-        if self.plan.point_pick {
-            match &self.pick_selection {
-                Some(s) if *s != self.selection => self.selection = s.clone(),
-                Some(_) => {}
-                None => self.pick_selection = Some(self.selection.clone()),
-            }
-        } else {
-            self.pick_selection = None;
-        }
-        // Split's clicks, else what the modifier being set shows, and a
-        // centre picked for it
-        if self.split.is_some() {
-            self.split_steps(&ctx);
-        } else {
-            self.take_picked_centre();
-            self.plan.mod_guides = self.modifier_guides();
-        }
-        drop(_pd);
-        // R draws a rectangle while sketching, not a rotate (MU38)
-        crate::sketch::set_sketching(&ctx, self.plan.tool == Tool::Sketch);
-        // the activity log: what the status bar said (it names every edit
-        // and undo) and the tool, when they change
-        if self.status != self.logged.0 {
-            crate::actlog::line(format!("status: {}", self.status));
-            self.logged.0 = self.status.clone();
-        }
-        if Some(self.plan.tool) != self.logged.1 {
-            crate::actlog::line(format!("tool: {:?}", self.plan.tool));
-            self.logged.1 = Some(self.plan.tool);
-        }
-        let title = window_title(&self.path, self.unsaved());
-        if title != self.title {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-            self.title = title;
-        }
-        crate::units::set(self.doc.model().units());
-        // the step drags round to: none while Alt is held (2.10)
-        let live = self.plan.snap.live(ctx.input(|i| i.modifiers.alt));
-        crate::snaps::set_current_step(if live.allows(crate::snaps::SnapKind::Grid) {
-            live.step_len()
-        } else {
-            0.0
-        });
-        crate::snaps::set_current_marks(live.marks_len());
-        {
-            let _p = Perf::new("frame: prompts and keys");
-            self.cmd_keys(&ctx);
-            self.step_prompt(&ctx);
-            self.workspace_prompt(&ctx);
-            self.area_keys(&ctx);
-            self.shortcuts(&ctx);
-        }
-        {
-            let _p = Perf::new("frame: edit mode and spotlight");
-            self.keep_edit_mode();
-            self.refresh_spotlight();
-        }
-        let dropped: Vec<String> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().display().to_string())
-                .filter(|p| !p.is_empty())
-                .collect()
-        });
-        for path in dropped {
-            // a dropped material file joins this project, which keeps its path
-            if !materials::is_material_file(&path) {
-                self.path = path.clone();
-            }
-            self.open_path(&path);
-        }
-        if self.live_reload {
-            let _p = Perf::new("frame: watch files");
-            for f in self.watch.changed(self.doc.model()) {
-                self.reload(&f);
-            }
-            if !crate::files::linked_files(self.doc.model()).is_empty() {
-                ctx.request_repaint_after(std::time::Duration::from_secs(1));
-            }
-        }
-
-        let _pw = Perf::new("web_panels");
-        let web = self.web_panels(ui, frame);
-        drop(_pw);
-        // the panes say again this frame what the one under the pointer does
-        self.plan.hint = None;
-        self.rect_3d = None;
-        self.rect_2d = None;
-        self.plan.web_menus = web;
-        crate::slabtool::set_options_in_top_bar(&ctx, web);
-        self.shell.menu_3d = false;
-        if !web {
-            egui::Panel::top("menu").show(ui, |ui| {
-                self.classic_menu(ui);
-                self.toolbar(ui);
-                crate::props::flow(ui, |ui| {
-                    let some = self.selection.is_some();
-                    if let Some(c) = crate::commands::modify_bar(ui, some) {
-                        self.run_command(&ctx, c, None);
-                    }
-                });
-            });
-            egui::Panel::bottom("status").show(ui, |ui| {
-                crate::props::flow(ui, |ui| {
-                    ui.label(&self.status);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(format!("{} elements", self.element_count()));
-                    });
-                });
-            });
-            egui::Panel::left("outliner")
-                .default_size(220.0)
-                .show(ui, |ui| self.outliner(ui));
-        }
-        // to the end of the frame from here: Properties, the areas and on
-        let _pr = Perf::new("frame: properties on");
-        let right_folded = self.shell.settings.right_folded;
-        let right = egui::Panel::right(if right_folded {
-            "properties_rail"
-        } else {
-            "properties"
-        })
-        .default_size(if right_folded {
-            40.0
-        } else {
-            self.shell.settings.right_width
-        })
-        .size_range(if right_folded {
-            40.0..=40.0
-        } else {
-            220.0..=640.0
-        })
-        .frame(
-            // flush at the left, where the tab column is (MU22)
-            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
-                left: 0,
-                right: 4,
-                top: 0,
-                bottom: 4,
-            }),
-        )
-        .show(ui, |ui| {
-            // the panel keeps the width it was given: what is wider
-            // wraps, folds into one column or is clipped, and never
-            // pushes the panel wider as the selection changes
-            let rect = ui.available_rect_before_wrap();
-            let clip = rect.expand2(egui::vec2(6.0, 0.0)).intersect(ui.clip_rect());
-            let folded = self.shell.settings.right_folded;
-            let edge = ui.max_rect();
-            if fold_handle(
-                ui.ctx(),
-                "props",
-                egui::pos2(edge.left() - 11.0, edge.center().y - 23.0),
-                folded,
-                true,
-                if folded {
-                    "Open Properties (Ctrl+])"
-                } else {
-                    "Fold Properties to its tabs (Ctrl+])"
-                },
-            ) {
-                self.shell.settings.right_folded = !folded;
-                self.shell.settings.store();
-            }
-            let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            inner.set_clip_rect(clip);
-            inner.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            // one grid for every row (A4-1): controls as tight as
-            // Blender's (MU22), the scroll bar in a gutter of its own
-            inner.spacing_mut().interact_size.y = 24.0;
-            // text a size down, as Blender's panels (MU22): rows fit
-            // on one line at the panel's usual width
-            for (style, font) in inner.style_mut().text_styles.iter_mut() {
-                font.size = match style {
-                    egui::TextStyle::Small => 10.5,
-                    egui::TextStyle::Heading => 14.0,
-                    _ => (font.size - 1.5).clamp(11.0, 12.5),
-                };
-            }
-            inner.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
-            inner.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
-            // editable fields (dropdowns, numbers, text) in the field
-            // colour, a tone apart from the panel, as Blender does, so
-            // they read at a glance as things you can change (MU20)
-            {
-                let p = crate::theme::Palette::of(ui.ctx());
-                let w = &mut inner.visuals_mut().widgets;
-                w.inactive.weak_bg_fill = p.field;
-                w.inactive.bg_stroke = egui::Stroke::new(1.0, p.edge);
-            }
-            let mut bar = egui::style::ScrollStyle::solid();
-            bar.bar_width = 6.0;
-            bar.bar_inner_margin = 4.0;
-            inner.spacing_mut().scroll = bar;
-            // as Blender's editor (MU22): the tab column down the left
-            // edge, a tone darker, then the pinned header and the
-            // tab's sections, which scroll
-            inner.set_max_width(rect.width());
-            let tabs = self.prop_tabs();
-            // a placing tool just picked opens its Next tab; a first
-            // selection opens Element; otherwise the tab stays
-            let now = (self.plan.tool, self.selection.active.is_some());
-            if now != self.prop_seen {
-                if now.0 != self.prop_seen.0 && now.0 != Tool::Select && !now.1 {
-                    self.prop_tab = PropTab::Next;
-                } else if now.1 && !self.prop_seen.1 {
-                    self.prop_tab = PropTab::Element;
-                }
-                self.prop_seen = now;
-            }
-            // the view in front leads, as Blender's editors do (MU40: a
-            // sheet's settings showed over the Masters view)
-            let front = self.areas.root.areas().get(self.areas.focus).copied();
-            if front != self.prop_front {
-                match front {
-                    Some(crate::areas::Shows::Masters) => self.prop_tab = PropTab::Master,
-                    Some(crate::areas::Shows::Profiles) => self.prop_tab = PropTab::Profile,
-                    Some(crate::areas::Shows::Log) => self.prop_tab = PropTab::Log,
-                    _ => {}
-                }
-                self.prop_front = front;
-            }
-            if !tabs.contains(&self.prop_tab) {
-                self.prop_tab = tabs[0];
-            }
-            // a tool just picked opens its Next tab; a new selection
-            // with no tab of its own opens Element
-            inner.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                self.prop_strip(ui, &tabs, rect.height());
-                if self.shell.settings.right_folded {
-                    return;
-                }
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
-                    let w = ui.available_width();
-                    // the header as wide as the boxes under it, which
-                    // leave the scroll bar its gutter: wider, its
-                    // fields and Delete ran off the panel (MU24)
-                    ui.set_max_width(w - 16.0);
-                    ui.add_space(4.0);
-                    self.properties_header(ui);
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.set_max_width(w - 16.0);
-                            crate::props::boxes(ui, true);
-                            self.properties(ui);
-                            crate::props::close_box(ui);
-                            crate::props::boxes(ui, false);
-                        });
-                });
-            });
-            ui.allocate_rect(rect, egui::Sense::hover());
-        })
-        .response
-        .rect;
-        // remember a new width once the drag is over
-        let width = right.width().round();
-        if (width - self.shell.settings.right_width).abs() >= 1.0
-            && !ui.input(|i| i.pointer.any_down())
-        {
-            self.shell.settings.right_width = width;
-            self.shell.settings.store();
-        }
-
-        // to the end of the frame from here: the areas, then what follows
-        let _pa = Perf::new("frame: areas on");
-        egui::CentralPanel::default().show(ui, |ui| {
-            let full = ui.available_rect_before_wrap();
-            self.mat.area = Some(full);
-            let plan_bg = Color32::from_rgb(252, 252, 250);
-            match self.placement {
-                PlanPlacement::Docked => self.show_areas(ui, full, frame, plan_bg),
-                PlanPlacement::Overlay => {
-                    self.show_3d(ui, full, frame);
-                    let inset = Rect::from_min_size(
-                        full.right_top() + Vec2::new(-full.width() * 0.42 - 12.0, 12.0),
-                        Vec2::new(full.width() * 0.42, full.height() * 0.45),
-                    );
-                    self.show_plan(
-                        ui,
-                        inset,
-                        Color32::from_rgba_unmultiplied(252, 252, 250, 225),
-                    );
-                    ui.painter().rect_stroke(
-                        inset,
-                        4.0,
-                        egui::Stroke::new(1.0, Color32::from_gray(160)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
-                PlanPlacement::Window | PlanPlacement::Hidden => self.show_3d(ui, full, frame),
-            }
-            ui.allocate_rect(full, Sense::hover());
-        });
-
-        if let Some(s) = self.plan.status.take() {
-            self.status = s;
-        }
-        for (c, at) in std::mem::take(&mut self.plan.commands) {
-            self.run_command(&ctx, c, at);
-        }
-        if std::mem::take(&mut self.plan.want_levels) {
-            self.open_levels();
-        }
-        // a view mark double-clicked: its view opens
-        if let Some(v) = self.plan.want_view.take() {
-            self.active_view = Some(v);
-        }
-        if std::mem::take(&mut self.plan.want_catalogue) {
-            self.catalogue.open = true;
-        }
-        // a box selection that took more than one kind: Keep only… is offered
-        if std::mem::take(&mut self.plan.boxed) {
-            self.after_box_selection();
-        }
-        // a box dragged with the Footing tool: footings under all it took
-        let hosts = std::mem::take(&mut self.plan.want_footings);
-        if !hosts.is_empty() {
-            self.selection.clear();
-            self.selection.extend(hosts, false);
-            self.footings_under_selection();
-        }
-        self.open_view_menu();
-        self.materials_window(&ctx);
-        self.assemblies_window(&ctx);
-        self.types_window(&ctx);
-        self.type_preview_window(&ctx);
-        self.catalogue_window(&ctx);
-        self.levels_window(&ctx);
-        self.level_copy_window(&ctx);
-        self.styles_window(&ctx);
-        self.templates_window(&ctx);
-        self.units_window(&ctx);
-        self.divide_window(&ctx);
-        self.profiles_window(&ctx);
-        self.settings_window(&ctx);
-        // the paper follows the setting and the theme; a change redraws
-        // the 3D view's grid and background
-        let dark = self.dark_paper(&ctx);
-        if dark != self.paper_is_dark {
-            self.paper_is_dark = dark;
-            self.geometry_key = None;
-        }
-        self.project_window(&ctx);
-        self.note_editor_window(&ctx);
-        self.ifc_export_window(&ctx);
-        self.reference_steps();
-        self.calibrate_window(&ctx);
-        self.sheets_export_window(&ctx);
-        self.new_project_window(&ctx);
-        self.marks_window(&ctx);
-        self.graphic_styles_window(&ctx);
-        self.ground_spacing_window(&ctx);
-        self.import_report_window(&ctx);
-        self.help_window(&ctx);
-        self.report_window(&ctx);
-        self.drafting_settings_window(&ctx);
-        self.layer_manager_window(&ctx);
-        self.ucs_manager_window(&ctx);
-        self.cmdline_window(&ctx);
-        self.cmd_history_window(&ctx);
-        self.close_window(&ctx);
-        // a plan in its own window keeps egui's menus
-        self.plan.web_menus = false;
-
-        if self.placement == PlanPlacement::Window {
-            let mut close = false;
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("creabim_plan"),
-                egui::ViewportBuilder::default()
-                    .with_title("Volumen · Plan")
-                    .with_inner_size([760.0, 560.0]),
-                |ui, _class| {
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        let rect = ui.available_rect_before_wrap();
-                        self.show_plan(ui, rect, plan_bg_color());
-                        ui.allocate_rect(rect, Sense::hover());
-                    });
-                    if ui.input(|i| i.viewport().close_requested()) {
-                        close = true;
-                    }
-                },
+        // a bug in one command must not close Volumen and lose the work:
+        // the frame is given up, the error said and logged (the panic
+        // hook already wrote where it happened)
+        let r =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.frame_body(ui, frame)));
+        if let Err(e) = r {
+            let why = e
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| e.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            crate::actlog::line(format!("recovered from an internal error: {why}"));
+            self.plan.modal = None;
+            self.plan.cmd_pick = None;
+            self.cmd.running = None;
+            self.status = format!(
+                "Internal error, recovered: {why}. Your work is safe; please send the activity log (Help) so it can be fixed."
             );
-            if close {
-                self.placement = PlanPlacement::Docked;
-            }
+            ui.ctx().request_repaint();
         }
     }
 }
@@ -13615,4 +13163,539 @@ fn far_drawing(model: &Model, b: [glam::DVec2; 2]) -> Option<glam::DVec2> {
         || b[0].y > hi.y + margin
         || b[1].y < lo.y - margin;
     apart.then_some((lo + hi) / 2.0)
+}
+
+impl CreaBimApp {
+    /// AutoCAD's SAVETIME: every so many minutes an unsaved project is
+    /// copied to `<name>.autosave.creabim` (never over its own file).
+    fn autosave(&mut self, ctx: &egui::Context) {
+        let minutes = self.shell.settings.autosave_minutes;
+        if minutes == 0 || !self.unsaved() || self.dragging() {
+            return;
+        }
+        let rev = self.doc.model().revision();
+        if self.autosaved.1 == Some(rev)
+            || self.autosaved.0.elapsed().as_secs() < minutes as u64 * 60
+        {
+            ctx.request_repaint_after(std::time::Duration::from_secs(30));
+            return;
+        }
+        let path = if self.path.is_empty() || !self.path.to_ascii_lowercase().ends_with(".creabim")
+        {
+            let name = openprojects::project_name(&self.path);
+            std::env::temp_dir()
+                .join(format!("{name}.autosave.creabim"))
+                .display()
+                .to_string()
+        } else {
+            with_extension(&self.path, "autosave.creabim")
+        };
+        let r = creabim_store::save(&path, &self.doc);
+        crate::actlog::line(format!("autosave {path}: {r:?}"));
+        self.autosaved = (std::time::Instant::now(), Some(rev));
+        if r.is_ok() {
+            self.status = format!("Saved a copy automatically: {path}");
+        }
+    }
+
+    fn frame_body(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.autosave(&ui.ctx().clone());
+        let _perf = Perf::new("frame");
+        // never lose work to a close: unsaved changes ask first, those of
+        // a project waiting in the Window menu too (shown to ask)
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && !self.unsaved() {
+            if let Some(i) = self.open_projects().iter().position(|(_, u)| *u) {
+                self.switch_project(i);
+            }
+        }
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && self.unsaved() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_ask = true;
+        }
+        let ctx = ui.ctx().clone();
+        // on the drawing area a bar's tooltip goes: the bar never hears the
+        // pointer leave it. Back from a bar (or after a pause in the moves
+        // here, in case leaving went unreported) the bars forget the
+        // button they last showed, so it shows again on the next hover
+        let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
+        // while a plan is zoomed or panned its lines go out without their
+        // soft edges: half the triangles for a big drawing, and they come
+        // back the moment it stops
+        let moving = now < self.plan.nav_until;
+        if ctx.tessellation_options(|o| o.feathering) == moving {
+            ctx.tessellation_options_mut(|o| o.feathering = !moving);
+        }
+        if std::env::var_os("CREABIM_PERF").is_some() {
+            // the whole time from frame to frame, painting included
+            let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
+            if dt > 2.0 {
+                eprintln!("frame to frame: {dt:.1} ms");
+            }
+        }
+        for e in events {
+            match e {
+                egui::Event::PointerGone => self.pointer_away = true,
+                egui::Event::PointerMoved(_) => {
+                    self.shell.drop_web_tip();
+                    if self.pointer_away || now - self.pointer_seen > TIP_PAUSE {
+                        if let Some(web) = &self.shell.web {
+                            web.run_all("window.CB && CB.away && CB.away()");
+                        }
+                    }
+                    self.pointer_away = false;
+                    self.pointer_seen = now;
+                }
+                _ => {}
+            }
+        }
+        crate::trace::hold(ctx.input(|i| i.pointer.any_down()));
+        let m = ctx.input(|i| i.modifiers);
+        shell::MODS.store(
+            m.shift as u8 | (m.command as u8) << 1 | (m.alt as u8) << 2,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        // the colour of what is worked on: orange, or the theme's accent;
+        // the 3D view's highlight is built again when it changes (MU39)
+        let ink = if self.shell.settings.interaction == "theme" {
+            self.shell.theme.selection()
+        } else {
+            crate::theme::ORANGE
+        };
+        crate::planview::set_plan_look(
+            self.shell.settings.plan_grid,
+            self.shell.settings.axis_lines,
+        );
+        crate::snaps::begin_marks();
+        self.drop_locked_from_selection();
+        crate::snaps::set_autosnap(
+            self.shell.settings.marker_size,
+            self.shell.settings.snap_tooltip,
+            self.shell.settings.aperture,
+        );
+        // the object snaps and tracking as set, kept for the next session
+        let kept = crate::snaps::SnapSettings {
+            increment: false,
+            ..self.plan.snap
+        };
+        if self.shell.settings.osnap != Some(kept)
+            || self.shell.settings.polar_angle != self.plan.guide_step
+        {
+            self.shell.settings.osnap = Some(kept);
+            self.shell.settings.polar_angle = self.plan.guide_step;
+            self.shell.settings.store();
+        }
+        if ink != crate::theme::interaction() {
+            crate::theme::set_interaction(ink);
+            self.geometry_key = None;
+            self.selection_key = None;
+        }
+        // the ghost the pointer's view drew last frame, for the others
+        let at = |g: &Option<(Option<usize>, crate::ghost::Ghost)>| {
+            g.as_ref()
+                .and_then(|(_, g)| g.parts.first()?.points.first().copied())
+        };
+        let moved = at(&self.plan.ghost_now) != at(&self.plan.ghost_shared);
+        self.plan.ghost_shared = self.plan.ghost_now.take();
+        // the other views catch up once the pointer stops
+        if moved {
+            ctx.request_repaint();
+        }
+        // Divide's marks, for every view to draw this frame (MU38)
+        let _pd = Perf::new("pre-frame");
+        (self.plan.divide_marks, self.plan.divide_labels) = self.divide_marks();
+        self.plan.divide_guides = self.divide.s.make == creabim_core::divide::Make::Guides;
+        // while a point is asked for, the selection stays as it was
+        if self.plan.point_pick {
+            match &self.pick_selection {
+                Some(s) if *s != self.selection => self.selection = s.clone(),
+                Some(_) => {}
+                None => self.pick_selection = Some(self.selection.clone()),
+            }
+        } else {
+            self.pick_selection = None;
+        }
+        // Split's clicks, else what the modifier being set shows, and a
+        // centre picked for it
+        if self.split.is_some() {
+            self.split_steps(&ctx);
+        } else {
+            self.take_picked_centre();
+            self.plan.mod_guides = self.modifier_guides();
+        }
+        drop(_pd);
+        // R draws a rectangle while sketching, not a rotate (MU38)
+        crate::sketch::set_sketching(&ctx, self.plan.tool == Tool::Sketch);
+        // the activity log: what the status bar said (it names every edit
+        // and undo) and the tool, when they change
+        if self.status != self.logged.0 {
+            crate::actlog::line(format!("status: {}", self.status));
+            self.logged.0 = self.status.clone();
+        }
+        if Some(self.plan.tool) != self.logged.1 {
+            crate::actlog::line(format!("tool: {:?}", self.plan.tool));
+            self.logged.1 = Some(self.plan.tool);
+        }
+        let title = window_title(&self.path, self.unsaved());
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
+        crate::units::set(self.doc.model().units());
+        // the step drags round to: none while Alt is held (2.10)
+        let live = self.plan.snap.live(ctx.input(|i| i.modifiers.alt));
+        crate::snaps::set_current_step(if live.allows(crate::snaps::SnapKind::Grid) {
+            live.step_len()
+        } else {
+            0.0
+        });
+        crate::snaps::set_current_marks(live.marks_len());
+        {
+            let _p = Perf::new("frame: prompts and keys");
+            self.cmd_keys(&ctx);
+            self.step_prompt(&ctx);
+            self.workspace_prompt(&ctx);
+            self.area_keys(&ctx);
+            self.shortcuts(&ctx);
+        }
+        {
+            let _p = Perf::new("frame: edit mode and spotlight");
+            self.keep_edit_mode();
+            self.refresh_spotlight();
+        }
+        let dropped: Vec<String> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().display().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        });
+        for path in dropped {
+            // a dropped material file joins this project, which keeps its path
+            if !materials::is_material_file(&path) {
+                self.path = path.clone();
+            }
+            self.open_path(&path);
+        }
+        if self.live_reload {
+            let _p = Perf::new("frame: watch files");
+            for f in self.watch.changed(self.doc.model()) {
+                self.reload(&f);
+            }
+            if !crate::files::linked_files(self.doc.model()).is_empty() {
+                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
+        }
+
+        let _pw = Perf::new("web_panels");
+        let web = self.web_panels(ui, frame);
+        drop(_pw);
+        // the panes say again this frame what the one under the pointer does
+        self.plan.hint = None;
+        self.rect_3d = None;
+        self.rect_2d = None;
+        self.plan.web_menus = web;
+        crate::slabtool::set_options_in_top_bar(&ctx, web);
+        self.shell.menu_3d = false;
+        if !web {
+            egui::Panel::top("menu").show(ui, |ui| {
+                self.classic_menu(ui);
+                self.toolbar(ui);
+                crate::props::flow(ui, |ui| {
+                    let some = self.selection.is_some();
+                    if let Some(c) = crate::commands::modify_bar(ui, some) {
+                        self.run_command(&ctx, c, None);
+                    }
+                });
+            });
+            egui::Panel::bottom("status").show(ui, |ui| {
+                crate::props::flow(ui, |ui| {
+                    ui.label(&self.status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{} elements", self.element_count()));
+                    });
+                });
+            });
+            egui::Panel::left("outliner")
+                .default_size(220.0)
+                .show(ui, |ui| self.outliner(ui));
+        }
+        // to the end of the frame from here: Properties, the areas and on
+        let _pr = Perf::new("frame: properties on");
+        let right_folded = self.shell.settings.right_folded;
+        let right = egui::Panel::right(if right_folded {
+            "properties_rail"
+        } else {
+            "properties"
+        })
+        .default_size(if right_folded {
+            40.0
+        } else {
+            self.shell.settings.right_width
+        })
+        .size_range(if right_folded {
+            40.0..=40.0
+        } else {
+            220.0..=640.0
+        })
+        .frame(
+            // flush at the left, where the tab column is (MU22)
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
+                left: 0,
+                right: 4,
+                top: 0,
+                bottom: 4,
+            }),
+        )
+        .show(ui, |ui| {
+            // the panel keeps the width it was given: what is wider
+            // wraps, folds into one column or is clipped, and never
+            // pushes the panel wider as the selection changes
+            let rect = ui.available_rect_before_wrap();
+            let clip = rect.expand2(egui::vec2(6.0, 0.0)).intersect(ui.clip_rect());
+            let folded = self.shell.settings.right_folded;
+            let edge = ui.max_rect();
+            if fold_handle(
+                ui.ctx(),
+                "props",
+                egui::pos2(edge.left() - 11.0, edge.center().y - 23.0),
+                folded,
+                true,
+                if folded {
+                    "Open Properties (Ctrl+])"
+                } else {
+                    "Fold Properties to its tabs (Ctrl+])"
+                },
+            ) {
+                self.shell.settings.right_folded = !folded;
+                self.shell.settings.store();
+            }
+            let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            inner.set_clip_rect(clip);
+            inner.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            // one grid for every row (A4-1): controls as tight as
+            // Blender's (MU22), the scroll bar in a gutter of its own
+            inner.spacing_mut().interact_size.y = 24.0;
+            // text a size down, as Blender's panels (MU22): rows fit
+            // on one line at the panel's usual width
+            for (style, font) in inner.style_mut().text_styles.iter_mut() {
+                font.size = match style {
+                    egui::TextStyle::Small => 10.5,
+                    egui::TextStyle::Heading => 14.0,
+                    _ => (font.size - 1.5).clamp(11.0, 12.5),
+                };
+            }
+            inner.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+            inner.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+            // editable fields (dropdowns, numbers, text) in the field
+            // colour, a tone apart from the panel, as Blender does, so
+            // they read at a glance as things you can change (MU20)
+            {
+                let p = crate::theme::Palette::of(ui.ctx());
+                let w = &mut inner.visuals_mut().widgets;
+                w.inactive.weak_bg_fill = p.field;
+                w.inactive.bg_stroke = egui::Stroke::new(1.0, p.edge);
+            }
+            let mut bar = egui::style::ScrollStyle::solid();
+            bar.bar_width = 6.0;
+            bar.bar_inner_margin = 4.0;
+            inner.spacing_mut().scroll = bar;
+            // as Blender's editor (MU22): the tab column down the left
+            // edge, a tone darker, then the pinned header and the
+            // tab's sections, which scroll
+            inner.set_max_width(rect.width());
+            let tabs = self.prop_tabs();
+            // a placing tool just picked opens its Next tab; a first
+            // selection opens Element; otherwise the tab stays
+            let now = (self.plan.tool, self.selection.active.is_some());
+            if now != self.prop_seen {
+                if now.0 != self.prop_seen.0 && now.0 != Tool::Select && !now.1 {
+                    self.prop_tab = PropTab::Next;
+                } else if now.1 && !self.prop_seen.1 {
+                    self.prop_tab = PropTab::Element;
+                }
+                self.prop_seen = now;
+            }
+            // the view in front leads, as Blender's editors do (MU40: a
+            // sheet's settings showed over the Masters view)
+            let front = self.areas.root.areas().get(self.areas.focus).copied();
+            if front != self.prop_front {
+                match front {
+                    Some(crate::areas::Shows::Masters) => self.prop_tab = PropTab::Master,
+                    Some(crate::areas::Shows::Profiles) => self.prop_tab = PropTab::Profile,
+                    Some(crate::areas::Shows::Log) => self.prop_tab = PropTab::Log,
+                    _ => {}
+                }
+                self.prop_front = front;
+            }
+            if !tabs.contains(&self.prop_tab) {
+                self.prop_tab = tabs[0];
+            }
+            // a tool just picked opens its Next tab; a new selection
+            // with no tab of its own opens Element
+            inner.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                self.prop_strip(ui, &tabs, rect.height());
+                if self.shell.settings.right_folded {
+                    return;
+                }
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+                    let w = ui.available_width();
+                    // the header as wide as the boxes under it, which
+                    // leave the scroll bar its gutter: wider, its
+                    // fields and Delete ran off the panel (MU24)
+                    ui.set_max_width(w - 16.0);
+                    ui.add_space(4.0);
+                    self.properties_header(ui);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            ui.set_max_width(w - 16.0);
+                            crate::props::boxes(ui, true);
+                            self.properties(ui);
+                            crate::props::close_box(ui);
+                            crate::props::boxes(ui, false);
+                        });
+                });
+            });
+            ui.allocate_rect(rect, egui::Sense::hover());
+        })
+        .response
+        .rect;
+        // remember a new width once the drag is over
+        let width = right.width().round();
+        if (width - self.shell.settings.right_width).abs() >= 1.0
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            self.shell.settings.right_width = width;
+            self.shell.settings.store();
+        }
+
+        // to the end of the frame from here: the areas, then what follows
+        let _pa = Perf::new("frame: areas on");
+        egui::CentralPanel::default().show(ui, |ui| {
+            let full = ui.available_rect_before_wrap();
+            self.mat.area = Some(full);
+            let plan_bg = Color32::from_rgb(252, 252, 250);
+            match self.placement {
+                PlanPlacement::Docked => self.show_areas(ui, full, frame, plan_bg),
+                PlanPlacement::Overlay => {
+                    self.show_3d(ui, full, frame);
+                    let inset = Rect::from_min_size(
+                        full.right_top() + Vec2::new(-full.width() * 0.42 - 12.0, 12.0),
+                        Vec2::new(full.width() * 0.42, full.height() * 0.45),
+                    );
+                    self.show_plan(
+                        ui,
+                        inset,
+                        Color32::from_rgba_unmultiplied(252, 252, 250, 225),
+                    );
+                    ui.painter().rect_stroke(
+                        inset,
+                        4.0,
+                        egui::Stroke::new(1.0, Color32::from_gray(160)),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                PlanPlacement::Window | PlanPlacement::Hidden => self.show_3d(ui, full, frame),
+            }
+            ui.allocate_rect(full, Sense::hover());
+        });
+
+        if let Some(s) = self.plan.status.take() {
+            self.status = s;
+        }
+        for (c, at) in std::mem::take(&mut self.plan.commands) {
+            self.run_command(&ctx, c, at);
+        }
+        if std::mem::take(&mut self.plan.want_levels) {
+            self.open_levels();
+        }
+        // a view mark double-clicked: its view opens
+        if let Some(v) = self.plan.want_view.take() {
+            self.active_view = Some(v);
+        }
+        if std::mem::take(&mut self.plan.want_catalogue) {
+            self.catalogue.open = true;
+        }
+        // a box selection that took more than one kind: Keep only… is offered
+        if std::mem::take(&mut self.plan.boxed) {
+            self.after_box_selection();
+        }
+        // a box dragged with the Footing tool: footings under all it took
+        let hosts = std::mem::take(&mut self.plan.want_footings);
+        if !hosts.is_empty() {
+            self.selection.clear();
+            self.selection.extend(hosts, false);
+            self.footings_under_selection();
+        }
+        self.open_view_menu();
+        self.materials_window(&ctx);
+        self.assemblies_window(&ctx);
+        self.types_window(&ctx);
+        self.type_preview_window(&ctx);
+        self.catalogue_window(&ctx);
+        self.levels_window(&ctx);
+        self.level_copy_window(&ctx);
+        self.styles_window(&ctx);
+        self.templates_window(&ctx);
+        self.units_window(&ctx);
+        self.divide_window(&ctx);
+        self.profiles_window(&ctx);
+        self.settings_window(&ctx);
+        // the paper follows the setting and the theme; a change redraws
+        // the 3D view's grid and background
+        let dark = self.dark_paper(&ctx);
+        if dark != self.paper_is_dark {
+            self.paper_is_dark = dark;
+            self.geometry_key = None;
+        }
+        self.project_window(&ctx);
+        self.note_editor_window(&ctx);
+        self.ifc_export_window(&ctx);
+        self.reference_steps();
+        self.calibrate_window(&ctx);
+        self.sheets_export_window(&ctx);
+        self.new_project_window(&ctx);
+        self.marks_window(&ctx);
+        self.graphic_styles_window(&ctx);
+        self.ground_spacing_window(&ctx);
+        self.import_report_window(&ctx);
+        self.help_window(&ctx);
+        self.report_window(&ctx);
+        self.drafting_settings_window(&ctx);
+        self.layer_manager_window(&ctx);
+        self.ucs_manager_window(&ctx);
+        self.cmdline_window(&ctx);
+        self.cmd_history_window(&ctx);
+        self.close_window(&ctx);
+        // a plan in its own window keeps egui's menus
+        self.plan.web_menus = false;
+
+        if self.placement == PlanPlacement::Window {
+            let mut close = false;
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("creabim_plan"),
+                egui::ViewportBuilder::default()
+                    .with_title("Volumen · Plan")
+                    .with_inner_size([760.0, 560.0]),
+                |ui, _class| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let rect = ui.available_rect_before_wrap();
+                        self.show_plan(ui, rect, plan_bg_color());
+                        ui.allocate_rect(rect, Sense::hover());
+                    });
+                    if ui.input(|i| i.viewport().close_requested()) {
+                        close = true;
+                    }
+                },
+            );
+            if close {
+                self.placement = PlanPlacement::Docked;
+            }
+        }
+    }
 }

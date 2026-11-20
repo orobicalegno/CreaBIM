@@ -1065,3 +1065,42 @@ mod more_edits {
         assert!(c.distance(DVec2::new(1.0, 1.0)) < 1e-9);
     }
 }
+
+#[cfg(test)]
+mod trim_fuzz {
+    use super::*;
+    use crate::{DetailKind, ElementId, Hatch};
+
+    #[test]
+    fn trim_and_extend_never_panic_on_a_hatch() {
+        let v = ElementId::new();
+        let sq = vec![
+            DVec2::ZERO,
+            DVec2::new(4.0, 0.0),
+            DVec2::new(4.0, 3.0),
+            DVec2::new(0.0, 3.0),
+        ];
+        let region = DetailItem::new(
+            v,
+            DetailKind::Region {
+                hatch: Hatch::Diagonal,
+            },
+            sq,
+        );
+        let line = DetailItem::new(
+            v,
+            DetailKind::draft(DraftShape::Line),
+            vec![DVec2::new(2.0, -1.0), DVec2::new(2.0, 4.0)],
+        );
+        for i in 0..60 {
+            for j in 0..50 {
+                let p = DVec2::new(-1.0 + i as f64 * 0.1, -1.0 + j as f64 * 0.1);
+                let _ = trim(&region, &[&line], p);
+                let _ = trim(&line, &[&region], p);
+                let _ = extend(&region, &[&line], p);
+                let _ = extend(&line, &[&region], p);
+                let _ = trim(&region, &[], p);
+            }
+        }
+    }
+}
