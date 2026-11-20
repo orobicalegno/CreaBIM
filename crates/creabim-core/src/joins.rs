@@ -368,6 +368,43 @@ pub struct WallEnds {
     pub core_line: [Option<(f64, f64)>; 2],
     /// Where walls crossing this one run through it, along it in order.
     pub gaps: Vec<Gap>,
+    /// At a T into a layered wall, at the start and at the end: how much
+    /// further than the faces a layer of each priority runs, through the
+    /// other wall's weaker layers to its first as strong (ArchiCAD's
+    /// priorities: an insulation runs through the other's plaster to its
+    /// insulation, a finish stops at its face).
+    pub reach: [Vec<(u8, f64)>; 2],
+}
+
+impl WallEnds {
+    /// How much further a layer of `priority` runs at the start (0) or the
+    /// end (1).
+    pub fn reach_of(&self, end: usize, priority: u8) -> f64 {
+        self.reach[end]
+            .iter()
+            .find(|(p, _)| *p == priority)
+            .map_or(0.0, |(_, r)| *r)
+    }
+
+    /// As [`WallEnds::place_layer`], for a layer of join `priority`: at a
+    /// T it runs on as far as [`WallEnds::reach`] says.
+    pub fn place_band(
+        &self,
+        wall: &Wall,
+        u: f64,
+        s: f64,
+        core: bool,
+        priority: u8,
+        ext: [f64; 2],
+    ) -> f64 {
+        if !core && u <= 0.0 {
+            return self.layer_start(wall, s, false) - self.reach_of(0, priority) - ext[0];
+        }
+        if !core && u >= wall.length() {
+            return self.layer_end(wall, s, false) + self.reach_of(1, priority) + ext[1];
+        }
+        self.place_layer(wall, u, s, core, ext)
+    }
 }
 
 /// Where another wall runs through a wall: the wall stops at `lo` and
@@ -715,7 +752,95 @@ fn joinables(model: &Model) -> Vec<Joinable<'_>> {
 
 /// Join every wall in the model with its neighbours on the same level.
 pub fn wall_joins(model: &Model) -> HashMap<ElementId, WallEnds> {
-    joins_among(&joinables(model), &rules(model))
+    let mut out = joins_among(&joinables(model), &rules(model));
+    layer_reach(model, &mut out);
+    out
+}
+
+/// For each end of a layered wall whose core runs into another layered
+/// wall (a T), how far each of its layers runs on into the other: through
+/// the other's layers weaker than it (a higher priority number) to its
+/// first one as strong or stronger.
+fn layer_reach(model: &Model, joins: &mut HashMap<ElementId, WallEnds>) {
+    let walls: Vec<(&Element, &Wall)> = model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            ElementKind::Wall(w) if w.length() > TOL && !w.is_arc() => Some((e, w)),
+            _ => None,
+        })
+        .collect();
+    for (e, w) in &walls {
+        let Some((_, asm)) = assembly::assembly_of(model, e) else {
+            continue;
+        };
+        let Some(ends) = joins.get(&e.id) else {
+            continue;
+        };
+        let mine: Vec<u8> = {
+            let mut v: Vec<u8> = assembly::wall_bands(asm, w)
+                .iter()
+                .map(|b| b.priority)
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        };
+        let mut reach: [Vec<(u8, f64)>; 2] = [vec![], vec![]];
+        for (k, (p, far)) in [(w.start, w.end), (w.end, w.start)].into_iter().enumerate() {
+            if ends.core[k] <= 1e-9 || ends.core_line[k].is_some() {
+                continue;
+            }
+            let d_in = (p - far).normalize_or_zero();
+            // the layered wall it runs into: the one whose body holds the end
+            let into = walls.iter().find(|(o, ow)| {
+                if o.id == e.id || ow.level != w.level {
+                    return false;
+                }
+                let d = ow.direction();
+                let u = (p - ow.start).dot(d);
+                let off = (p - ow.start).perp_dot(d).abs();
+                u > TOL
+                    && u < ow.length() - TOL
+                    && off <= ow.thickness / 2.0 + w.thickness + TOL
+                    && d_in.perp_dot(d).abs() > 1e-6
+            });
+            let Some((o, ow)) = into else { continue };
+            let Some((_, oasm)) = assembly::assembly_of(model, o) else {
+                continue;
+            };
+            let bands = assembly::wall_bands(oasm, ow);
+            let n = ow.direction().perp();
+            // the side it comes from: +1 the other's left
+            let side = if (far - ow.start).dot(n) > 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let face = side * ow.thickness / 2.0;
+            let slant = d_in.dot(n).abs().max(1e-6);
+            let mut order = bands.clone();
+            order.sort_by(|a, b| {
+                if side > 0.0 {
+                    b.s1.total_cmp(&a.s1)
+                } else {
+                    a.s0.total_cmp(&b.s0)
+                }
+            });
+            for pr in &mine {
+                let Some(stop) = order.iter().find(|b| b.priority <= *pr) else {
+                    continue;
+                };
+                let s_stop = if side > 0.0 { stop.s1 } else { stop.s0 };
+                let r = (face - s_stop).abs() / slant;
+                if r > 1e-9 {
+                    reach[k].push((*pr, r));
+                }
+            }
+        }
+        if let Some(ends) = joins.get_mut(&e.id) {
+            ends.reach = reach;
+        }
+    }
 }
 
 /// Join walls that are not in a model (all without layers), as walls of
@@ -817,6 +942,7 @@ fn joins_among(walls: &[Joinable], rules: &[JoinRule]) -> HashMap<ElementId, Wal
                     b.core_line[1].map(|(u, k)| (u - l + len, k)),
                 ],
                 gaps: vec![],
+                reach: Default::default(),
             },
         );
     }

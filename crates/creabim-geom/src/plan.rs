@@ -544,7 +544,10 @@ pub fn clean_up_pieces(model: &Model, items: &mut Vec<PlanItem>, layers: Vec<Cut
             let mut thin: Vec<(f64, f64, bool)> = Vec::new();
             for (j, other) in polys.iter().enumerate() {
                 let same = keys[i] == keys[j];
-                if i == j || (!same && other.id != piece.id) {
+                // two layers of joined walls meeting inside the mass: a
+                // thin line between them too, as between one wall's layers
+                let layered = piece.layer.is_some() && other.layer.is_some();
+                if i == j || (!same && other.id != piece.id && !layered) {
                     continue;
                 }
                 for (p, q) in edges(&other.points) {
@@ -1205,7 +1208,16 @@ pub fn plan_view_with(
                             if w.is_arc() {
                                 w.place(u, s)
                             } else {
-                                w.start + d * ends.place_layer(w, u, s, band.core, band.ext) + n * s
+                                w.start
+                                    + d * ends.place_band(
+                                        w,
+                                        u,
+                                        s,
+                                        band.core,
+                                        band.priority,
+                                        band.ext,
+                                    )
+                                    + n * s
                             }
                         };
                         let mut piece = |a: f64, b: f64, s0: f64, s1: f64| {

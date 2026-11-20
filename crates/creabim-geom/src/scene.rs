@@ -145,7 +145,16 @@ fn layer_items(
                         (b.s0, b.s1),
                         Some(b.index),
                         b.core,
-                        b.ext,
+                        // at a T a layer runs on through the other wall's
+                        // weaker layers, as in the plans
+                        if b.core {
+                            b.ext
+                        } else {
+                            [
+                                b.ext[0] + ends.reach_of(0, b.priority),
+                                b.ext[1] + ends.reach_of(1, b.priority),
+                            ]
+                        },
                         b.vext,
                     );
                     (b, m)
