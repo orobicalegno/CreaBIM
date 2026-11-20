@@ -3259,6 +3259,32 @@ pub fn show(
         }
         return None;
     }
+    // STRETCH's window as its far corner is picked: dashed green, as
+    // AutoCAD's crossing window, from the first corner to the pointer
+    if state.pick_window {
+        let first = state
+            .cmd_pick
+            .as_ref()
+            .filter(|(v, _)| v.is_none_or(|v| v == view))
+            .and_then(|(_, p)| p.first().copied());
+        if let (Some(a), Some(b)) = (first, response.hover_pos()) {
+            let r = Rect::from_two_pos(xf.to_screen(a), b);
+            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(80, 200, 120, 40));
+            let c = [
+                r.left_top(),
+                r.right_top(),
+                r.right_bottom(),
+                r.left_bottom(),
+                r.left_top(),
+            ];
+            painter.extend(egui::Shape::dashed_line(
+                &c,
+                Stroke::new(1.2, Color32::from_rgb(40, 150, 80)),
+                6.0,
+                4.0,
+            ));
+        }
+    }
     // a TRIM or EXTEND window let go: every line it crosses
     if let Some((v, a, b)) = state.fence_done.take() {
         if v == view {
