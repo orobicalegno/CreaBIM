@@ -293,6 +293,14 @@ pub fn dxf_items(text: &str) -> Result<Vec<TitleItem>, String> {
 /// block on layer 0 holds, the layer the block is inserted on (as AutoCAD
 /// draws it).
 pub fn dxf_items_layered(text: &str) -> Result<Vec<(TitleItem, String)>, String> {
+    Ok(dxf_items_tagged(text)?
+        .into_iter()
+        .map(|(it, tag)| (it, split_tag(&tag).0.to_string()))
+        .collect())
+}
+
+/// [`dxf_items_layered`] with each item's own colour kept in its tag.
+fn dxf_items_tagged(text: &str) -> Result<Vec<(TitleItem, String)>, String> {
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
     let pairs: Vec<Group> = lines
         .chunks(2)
@@ -351,8 +359,140 @@ pub fn dxf_items_layered(text: &str) -> Result<Vec<(TitleItem, String)>, String>
     Ok(out.into_iter().zip(layers).collect())
 }
 
+/// A DXF drawing's items with their layers and colours (their own, else
+/// their layer's; none is the ink), and each layer's colour.
+#[allow(clippy::type_complexity)]
+pub fn dxf_items_coloured(
+    text: &str,
+) -> Result<
+    (
+        Vec<(TitleItem, String, Option<[u8; 3]>)>,
+        std::collections::HashMap<String, [u8; 3]>,
+    ),
+    String,
+> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<Group> = lines
+        .chunks(2)
+        .filter(|c| c.len() == 2)
+        .filter_map(|c| Some((c[0].parse::<i64>().ok()?, c[1])))
+        .collect();
+    let table = dxf_layer_colours(&pairs);
+    let tagged = dxf_items_tagged(text)?;
+    let layer_rgb: std::collections::HashMap<String, [u8; 3]> = table
+        .iter()
+        .filter_map(|(k, v)| Some((k.clone(), tag_rgb(*v)?)))
+        .collect();
+    let items = tagged
+        .into_iter()
+        .map(|(it, tag)| {
+            let (layer, own) = split_tag(&tag);
+            let rgb = match own {
+                Some(c) => tag_rgb(c),
+                None => layer_rgb.get(layer).copied(),
+            };
+            (it, layer.to_string(), rgb)
+        })
+        .collect();
+    Ok((items, layer_rgb))
+}
+
+/// A colour tag above this is a true colour, 0xRRGGBB over it.
+const TRUE_COLOUR: i64 = 1 << 32;
+
+/// An item's layer and colour as [`dxf_draw`] keeps them: the layer's name,
+/// then (after a \u{1}) its own colour, an index or a true colour.
+fn split_tag(tag: &str) -> (&str, Option<i64>) {
+    match tag.split_once('\u{1}') {
+        Some((l, c)) => (l, c.parse().ok()),
+        None => (tag, None),
+    }
+}
+
+/// A colour tag as RGB: AutoCAD's index colours (7, white or black, is
+/// none: the ink) or a true colour.
+fn tag_rgb(c: i64) -> Option<[u8; 3]> {
+    if c >= TRUE_COLOUR {
+        let v = c - TRUE_COLOUR;
+        return Some([(v >> 16) as u8, (v >> 8) as u8, v as u8]);
+    }
+    aci_rgb(c)
+}
+
+/// AutoCAD Color Index to RGB; 7 (white on black, black on white) and
+/// anything unknown is none.
+pub fn aci_rgb(i: i64) -> Option<[u8; 3]> {
+    Some(match i {
+        1 => [255, 0, 0],
+        2 => [255, 255, 0],
+        3 => [0, 255, 0],
+        4 => [0, 255, 255],
+        5 => [0, 0, 255],
+        6 => [255, 0, 255],
+        8 => [128, 128, 128],
+        9 => [192, 192, 192],
+        10..=249 => {
+            // 24 hues, 15° apart; in each, five brightnesses, full and
+            // half saturated
+            let hue = ((i - 10) / 10) as f64 * 15.0;
+            let k = (i - 10) % 10;
+            let v = [1.0, 1.0, 0.8, 0.8, 0.6, 0.6, 0.5, 0.5, 0.3, 0.3][k as usize];
+            let sat = if k % 2 == 0 { 1.0 } else { 0.5 };
+            let f = |n: f64| {
+                let kk = (n + hue / 60.0) % 6.0;
+                v - v * sat * kk.min(4.0 - kk).clamp(0.0, 1.0)
+            };
+            [
+                (f(5.0) * 255.0) as u8,
+                (f(3.0) * 255.0) as u8,
+                (f(1.0) * 255.0) as u8,
+            ]
+        }
+        250..=255 => {
+            let g = [51, 80, 105, 130, 190, 255][(i - 250) as usize];
+            [g, g, g]
+        }
+        _ => return None,
+    })
+}
+
+/// The layers' colours in a DXF's LAYER table.
+fn dxf_layer_colours(pairs: &[Group]) -> std::collections::HashMap<String, i64> {
+    let mut out = std::collections::HashMap::new();
+    for e in dxf_section(pairs, "TABLES").unwrap_or_default() {
+        if e.0 != "LAYER" {
+            continue;
+        }
+        let Some(name) =
+            e.1.iter()
+                .find(|q| q.0 == 2)
+                .map(|q| q.1.trim().to_string())
+        else {
+            continue;
+        };
+        let rgb =
+            e.1.iter()
+                .find(|q| q.0 == 420)
+                .and_then(|q| q.1.trim().parse::<i64>().ok());
+        let aci =
+            e.1.iter()
+                .find(|q| q.0 == 62)
+                .and_then(|q| q.1.trim().parse::<i64>().ok());
+        match (rgb, aci) {
+            (Some(v), _) => {
+                out.insert(name, TRUE_COLOUR + (v & 0xFF_FFFF));
+            }
+            (None, Some(i)) => {
+                out.insert(name, i.abs());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Draw `ents` through `m` (drawing units to mm) into `out`, each item's
-/// layer in `layers`.
+/// layer (and own colour, see [`split_tag`]) in `layers`.
 #[allow(clippy::too_many_arguments)]
 fn dxf_draw(
     ents: &[Ent],
@@ -373,11 +513,27 @@ fn dxf_draw(
         }
         // a polyline's vertices and end are on the polyline's layer
         if !matches!(name, "VERTEX" | "SEQEND") {
+            let (inherit_layer, inherit_colour) = split_tag(inherit);
             let own = g.iter().find(|p| p.0 == 8).map_or("0", |p| p.1.trim());
-            layer = if own == "0" {
-                inherit.to_string()
-            } else {
-                own.to_string()
+            let own = if own == "0" { inherit_layer } else { own };
+            // its colour: true colour (420), else the index (62); by block
+            // (0) is the insert's, by layer (256, or none) the layer's
+            let colour = match (
+                g.iter()
+                    .find(|p| p.0 == 420)
+                    .and_then(|p| p.1.trim().parse::<i64>().ok()),
+                g.iter()
+                    .find(|p| p.0 == 62)
+                    .and_then(|p| p.1.trim().parse::<i64>().ok()),
+            ) {
+                (Some(rgb), _) => Some(TRUE_COLOUR + (rgb & 0xFF_FFFF)),
+                (None, Some(0)) => inherit_colour,
+                (None, Some(i)) if (1..256).contains(&i.abs()) => Some(i.abs()),
+                _ => None,
+            };
+            layer = match colour {
+                Some(c) => format!("{own}\u{1}{c}"),
+                None => own.to_string(),
             };
         }
         if out.len() >= MAX_ITEMS {

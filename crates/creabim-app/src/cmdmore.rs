@@ -545,6 +545,8 @@ impl CreaBimApp {
         let model = self.doc.model();
         let mut tx = Transaction::new("Explode");
         let (mut parts, mut layers_new) = (0usize, Vec::<String>::new());
+        // the DXF's layer colours, for the layers made from them
+        let mut layer_rgb: std::collections::HashMap<String, [u8; 3]> = Default::default();
         let mut table = creabim_core::detail::layers(model);
         let mut touched = false;
         for id in self.selection.all() {
@@ -612,23 +614,29 @@ impl CreaBimApp {
                         .map_err(|e| e.to_string())
                         .and_then(|b| {
                             let text = creabim_exchange::titleblock::dxf_text(&b);
-                            creabim_exchange::titleblock::dxf_items_layered(&text)
+                            creabim_exchange::titleblock::dxf_items_coloured(&text)
                         }) {
-                        Ok(items) => items,
+                        Ok((items, rgb)) => {
+                            for (k, v) in rgb {
+                                layer_rgb.entry(k.trim().to_string()).or_insert(v);
+                            }
+                            items
+                        }
                         Err(err) => {
                             self.say(format!("EXPLODE: couldn't read {path}: {err}"));
                             return;
                         }
                     };
-                    for (it, layer) in items {
+                    for (it, layer, rgb) in items {
                         // the drawing's texts come as notes where they stood
                         if let creabim_core::titleblock::TitleItem::Text { at, text, .. } = &it {
                             if !text.trim().is_empty() {
-                                let n = creabim_core::Note::new(
+                                let mut n = creabim_core::Note::new(
                                     view,
                                     r.place(*at / 1000.0),
                                     text.clone(),
                                 );
+                                n.color = rgb.map(|c| c.map(|v| v as f32 / 255.0));
                                 tx = tx.insert(Element::new("Note", ElementKind::Note(n)));
                                 parts += 1;
                             }
@@ -657,6 +665,10 @@ impl CreaBimApp {
                         if table.get(&name).is_none() && !layers_new.contains(&name) {
                             layers_new.push(name.clone());
                         }
+                        // its own colour where it isn't its layer's
+                        if rgb.is_some() && rgb != layer_rgb.get(&name).copied() {
+                            d.color = rgb;
+                        }
                         d.layer = Some(name);
                         d.linetype = None;
                         tx = tx.insert(Element::new("Line", ElementKind::Detail(d)));
@@ -674,7 +686,11 @@ impl CreaBimApp {
         }
         if !layers_new.is_empty() {
             for n in &layers_new {
-                table.layers.push(creabim_core::DraftLayer::named(n));
+                let mut l = creabim_core::DraftLayer::named(n);
+                if let Some(c) = layer_rgb.get(n) {
+                    l.color = Some(*c);
+                }
+                table.layers.push(l);
             }
             tx.ops
                 .extend(creabim_core::detail::set_layers(self.doc.model(), table).ops);
@@ -892,6 +908,84 @@ impl CreaBimApp {
 
     /// HATCH by a point inside: the smallest closed linework, or room,
     /// around `p`, filled with a region of the Detail tool's hatch.
+    /// The smallest area round `p` closed by the view's lines (what is
+    /// drawn, linework, a DXF's lines), looked for close by first.
+    fn boundary_round(&mut self, view: ElementId, p: DVec2) -> Option<Vec<DVec2>> {
+        let mut segs: Vec<(DVec2, DVec2)> = vec![];
+        if let Some(drawing) = self.drawing_live(view) {
+            use creabim_geom::{plan::Pen, PlanItem};
+            for it in &drawing.items {
+                match it {
+                    PlanItem::Line { pen, a, b, .. } if !matches!(pen, Pen::Guide | Pen::Grid) => {
+                        segs.push((*a, *b))
+                    }
+                    PlanItem::Polygon { points, .. } => {
+                        for i in 0..points.len() {
+                            segs.push((points[i], points[(i + 1) % points.len()]));
+                        }
+                    }
+                    PlanItem::Arc {
+                        center,
+                        radius,
+                        start,
+                        end,
+                        ..
+                    } => {
+                        let mut sweep = end - start;
+                        if sweep <= 0.0 {
+                            sweep += std::f64::consts::TAU;
+                        }
+                        let n = ((sweep / 0.1).ceil() as usize).clamp(4, 128);
+                        let at = |k: usize| {
+                            *center
+                                + DVec2::from_angle(start + sweep * k as f64 / n as f64) * *radius
+                        };
+                        for k in 0..n {
+                            segs.push((at(k), at(k + 1)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (id, r) in creabim_core::reference::in_view(self.doc.model(), view) {
+            if r.hidden {
+                continue;
+            }
+            if let crate::trace::Shown::Lines(lines) =
+                self.plan.ref_cache.get(self.doc.model(), id, r)
+            {
+                for l in lines.iter() {
+                    for w in l.windows(2) {
+                        segs.push((r.place(w[0]), r.place(w[1])));
+                    }
+                }
+            }
+        }
+        // close by first: an area found well inside the box is the one
+        for reach in [8.0, 40.0, 200.0, 2000.0] {
+            let near: Vec<(DVec2, DVec2)> = segs
+                .iter()
+                .copied()
+                .filter(|(a, b)| {
+                    a.x.min(b.x) < p.x + reach
+                        && a.x.max(b.x) > p.x - reach
+                        && a.y.min(b.y) < p.y + reach
+                        && a.y.max(b.y) > p.y - reach
+                })
+                .collect();
+            if let Some(f) = crate::boundary::around(&near, p) {
+                let inside_box = f
+                    .iter()
+                    .all(|q| (*q - p).abs().max_element() < reach * 0.98);
+                if inside_box {
+                    return Some(f);
+                }
+            }
+        }
+        None
+    }
+
     fn hatch_at(&mut self, view: ElementId, p: DVec2) {
         let inside = |poly: &[DVec2]| {
             let mut c = false;
@@ -932,8 +1026,13 @@ impl CreaBimApp {
                 }
             }
         }
+        // else the area closed round it by any lines, AutoCAD's way: lines
+        // in many pieces, crossing, walls, a DXF's lines
+        if best.is_none() {
+            best = self.boundary_round(view, p).map(|o| (0.0, o));
+        }
         let Some((_, outline)) = best else {
-            self.say("HATCH: no closed boundary round that point (closed linework or a room). Type S to draw its corners.");
+            self.say("HATCH: no closed area round that point: the lines round it leave a gap. Type S to draw its corners.");
             return;
         };
         let hatch = match self.plan.details.kind {

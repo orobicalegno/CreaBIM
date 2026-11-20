@@ -8305,6 +8305,11 @@ impl CreaBimApp {
             r.colour = None;
             r.opacity = 0.6;
         }
+        // a DXF in its own colours, as in AutoCAD
+        if r_source_dxf {
+            r.colour = None;
+            r.opacity = r.opacity.max(0.85);
+        }
         // named for what it shows, without a prefix eating the field (MU24)
         let name = crate::trace::label(model, &r.source);
         let e = Element::new(name.clone(), ElementKind::Reference(r));
@@ -10861,16 +10866,16 @@ impl CreaBimApp {
             return;
         };
         let mut multi: Option<String> = None;
+        let mut kinds: Vec<(String, usize)> = Vec::new();
         if self.selection.len() > 1 {
             // how many of each kind, then the active element below
-            let mut kinds: Vec<(&str, usize)> = Vec::new();
             for e in self
                 .selection
                 .all()
                 .iter()
                 .filter_map(|i| self.doc.model().get(*i))
             {
-                let k = kind_word(&e.kind);
+                let k = pick_word(&e.kind);
                 match kinds.iter_mut().find(|(l, _)| *l == k) {
                     Some((_, n)) => *n += 1,
                     None => kinds.push((k, 1)),
@@ -10932,8 +10937,40 @@ impl CreaBimApp {
             })
         });
         if let Some(m) = multi.take() {
-            ui.add(egui::Label::new(egui::RichText::new(m).weak().small()).truncate())
-                .on_hover_text("G, R, S, Shift+D, Delete, Ctrl+C and H act on all of them. Below is the last one picked; Shift+click picks another.");
+            // AutoCAD's Properties list: All, or one kind of what is
+            // selected, to keep only those
+            let mut keep: Option<String> = None;
+            crate::props::head_row(ui, "Selected", |ui| {
+                egui::ComboBox::from_id_salt("props.kinds")
+                    .width(ui.available_width())
+                    .selected_text(format!("All ({})", self.selection.len()))
+                    .show_ui(ui, |ui| {
+                        let _ = ui.selectable_label(true, format!("All ({})", self.selection.len()));
+                        for (k, n) in &kinds {
+                            if ui
+                                .selectable_label(false, format!("{} ({n})", capitalised(k)))
+                                .on_hover_text("Keep only these selected")
+                                .clicked()
+                            {
+                                keep = Some(k.clone());
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(format!("{m}. Pick a kind to keep only those selected. G, R, S, Shift+D, Delete, Ctrl+C and H act on all of them."));
+                false
+            });
+            if let Some(k) = keep {
+                let model = self.doc.model();
+                let ids: std::collections::HashSet<ElementId> = self
+                    .selection
+                    .all()
+                    .into_iter()
+                    .filter(|i| model.get(*i).is_some_and(|e| pick_word(&e.kind) == k))
+                    .collect();
+                self.selection.retain(|i| ids.contains(&i));
+                self.status = format!("{} {} kept selected.", ids.len(), plural(&k, ids.len()));
+            }
         }
         if marksui::markable(&e.kind) {
             crate::props::head_row(ui, "Mark", |ui| {
@@ -11656,6 +11693,25 @@ impl Drop for Perf {
 }
 
 impl eframe::App for CreaBimApp {
+    /// Closed without the Save the changes window having had its say (the
+    /// system ending it, a close the window never heard): unsaved work is
+    /// kept in a recovery copy beside the project, never lost.
+    fn on_exit(&mut self) {
+        if self.close_ok || !self.unsaved() {
+            return;
+        }
+        let base = if self.path.is_empty() {
+            std::env::temp_dir()
+                .join("Volumen recovered.creabim")
+                .display()
+                .to_string()
+        } else {
+            with_extension(&self.path, "recovered.creabim")
+        };
+        let r = creabim_store::save(&base, &self.doc);
+        crate::actlog::line(format!("exit unsaved: recovery copy {base}: {r:?}"));
+    }
+
     /// Keys typed while a web pane had the keyboard reach the views.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if self.shell.feed_keys(raw_input) {
@@ -12683,6 +12739,22 @@ fn camera_fields(
 }
 
 /// What to call an element in a count.
+/// What an element is, for the Properties list of a selection: linework
+/// by its shape (line, circle, hatch), the rest by [`kind_word`].
+fn pick_word(k: &ElementKind) -> String {
+    match k {
+        ElementKind::Detail(d) => d.kind.label().to_lowercase(),
+        _ => kind_word(k).to_string(),
+    }
+}
+
+fn capitalised(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
+}
+
 pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
     match k {
         ElementKind::Level(_) => "level",

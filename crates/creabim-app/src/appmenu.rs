@@ -1198,7 +1198,7 @@ pub(crate) fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
     static TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
     TEX.get_or_init(|| {
         let img =
-            image::load_from_memory(include_bytes!("../assets/logo/png/creabim-mark-128.png"))
+            image::load_from_memory(include_bytes!("../assets/logo/png/volumen-mark-128.png"))
                 .map(|i| i.to_rgba8())
                 .unwrap_or_default();
         let (w, h) = img.dimensions();

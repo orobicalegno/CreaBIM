@@ -861,7 +861,7 @@ impl Snapper {
     /// snaps to corners and edges instead.
     pub fn add_intersections(&mut self) {
         let flat = |p: DVec3| p.truncate();
-        let n = self.segments.len().min(16000);
+        let n = self.segments.len().min(80_000);
         // the pairs worth trying: segments whose boxes overlap, found by a
         // sweep along x, and every guide (endless) with everything (MU39:
         // trying every pair took ~90 ms on the starter house)

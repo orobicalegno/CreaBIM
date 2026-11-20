@@ -1221,18 +1221,26 @@ impl CreaBimApp {
                 self.cmd_start(ctx, &c);
             }
         }
-        // Esc ends the command: back to selecting, what is drawn kept
+        if std::mem::take(&mut self.plan.north_request) {
+            self.selection.clear();
+            self.cmd_start(ctx, "NORTHDIR");
+        }
+        // Esc ends the command: back to selecting, what is drawn kept, and
+        // nothing left selected (the piece just drawn neither), as AutoCAD
         if std::mem::take(&mut self.cmd.esc)
             && self.plan.modal.is_none()
-            && self.plan.tool != Tool::Select
             && !ctx.egui_wants_keyboard_input()
         {
-            crate::detailtool::keep(&mut self.doc, &mut self.plan, &mut self.selection);
-            self.plan.cmd_pick = None;
-            self.plan.cmd_preview = None;
-            self.cmd.running = None;
-            self.pick_tool(ctx, Tool::Select);
-            self.say("*Cancel*");
+            if self.plan.tool != Tool::Select || self.cmd.running.is_some() {
+                crate::detailtool::keep(&mut self.doc, &mut self.plan, &mut self.selection);
+                self.plan.cmd_pick = None;
+                self.plan.cmd_preview = None;
+                self.cmd.running = None;
+                self.pick_tool(ctx, Tool::Select);
+                self.say("*Cancel*");
+            }
+            self.selection.clear();
+            self.plan.boxsel = None;
         }
         if !self.shell.settings.command_line {
             return;

@@ -1255,6 +1255,34 @@ pub fn layer_tree(
     let mut fold_changed = false;
     let tree = layers.tree();
     let mut hide_below: Option<usize> = None;
+    // the layers picked together, kept for the session
+    let chosen_id = egui::Id::new("draft.layers.chosen");
+    let mut chosen: Vec<String> = ui.data(|d| d.get_temp(chosen_id)).unwrap_or_default();
+    chosen.retain(|n| layers.get(n).is_some());
+    let mut chosen_changed = false;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button("Pick all")
+            .on_hover_text("Pick every layer: a change to one is made to all")
+            .clicked()
+        {
+            chosen = layers.layers.iter().map(|l| l.name.clone()).collect();
+            chosen_changed = true;
+        }
+        if ui.small_button("Pick none").clicked() {
+            chosen.clear();
+            chosen_changed = true;
+        }
+        if !chosen.is_empty() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} picked: a change to one is made to all",
+                    chosen.len()
+                ))
+                .weak(),
+            );
+        }
+    });
 
     for (i, depth) in tree {
         if let Some(d) = hide_below {
@@ -1273,7 +1301,22 @@ pub fn layer_tree(
             hide_below = Some(depth);
         }
         let parent_hidden = layers.chain(&name).iter().skip(1).any(|l| l.hidden);
+        let before = table.layers.iter().find(|l| l.name == name).cloned();
         ui.horizontal(|ui| {
+            // picked with others: a change to one is made to all of them
+            let picked = chosen.contains(&name);
+            if ui
+                .selectable_label(picked, "Pick")
+                .on_hover_text("Pick this layer with others: what you change on one picked layer (shown, colour, line type, lock, pen) is changed on all of them")
+                .clicked()
+            {
+                if !picked {
+                    chosen.push(name.clone());
+                } else {
+                    chosen.retain(|n| *n != name);
+                }
+                chosen_changed = true;
+            }
             ui.add_space(14.0 * depth as f32);
             // fold the branch
             if has_children {
@@ -1439,6 +1482,34 @@ pub fn layer_tree(
                 }
             }
         });
+        // the change made to a picked layer, made to the others picked
+        if chosen.contains(&name) {
+            let after = table.layers.iter().find(|l| l.name == name).cloned();
+            if let (Some(b), Some(a)) = (before, after) {
+                if b != a {
+                    for l in table.layers.iter_mut() {
+                        if l.name == name || !chosen.contains(&l.name) {
+                            continue;
+                        }
+                        if a.hidden != b.hidden {
+                            l.hidden = a.hidden;
+                        }
+                        if a.color != b.color {
+                            l.color = a.color;
+                        }
+                        if a.linetype != b.linetype {
+                            l.linetype = a.linetype;
+                        }
+                        if a.locked != b.locked {
+                            l.locked = a.locked;
+                        }
+                        if a.pen != b.pen {
+                            l.pen = a.pen;
+                        }
+                    }
+                }
+            }
+        }
         // deleting a layer with linework on it: asked first
         let ask: Option<String> = ui.data(|m| m.get_temp(egui::Id::new("draft.layer.ask")));
         if ask.as_deref() == Some(name.as_str()) {
@@ -1462,6 +1533,9 @@ pub fn layer_tree(
     }
     if fold_changed {
         ui.data_mut(|d| d.insert_temp(folded_id, folded));
+    }
+    if chosen_changed {
+        ui.data_mut(|d| d.insert_temp(chosen_id, chosen));
     }
     if let Some(name) = remove {
         table.remove(&name);

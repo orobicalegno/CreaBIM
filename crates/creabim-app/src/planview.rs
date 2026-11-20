@@ -456,6 +456,8 @@ pub struct PlanState {
     pub menu_request: Option<egui::Pos2>,
     /// Where Shift + right-click asked for AutoCAD's object snap menu.
     pub osnap_menu_request: Option<egui::Pos2>,
+    /// The north icon was double-clicked: set the north.
+    pub north_request: bool,
     /// A point typed on the command line, for this view's tool to take as
     /// a click there (drawing coordinates), exactly, with no snap.
     pub forced_point: Option<(ElementId, DVec2)>,
@@ -721,6 +723,7 @@ impl Default for PlanState {
             chain: (None, vec![]),
             rested: (None, vec![]),
             osnap_menu_request: None,
+            north_request: false,
             forced_point: None,
             last_point: None,
             cursor_at: None,
@@ -1004,7 +1007,10 @@ pub fn show(
     let (mut center, mut scale) = match style.camera {
         Some(c) => c,
         None => {
-            let shared = *state.cameras.entry(view).or_insert_with(|| fit(plan, rect));
+            let shared = *state
+                .cameras
+                .entry(view)
+                .or_insert_with(|| fit_all(doc.model(), view, plan, rect));
             match state.area {
                 // its own, starting where the first area is
                 Some(a) => *state.area_cameras.entry((a, view)).or_insert(shared),
@@ -1132,8 +1138,15 @@ pub fn show(
                 .collect(),
         };
         let fit_sel = (!picked.items.is_empty()).then(|| fit(&picked, rect));
-        if let Some((c, k)) = nav_column(ui, rect, view, || fit(plan, rect), fit_sel, center, scale)
-        {
+        if let Some((c, k)) = nav_column(
+            ui,
+            rect,
+            view,
+            || fit_all(doc.model(), view, plan, rect),
+            fit_sel,
+            center,
+            scale,
+        ) {
             center = c;
             scale = k;
         }
@@ -1187,6 +1200,15 @@ pub fn show(
                 .project_info()
                 .map_or(0.0, |(_, p)| p.true_north);
             draw_north_icon(&painter, &xf, north);
+            // a double-click on it sets the north (NORTHDIR)
+            let base = xf.rect.left_bottom() + Vec2::new(96.0, -108.0);
+            if response.double_clicked()
+                && response
+                    .interact_pointer_pos()
+                    .is_some_and(|p| p.distance(base) < 26.0)
+            {
+                state.north_request = true;
+            }
         }
     }
     // a point asked for: a cross follows the pointer, a click gives it
@@ -4147,6 +4169,17 @@ fn under_pointer(
         if let Some(c) = r.outline() {
             if (0..4).any(|i| segment_distance(p, c[i], c[(i + 1) % 4]) < tol) {
                 under.push(id);
+                continue;
+            }
+        }
+        // and any of a DXF's lines, as a block in AutoCAD
+        if let crate::trace::Shown::Lines(lines) = state.ref_cache.get(doc.model(), id, r) {
+            let hit = lines.iter().any(|l| {
+                l.windows(2)
+                    .any(|w| segment_distance(p, r.place(w[0]), r.place(w[1])) < tol)
+            });
+            if hit {
+                under.push(id);
             }
         }
     }
@@ -5087,8 +5120,9 @@ fn add_reference_snaps(
     model: &creabim_core::Model,
     view: ElementId,
 ) -> usize {
-    // a huge drawing is cut short rather than slowing every snap
-    const MOST: usize = 20_000;
+    // a huge drawing is cut short rather than slowing every snap (a big
+    // DXF was cut at 20 000 and its far part never snapped)
+    const MOST: usize = 250_000;
     let mut n = 0;
     for e in model.iter() {
         let ElementKind::Reference(r) = &e.kind else {
@@ -5101,21 +5135,82 @@ fn add_reference_snaps(
             continue;
         };
         for l in lines.iter() {
-            for w in l.windows(2) {
-                if n >= MOST {
-                    return n;
-                }
-                s.add_segment(
-                    r.place(w[0]).extend(0.0),
-                    r.place(w[1]).extend(0.0),
-                    crate::snaps::Source::Underlay,
-                    Some(e.id),
-                );
+            if n >= MOST {
+                return n;
+            }
+            let pts: Vec<DVec3> = l.iter().map(|p| r.place(*p).extend(0.0)).collect();
+            // an arc or circle comes as many short pieces: it snaps as
+            // AutoCAD's does, at its ends, middle, centre and quadrants,
+            // not at every piece's end
+            if let Some((c, quads)) = arc_of(&pts) {
+                s.add_curve(&pts, Some(c), &quads, Some(e.id));
+                n += pts.len();
+                continue;
+            }
+            for w in pts.windows(2) {
+                s.add_segment(w[0], w[1], crate::snaps::Source::Edge, Some(e.id));
                 n += 1;
             }
         }
     }
     n
+}
+
+/// Is `pts` an arc or a circle drawn as a polyline (8 or more pieces of
+/// one length, all as far from one centre)? Its centre and the quadrant
+/// points (0°, 90°, 180°, 270°) on it.
+fn arc_of(pts: &[DVec3]) -> Option<(DVec3, Vec<DVec3>)> {
+    if pts.len() < 9 {
+        return None;
+    }
+    let len = |i: usize| pts[i].distance(pts[i + 1]);
+    let first = len(0);
+    if first < 1e-9 || (1..pts.len() - 1).any(|i| (len(i) - first).abs() > first * 0.05) {
+        return None;
+    }
+    // the centre through three points spread along it
+    let (a, b, c) = (
+        pts[0].truncate(),
+        pts[pts.len() / 2].truncate(),
+        pts[pts.len() - 1].truncate(),
+    );
+    let c = if a.distance(c) < first * 0.5 {
+        // closed: the far point and a quarter of the way round
+        (a, b, pts[pts.len() / 4].truncate())
+    } else {
+        (a, b, c)
+    };
+    let (a, b, c) = c;
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let sq = |p: DVec2| p.length_squared();
+    let centre = DVec2::new(
+        (sq(a) * (b.y - c.y) + sq(b) * (c.y - a.y) + sq(c) * (a.y - b.y)) / d,
+        (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d,
+    );
+    let radius = centre.distance(a);
+    if pts
+        .iter()
+        .any(|p| (p.truncate().distance(centre) - radius).abs() > radius * 0.02)
+    {
+        return None;
+    }
+    // the quadrants on the curve as drawn
+    let quads = [0.0f64, 90.0, 180.0, 270.0]
+        .iter()
+        .map(|t| centre + DVec2::from_angle(t.to_radians()) * radius)
+        .filter(|q| {
+            pts.windows(2).any(|w| {
+                let (p, r) = (w[0].truncate(), w[1].truncate());
+                let t = ((*q - p).dot(r - p) / (r - p).length_squared()).clamp(0.0, 1.0);
+                (p + (r - p) * t).distance(*q) < first * 0.2
+            })
+        })
+        .map(|q| q.extend(pts[0].z))
+        .collect();
+    Some((centre.extend(pts[0].z), quads))
 }
 
 /// The floor plans' ranges in a section (MU34 A1, MU36): a band per plan
@@ -5801,8 +5896,32 @@ fn crop_rects(model: &creabim_core::Model, view: ElementId) -> Vec<(ElementId, D
         .collect()
 }
 
+/// [`fit`] taking in the references shown in the view too (a DXF beside
+/// the model), as AutoCAD's Zoom Extents takes in an xref.
+fn fit_all(model: &creabim_core::Model, view: ElementId, d: &Drawing, rect: Rect) -> (DVec2, f32) {
+    let mut b = d.bounds();
+    for (_, r) in creabim_core::reference::in_view(model, view) {
+        if r.hidden {
+            continue;
+        }
+        if let Some(c) = r.outline() {
+            for p in c {
+                b = Some(match b {
+                    Some((lo, hi)) => (lo.min(p), hi.max(p)),
+                    None => (p, p),
+                });
+            }
+        }
+    }
+    fit_bounds(b, rect)
+}
+
 fn fit(d: &Drawing, rect: Rect) -> (DVec2, f32) {
-    match d.bounds() {
+    fit_bounds(d.bounds(), rect)
+}
+
+fn fit_bounds(b: Option<(DVec2, DVec2)>, rect: Rect) -> (DVec2, f32) {
+    match b {
         Some((lo, hi)) => {
             let size = (hi - lo).max(DVec2::splat(1.0));
             let scale = (rect.width() as f64 / size.x).min(rect.height() as f64 / size.y) * 0.85;

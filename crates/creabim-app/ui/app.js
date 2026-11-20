@@ -20,9 +20,10 @@
 
   // the CreaBIM mark: filled, in the brand colour of the theme
   // (the small cut below 48 px, the full mark from 48 px up)
+  // the Volumen mark: two bars and a V, in the logo's ink
+  const VM_PATH = "M18 18h14v91h-14z M39 18h14v91h-14z M60 18h14v45L88 18h16L76 109h-16z";
   function mark(full) {
-    const name = full ? "creabim-mark-full" : "creabim-mark";
-    return `<svg class="mark" viewBox="0 0 200 200" aria-label="Volumen">${window.ICONS[name]}</svg>`;
+    return `<svg class="mark" viewBox="0 0 128 128" aria-label="Volumen"><path class="vm-mark" transform="translate(3 0)" d="${VM_PATH}"/></svg>`;
   }
 
   // The weaver and its nest, woven once where the logo lives (MU39, the
@@ -37,13 +38,9 @@
       new: `<path class="wm-ctx" d="M222 62 H318 V160 H222 Z M270 62 V112 H318"/>`,
     }[kind] || "";
     const w = ctxArt ? 330 : 200;
-    return `<svg class="woven ${play ? "play" : "still"}" viewBox="0 0 ${w} 200" aria-label="Volumen">` +
-      `<g transform="translate(9 4)">` +
-      `<path class="wm-branch" d="M26 52 H174"/>` +
-      `<path class="wm-nest" d="M130 52 C162 64 172 100 166 128 C160 156 146 166 142 190 L118 190 C114 166 98 156 94 128 C88 100 98 64 130 52 Z"/>` +
-      `<path class="wm-strand" d="M98 98 L164 124"/><path class="wm-strand s2" d="M96 132 L160 156"/>` +
-      `<g class="wm-bird"><path d="M44.5 8.0 C51.2 2.1 63.8 3.0 67.2 12.2 C69.7 18.9 66.4 24.8 63.0 29.0 C61.3 39.9 52.9 50.0 38.6 50.8 C32.8 51.3 27.7 50.0 23.5 48.3 L8.4 56.7 L16.8 43.3 C14.3 35.7 16.0 27.3 21.8 22.3 C27.7 17.2 37.8 14.7 44.5 8.0 Z"/><path d="M65.5 10.5 L80.6 16.4 L65.5 21.4 Z"/><circle class="wm-eye" cx="61.5" cy="11.4" r="2.8"/></g>` +
-      `</g>${ctxArt}</svg>`;
+    // the Volumen mark where the weaver was, still
+    return `<svg class="woven still" viewBox="0 0 ${w} 200" aria-label="Volumen">` +
+      `<g transform="translate(0 0) scale(1.5625)"><path class="vm-mark" transform="translate(3 0)" d="${VM_PATH}"/></g>${ctxArt}</svg>`;
   }
 
   // A page's major sections (its ## headings) fold, as Properties' do
@@ -607,13 +604,11 @@
   // outline marches, two strands weave, an orange dot pulses. Saved, the
   // weave closes, the nest fills, the dot turns green and the bird lands.
   function unsavedNest() {
-    const nest = "M130 52 C162 64 172 100 166 128 C160 156 146 166 142 190 L118 190 C114 166 98 156 94 128 C88 100 98 64 130 52 Z";
-    return `<svg class="nest" width="46" height="49" viewBox="0 -14 212 224" aria-hidden="true"><g transform="translate(9 4)">` +
-      `<path class="wm-branch" d="M26 52 H174"/><ellipse class="wm-shadow" cx="40" cy="46" rx="22" ry="3.5"/>` +
-      `<path class="wm-nest" d="${nest}"/><path class="wm-strand" d="M98 98 L164 124"/><path class="wm-strand s2" d="M96 132 L160 156"/>` +
-      `<path class="wm-rim" d="${nest}"/><circle class="wm-dot" cx="184" cy="20" r="12"/>` +
-      `<g class="wm-bird"><path d="M44.5 8.0 C51.2 2.1 63.8 3.0 67.2 12.2 C69.7 18.9 66.4 24.8 63.0 29.0 C61.3 39.9 52.9 50.0 38.6 50.8 C32.8 51.3 27.7 50.0 23.5 48.3 L8.4 56.7 L16.8 43.3 C14.3 35.7 16.0 27.3 21.8 22.3 C27.7 17.2 37.8 14.7 44.5 8.0 Z"/><path d="M65.5 10.5 L80.6 16.4 L65.5 21.4 Z"/><circle class="wm-eye" cx="61.5" cy="11.4" r="2.8"/></g></g></svg>`;
+    // the Volumen mark, with a dot that turns green once saved
+    return `<svg class="nest" width="46" height="49" viewBox="0 -6 140 140" aria-hidden="true">` +
+      `<path class="vm-mark" transform="translate(3 0)" d="${VM_PATH}"/><circle class="wm-dot" cx="122" cy="14" r="10"/></svg>`;
   }
+
 
   // Drawn once for a question; Saving… and Saved change it in place, so
   // the nest's motion carries on into its settling.
