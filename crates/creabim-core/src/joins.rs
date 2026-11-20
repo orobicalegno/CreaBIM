@@ -397,10 +397,13 @@ impl WallEnds {
         priority: u8,
         ext: [f64; 2],
     ) -> f64 {
-        if !core && u <= 0.0 {
+        // a core runs as its join says; where no join set one, as far as
+        // its priority reaches too
+        let free = |k: usize| !core || (self.core[k] <= 1e-9 && self.core_line[k].is_none());
+        if u <= 0.0 && free(0) {
             return self.layer_start(wall, s, false) - self.reach_of(0, priority) - ext[0];
         }
-        if !core && u >= wall.length() {
+        if u >= wall.length() && free(1) {
             return self.layer_end(wall, s, false) + self.reach_of(1, priority) + ext[1];
         }
         self.place_layer(wall, u, s, core, ext)
@@ -787,23 +790,43 @@ fn layer_reach(model: &Model, joins: &mut HashMap<ElementId, WallEnds>) {
         };
         let mut reach: [Vec<(u8, f64)>; 2] = [vec![], vec![]];
         for (k, (p, far)) in [(w.start, w.end), (w.end, w.start)].into_iter().enumerate() {
-            if ends.core[k] <= 1e-9 || ends.core_line[k].is_some() {
+            if ends.core_line[k].is_some() || w.disallow_join[k] {
                 continue;
             }
             let d_in = (p - far).normalize_or_zero();
-            // the layered wall it runs into: the one whose body holds the end
-            let into = walls.iter().find(|(o, ow)| {
-                if o.id == e.id || ow.level != w.level {
-                    return false;
-                }
-                let d = ow.direction();
-                let u = (p - ow.start).dot(d);
-                let off = (p - ow.start).perp_dot(d).abs();
-                u > TOL
-                    && u < ow.length() - TOL
-                    && off <= ow.thickness / 2.0 + w.thickness + TOL
-                    && d_in.perp_dot(d).abs() > 1e-6
+            // a wall carrying straight on from this end: the run goes on,
+            // it runs into nothing
+            let runs_on = walls.iter().any(|(o, ow)| {
+                o.id != e.id
+                    && ow.level == w.level
+                    && ow.direction().perp_dot(d_in).abs() < 0.05
+                    && ow.start.distance(p).min(ow.end.distance(p)) < w.thickness.max(TOL)
             });
+            if runs_on {
+                continue;
+            }
+            // the layered wall it runs into: the one whose body holds the
+            // end (the nearest; a run split there in two counts as one),
+            // across it, not along it
+            let into = walls
+                .iter()
+                .filter(|(o, ow)| {
+                    if o.id == e.id || ow.level != w.level {
+                        return false;
+                    }
+                    let d = ow.direction();
+                    let u = (p - ow.start).dot(d);
+                    let off = (p - ow.start).perp_dot(d).abs();
+                    u > -ow.thickness / 2.0 - TOL
+                        && u < ow.length() + ow.thickness / 2.0 + TOL
+                        && off <= ow.thickness / 2.0 + w.thickness + TOL
+                        && d_in.perp_dot(d).abs() > 0.3
+                        && assembly::assembly_of(model, o).is_some()
+                })
+                .min_by(|(_, a), (_, b)| {
+                    let off = |ow: &Wall| (p - ow.start).perp_dot(ow.direction()).abs();
+                    off(a).total_cmp(&off(b))
+                });
             let Some((o, ow)) = into else { continue };
             let Some((_, oasm)) = assembly::assembly_of(model, o) else {
                 continue;

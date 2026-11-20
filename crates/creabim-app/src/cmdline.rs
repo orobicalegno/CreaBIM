@@ -1241,6 +1241,18 @@ impl CreaBimApp {
     /// said and the prompt with what is being typed.
     pub(super) fn cmdline_window(&mut self, ctx: &egui::Context) {
         self.cmd_tick();
+        // STRETCH's second point is its window's other corner
+        self.plan.pick_window = matches!(
+            self.cmd.running.as_ref().map(|r| &r.wants),
+            Some(Wants::Points {
+                then: Finish::Stretch,
+                ..
+            })
+        ) && self
+            .plan
+            .cmd_pick
+            .as_ref()
+            .is_some_and(|(_, p)| p.len() == 1);
         // a quick right-click: Enter for what runs, else the last command
         if std::mem::take(&mut self.plan.right_quick) && self.plan.modal.is_none() {
             if self.cmd.running.is_some() || self.plan.outline.is_some() {

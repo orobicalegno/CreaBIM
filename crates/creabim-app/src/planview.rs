@@ -471,6 +471,9 @@ pub struct PlanState {
     pub cursor_at: Option<(ElementId, DVec2)>,
     /// Enter on an empty command line: finish the shape being drawn.
     pub cmd_finish: bool,
+    /// The point a command asks for now is a window's far corner: no
+    /// ORTHO or POLAR from the first (AutoCAD's crossing window).
+    pub pick_window: bool,
     /// A command collecting points of its own (DIST, ID, CIRCLE 3P…): the
     /// view and the points so far. Clicks go here, not to the tool.
     pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
@@ -728,6 +731,7 @@ impl Default for PlanState {
             rested: (None, vec![]),
             osnap_menu_request: None,
             north_request: false,
+            pick_window: false,
             fence: None,
             fence_done: None,
             forced_point: None,
@@ -1778,6 +1782,7 @@ pub fn show(
         .cmd_pick
         .as_ref()
         .filter(|(v, _)| v.is_none_or(|v| v == view))
+        .filter(|_| !state.pick_window)
         .and_then(|(_, p)| p.last().copied());
     let drawing_from = state
         .pending

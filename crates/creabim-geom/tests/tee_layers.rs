@@ -7,7 +7,7 @@ use creabim_core::{Element, ElementKind, Hatch, Level, Material, Model, Transact
 use creabim_geom::plan::{Pen, PlanItem};
 use glam::DVec2;
 
-fn model() -> (Model, creabim_core::ElementId) {
+fn model_as(user: bool) -> (Model, creabim_core::ElementId) {
     let mut doc = creabim_core::Document::new();
     let level = Element::new(
         "L0",
@@ -41,9 +41,21 @@ fn model() -> (Model, creabim_core::ElementId) {
     );
     let a = Element::new("Muro esterno", ElementKind::Assembly(asm));
     let aid = a.id;
-    let mut main = Wall::new(lid, DVec2::new(-2.0, 0.0), DVec2::new(2.0, 0.0), 0.27, 3.0);
+    let (m0, m1) = if user {
+        (DVec2::new(2.0, 0.0), DVec2::new(-2.0, 0.0))
+    } else {
+        (DVec2::new(-2.0, 0.0), DVec2::new(2.0, 0.0))
+    };
+    let mut main = Wall::new(lid, m0, m1, 0.27, 3.0);
     main.assembly = Some(aid);
-    let mut branch = Wall::new(lid, DVec2::new(0.0, 0.135), DVec2::new(0.0, 2.0), 0.27, 3.0);
+    let v = std::env::var("TEE_VARIANT").unwrap_or_default();
+    let reach = if v.contains('c') { 0.0 } else { 0.135 };
+    let (b0, b1) = if user {
+        (DVec2::new(0.0, 2.0), DVec2::new(0.0, reach))
+    } else {
+        (DVec2::new(0.0, reach), DVec2::new(0.0, 2.0))
+    };
+    let mut branch = Wall::new(lid, b0, b1, 0.27, 3.0);
     branch.assembly = Some(aid);
     let tx = Transaction::new("t")
         .insert(level)
@@ -51,7 +63,29 @@ fn model() -> (Model, creabim_core::ElementId) {
         .insert(pir)
         .insert(clt)
         .insert(a)
-        .insert(Element::new("A", ElementKind::Wall(main)))
+        .insert(Element::new(
+            "A",
+            ElementKind::Wall(if v.contains('s') {
+                let mut h = main.clone();
+                h.end = DVec2::ZERO;
+                h
+            } else {
+                main.clone()
+            }),
+        ))
+        .insert(Element::new(
+            "A2",
+            ElementKind::Wall(if v.contains('s') {
+                let mut h = main.clone();
+                h.start = DVec2::ZERO;
+                h
+            } else {
+                let mut h = main.clone();
+                h.start = DVec2::new(50.0, 50.0);
+                h.end = DVec2::new(51.0, 50.0);
+                h
+            }),
+        ))
         .insert(Element::new("B", ElementKind::Wall(branch)));
     doc.commit(tx).unwrap();
     (doc.model().clone(), lid)
@@ -59,9 +93,18 @@ fn model() -> (Model, creabim_core::ElementId) {
 
 #[test]
 fn a_layered_tee_joins_layer_by_layer() {
-    let (m, lid) = model();
+    check(false);
+}
+
+#[test]
+fn a_layered_tee_joins_layer_by_layer_the_other_way_round() {
+    check(true);
+}
+
+fn check(user: bool) {
+    let (m, lid) = model_as(user);
     let items = creabim_geom::plan::plan_view(&m, lid, 1.2).items;
-    if let Ok(path) = std::env::var("TEE_DUMP") {
+    if let Ok(path) = std::env::var(if user { "TEE_DUMP2" } else { "TEE_DUMP" }) {
         let mut out = String::new();
         for it in &items {
             match it {
