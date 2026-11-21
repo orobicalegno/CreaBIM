@@ -456,7 +456,7 @@ pub(super) fn look_ui(
     });
     let mut sun = c.shadows.is_some();
     if crate::props::check(ui, "Shadows", &mut sun, "Sun")
-        .on_hover_text("Shadows cast on the ground, in plans from above")
+        .on_hover_text("Soft sun shadows: on the ground in plans from above; on the floors in cut plans, from the walls, furniture and all that stands below the cut. Printed and in PDFs too")
         .changed()
     {
         c.shadows = sun.then_some(Shadows {
@@ -1685,7 +1685,7 @@ fn templates_page(
                 .changed();
         });
         let mut sun = cues.shadows.is_some();
-        if crate::props::switch(ui, &mut sun, "Sun shadows in plans from above").changed() {
+        if crate::props::switch(ui, &mut sun, "Sun shadows in plans").changed() {
             cues.shadows = sun.then_some(Shadows {
                 direction: -50.0,
                 length: 0.6,

@@ -195,6 +195,14 @@ pub struct Settings {
     pub guides_hidden: bool,
     /// How the 3D view draws: shaded, with edges, hidden line or wireframe.
     pub render_3d: crate::render3d::RenderMode,
+    /// The sun casts shadows in the 3D view.
+    pub shadows_3d: bool,
+    /// Corners, recesses and the ground under overhangs shaded by the sky.
+    pub occlusion_3d: bool,
+    /// Where the sun stands: degrees clockwise from true north, and above
+    /// the horizon.
+    pub sun_azimuth: f64,
+    pub sun_altitude: f64,
     /// Width of the Help panel, in points.
     pub help_width: f32,
     /// Which sections of Properties are open, by key, where it differs
@@ -284,6 +292,10 @@ impl Default for Settings {
             hidden_colour_3d: false,
             guides_hidden: false,
             render_3d: Default::default(),
+            shadows_3d: false,
+            occlusion_3d: false,
+            sun_azimuth: 150.0,
+            sun_altitude: 40.0,
             help_width: 400.0,
             props_open: Default::default(),
             tools_tab: 0,

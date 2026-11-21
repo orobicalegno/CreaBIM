@@ -2254,6 +2254,51 @@ impl CreaBimApp {
                 };
             }
             "xray" => self.set_xray(!self.shell.settings.xray),
+            "shadows3d" => {
+                let s = &mut self.shell.settings;
+                s.shadows_3d = !s.shadows_3d;
+                s.store();
+                self.status = if s.shadows_3d {
+                    "Sun shadows on. Render > Sun position moves the sun.".into()
+                } else {
+                    "Sun shadows off.".into()
+                };
+            }
+            "occlusion3d" => {
+                let s = &mut self.shell.settings;
+                s.occlusion_3d = !s.occlusion_3d;
+                s.store();
+                self.status = if s.occlusion_3d {
+                    "Ambient occlusion on: corners and the ground under overhangs shaded.".into()
+                } else {
+                    "Ambient occlusion off.".into()
+                };
+            }
+            "sun" => {
+                let at = match arg {
+                    "morning" => Some((100.0, 25.0)),
+                    "noon" => Some((180.0, 60.0)),
+                    "afternoon" => Some((225.0, 40.0)),
+                    "evening" => Some((265.0, 18.0)),
+                    _ => None,
+                };
+                match at {
+                    Some((az, alt)) => {
+                        let s = &mut self.shell.settings;
+                        (s.sun_azimuth, s.sun_altitude) = (az, alt);
+                        if !s.shadows_3d && s.render_3d != RenderMode::WhiteModel {
+                            s.shadows_3d = true;
+                        }
+                        s.store();
+                        self.status = format!("The sun {az:.0}° from true north, {alt:.0}° high.");
+                    }
+                    None => self.sun_dialog = true,
+                }
+            }
+            "export3d" => {
+                self.export_3d = Some(index.unwrap_or(4000) as u32);
+                self.status = "Making the image…".into();
+            }
             "render3d" => {
                 if let Some(m) = index.and_then(|i| RenderMode::ALL.get(i)) {
                     let s = &mut self.shell.settings;
@@ -2986,7 +3031,52 @@ impl CreaBimApp {
                     .icon(m.icon())
                     .hint(m.hint())
             })
+            .chain(self.light_items())
             .collect()
+    }
+
+    /// The sun and sky of the 3D view, and its image at print size.
+    fn light_items(&self) -> Vec<Item> {
+        let s = &self.shell.settings;
+        let sun = |key: &str, label: &str, az: f64, alt: f64| {
+            Item::new(format!("sun:{key}"), label)
+                .checked((s.sun_azimuth - az).abs() < 0.5 && (s.sun_altitude - alt).abs() < 0.5)
+                .hint(format!("The sun {az:.0}° from true north, {alt:.0}° high"))
+        };
+        vec![
+            Item::Separator,
+            Item::new("shadows3d", "Sun shadows")
+                .checked(s.shadows_3d)
+                .icon("sun")
+                .hint("The sun casts shadows on the model and the ground, from the project's true north"),
+            Item::new("occlusion3d", "Ambient occlusion")
+                .checked(s.occlusion_3d)
+                .icon("moon")
+                .hint("Corners, recesses and the ground under overhangs shaded by the sky"),
+            Item::sub(
+                "Sun position",
+                vec![
+                    sun("morning", "Morning (east, low)", 100.0, 25.0),
+                    sun("noon", "Midday (south, high)", 180.0, 60.0),
+                    sun("afternoon", "Afternoon (south-west)", 225.0, 40.0),
+                    sun("evening", "Evening (west, low)", 265.0, 18.0),
+                    Item::new("sun:dialog", "Set azimuth and height…")
+                        .hint("Type where the sun stands, in degrees"),
+                ],
+            )
+            .icon("sun"),
+            Item::sub(
+                "Save image",
+                [2000u32, 4000, 8000]
+                    .into_iter()
+                    .map(|w| {
+                        Item::new(format!("export3d:{w}"), format!("{w} pixels wide…"))
+                            .hint("The 3D view as it is now, as a PNG image at high resolution")
+                    })
+                    .collect(),
+            )
+            .icon("image"),
+        ]
     }
 
     /// How the active section, elevation or 3D view can draw.

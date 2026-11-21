@@ -105,6 +105,9 @@ pub fn plan(model: &Model, v: &View, level: ElementId, cut: f64) -> PlanView {
         return from_above(model, v, level, cut);
     }
     let mut d = crate::plan::plan_view_with(model, level, cut, &v.graphics);
+    if let Some(sh) = v.look.cues.shadows {
+        cast_shadows(model, level, cut, sh, &mut d.items);
+    }
     if !r.spans_levels() {
         return d;
     }
@@ -191,6 +194,160 @@ pub fn from_above_span(model: &Model, v: &View, level: ElementId, _cut: f64) -> 
     let top = r.top.map_or(hi + 1.0, |t| t.z(model, own));
     let bottom = r.bottom.map_or(lo - 1.0, |b| b.z(model, own));
     (top, bottom.min(top - 0.01))
+}
+
+/// How fine a cut plan's shadows are drawn, metres a pixel, and the most
+/// pixels their image may take each way.
+const SHADOW_PIXEL: f64 = 0.02;
+const SHADOW_MAX_PIXELS: usize = 3000;
+
+/// The sun's shadows on a cut plan: what stands on the floor, up to the cut,
+/// throws its shadow along the look's direction, each point by its height.
+/// They go in as a soft see-through image over the floors and rooms and
+/// under the walls, furniture and the rest, so a floor's pattern shows
+/// through them on screen and on paper alike.
+fn cast_shadows(
+    model: &Model,
+    level: ElementId,
+    cut: f64,
+    sh: creabim_core::styles::Shadows,
+    items: &mut Vec<PlanItem>,
+) {
+    let floor = model.level(level).map_or(0.0, |l| l.elevation);
+    let top = floor + cut;
+    let dir = DVec2::from_angle(sh.direction.to_radians()) * sh.length;
+    let ground = |id: ElementId| {
+        matches!(
+            model.get(id).map(|e| &e.kind),
+            Some(ElementKind::Slab(_) | ElementKind::Site(_))
+        )
+    };
+    let mut tris: Vec<[DVec2; 3]> = Vec::new();
+    for s in crate::scene::drawn_scene(model) {
+        if ground(s.id) {
+            continue;
+        }
+        for t in s.mesh.indices.chunks(3) {
+            let p = |k: usize| Vec3::from(s.mesh.positions[t[k] as usize]).as_dvec3();
+            let t = [p(0), p(1), p(2)];
+            let (lo, hi) = t
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
+            // standing on this floor, reaching above it, starting below the cut
+            if hi <= floor + 0.02 || lo >= top || lo < floor - 0.05 {
+                continue;
+            }
+            let q = t.map(|p| p.truncate() + dir * (p.z.min(top) - floor).max(0.0));
+            if (q[1] - q[0]).perp_dot(q[2] - q[0]).abs() > 1e-8 {
+                tris.push(q);
+            }
+        }
+    }
+    if tris.is_empty() {
+        return;
+    }
+    let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
+    for p in tris.iter().flatten() {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    // room round the edge for the blur
+    let blur = 0.06;
+    lo -= DVec2::splat(blur * 3.0);
+    hi += DVec2::splat(blur * 3.0);
+    let span = hi - lo;
+    let px = SHADOW_PIXEL.max(span.max_element() / SHADOW_MAX_PIXELS as f64);
+    let (w, h) = (
+        (span.x / px).ceil() as usize + 1,
+        (span.y / px).ceil() as usize + 1,
+    );
+    // what the shadows cover, row 0 at the top
+    let mut mask = vec![0f32; w * h];
+    for t in &tris {
+        let c = t.map(|p| DVec2::new((p.x - lo.x) / px, (hi.y - p.y) / px));
+        let (a, b) = (
+            c.iter().fold(DVec2::splat(f64::MAX), |m, p| m.min(*p)),
+            c.iter().fold(DVec2::splat(f64::MIN), |m, p| m.max(*p)),
+        );
+        let area = (c[1] - c[0]).perp_dot(c[2] - c[0]);
+        for y in (a.y.floor().max(0.0) as usize)..=(b.y.ceil() as usize).min(h - 1) {
+            for x in (a.x.floor().max(0.0) as usize)..=(b.x.ceil() as usize).min(w - 1) {
+                let p = DVec2::new(x as f64 + 0.5, y as f64 + 0.5);
+                let e = |i: usize, j: usize| (c[j] - c[i]).perp_dot(p - c[i]) * area.signum();
+                if e(0, 1) >= 0.0 && e(1, 2) >= 0.0 && e(2, 0) >= 0.0 {
+                    mask[y * w + x] = 1.0;
+                }
+            }
+        }
+    }
+    // soft edges: a box blur, twice, each way
+    let r = ((blur / px).round() as usize).max(1);
+    for _ in 0..2 {
+        mask = box_blur(&mask, w, h, r, true);
+        mask = box_blur(&mask, w, h, r, false);
+    }
+    let alpha = sh.opacity.clamp(0.0, 1.0) * 255.0;
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    let mut key = 0xcbf2_9ce4_8422_2325u64;
+    for m in &mask {
+        let a = (m * alpha).round() as u8;
+        rgba.extend_from_slice(&[20, 22, 28, a]);
+        key = (key ^ a as u64).wrapping_mul(0x100_0000_01b3);
+    }
+    let image = PlanItem::Image {
+        id: ElementId::NIL,
+        raster: std::sync::Arc::new(crate::raster::Raster {
+            width: w,
+            height: h,
+            rgba,
+            key: key ^ level.0.as_u128() as u64,
+        }),
+        lo: DVec2::new(lo.x, hi.y - h as f64 * px),
+        hi: DVec2::new(lo.x + w as f64 * px, hi.y),
+        clip: None,
+    };
+    // over the floors and rooms, under everything else
+    let under = |it: &PlanItem| {
+        matches!(it, PlanItem::Room { .. } | PlanItem::Tint { .. })
+            || !matches!(
+                it,
+                PlanItem::Label { .. }
+                    | PlanItem::Text { .. }
+                    | PlanItem::Tag { .. }
+                    | PlanItem::Dimension { .. }
+                    | PlanItem::Annotation { .. }
+            ) && ground(it.id())
+    };
+    let (mut out, rest): (Vec<PlanItem>, Vec<PlanItem>) =
+        std::mem::take(items).into_iter().partition(under);
+    out.push(image);
+    out.extend(rest);
+    *items = out;
+}
+
+/// `src` (`w` by `h`) averaged over `2r + 1` pixels along its rows, or its
+/// columns.
+fn box_blur(src: &[f32], w: usize, h: usize, r: usize, rows: bool) -> Vec<f32> {
+    let mut out = vec![0f32; src.len()];
+    let (n, lines) = if rows { (w, h) } else { (h, w) };
+    let at = |line: usize, i: usize| if rows { line * w + i } else { i * w + line };
+    let k = 1.0 / (2 * r + 1) as f32;
+    for line in 0..lines {
+        let mut sum = 0f32;
+        for i in 0..=r.min(n - 1) {
+            sum += src[at(line, i)];
+        }
+        for i in 0..n {
+            out[at(line, i)] = sum * k;
+            if i + r + 1 < n {
+                sum += src[at(line, i + r + 1)];
+            }
+            if i >= r {
+                sum -= src[at(line, i - r)];
+            }
+        }
+    }
+    out
 }
 
 /// A plan looking straight down from the top of its range: nothing cut,
@@ -488,6 +645,31 @@ mod tests {
             level: lv[1],
             cut_height: 1.2,
         };
+    }
+
+    #[test]
+    fn a_cut_plan_has_soft_shadows_over_its_floors_under_its_walls() {
+        let (m, lv, _) = levels();
+        let mut v = View::plan(lv[0]);
+        v.look.cues.shadows = Some(creabim_core::styles::Shadows {
+            direction: 0.0,
+            length: 1.0,
+            opacity: 0.4,
+        });
+        let d = plan(&m, &v, lv[0], 1.2);
+        let at = d
+            .items
+            .iter()
+            .position(|it| matches!(it, PlanItem::Image { .. }))
+            .expect("a shadow image");
+        let PlanItem::Image { raster, .. } = &d.items[at] else {
+            unreachable!()
+        };
+        assert!(raster.rgba.chunks(4).any(|p| p[3] > 50));
+        // the cut walls draw over the shadows
+        assert!(d.items[at..]
+            .iter()
+            .any(|it| matches!(it, PlanItem::Fill { .. })));
     }
 
     #[test]

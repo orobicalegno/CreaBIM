@@ -182,6 +182,11 @@ pub struct CreaBimApp {
     /// Aspect ratio of the 3D view as last drawn, for framing.
     aspect: f32,
     viewport: Option<Viewport3d>,
+    /// An image of the 3D view asked for, this many pixels wide: made on the
+    /// next frame, where the renderer is at hand.
+    pub(crate) export_3d: Option<u32>,
+    /// The Sun position window is open.
+    pub(crate) sun_dialog: bool,
     geometry_key: Option<GeometryKey>,
     /// How far Inset draws a face inside its edges.
     inset_by: f64,
@@ -467,6 +472,8 @@ impl CreaBimApp {
             cube: Default::default(),
             aspect: 0.65,
             viewport,
+            export_3d: None,
+            sun_dialog: false,
             geometry_key: None,
             geometry_gen: 0,
             pick_selection: None,
@@ -2762,6 +2769,100 @@ impl CreaBimApp {
 
     // ---- 3D -------------------------------------------------------------
 
+    /// Where the sun stands, typed or dragged: the 3D view follows as the
+    /// numbers change.
+    fn sun_window(&mut self, ctx: &egui::Context) {
+        if !self.sun_dialog {
+            return;
+        }
+        let mut open = true;
+        let mut close = false;
+        let before = self.shell.settings.clone();
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        shell::window("Sun position")
+            .open(&mut open)
+            .default_pos(area.min + Vec2::new(60.0, 90.0))
+            .constrain_to(area)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                let s = &mut self.shell.settings;
+                egui::Grid::new("sun_grid").num_columns(2).show(ui, |ui| {
+                    ui.label("Azimuth")
+                        .on_hover_text("Degrees clockwise from the project's true north: 90 east, 180 south, 270 west");
+                    ui.add(
+                        egui::DragValue::new(&mut s.sun_azimuth)
+                            .range(0.0..=360.0)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
+                    ui.end_row();
+                    ui.label("Height").on_hover_text("Degrees above the horizon");
+                    ui.add(
+                        egui::DragValue::new(&mut s.sun_altitude)
+                            .range(2.0..=90.0)
+                            .speed(0.5)
+                            .suffix("°"),
+                    );
+                    ui.end_row();
+                });
+                ui.add(egui::Slider::new(&mut s.sun_azimuth, 0.0..=360.0).show_value(false));
+                ui.checkbox(&mut s.shadows_3d, "Sun shadows");
+                ui.checkbox(&mut s.occlusion_3d, "Ambient occlusion");
+                ui.separator();
+                close = ui.button("Close").clicked();
+            });
+        if self.shell.settings != before {
+            self.shell.settings.store();
+        }
+        if !open || close {
+            self.sun_dialog = false;
+        }
+    }
+
+    /// The 3D view's background, for the paper's darkness and the shading.
+    pub(crate) fn background_3d(&self) -> [f64; 3] {
+        if self.shell.settings.render_3d == crate::render3d::RenderMode::WhiteModel
+            && !self.paper_is_dark
+        {
+            return [0.94, 0.94, 0.93];
+        }
+        if self.paper_is_dark {
+            BACKGROUND_3D_DARK
+        } else {
+            BACKGROUND_3D
+        }
+        .map(f64::from)
+    }
+
+    /// How the 3D view is lit: the sun from the settings, turned by the
+    /// project's true north; the white model always in sun and sky.
+    pub(crate) fn lighting_3d(&self) -> crate::render3d::Lighting {
+        let s = &self.shell.settings;
+        let white = s.render_3d == crate::render3d::RenderMode::WhiteModel;
+        let wire = matches!(
+            s.render_3d,
+            crate::render3d::RenderMode::Wireframe | crate::render3d::RenderMode::HiddenLine
+        );
+        let north = self
+            .doc
+            .model()
+            .project_info()
+            .map_or(0.0, |(_, p)| p.true_north);
+        crate::render3d::Lighting {
+            shadows: !wire && (s.shadows_3d || white),
+            ambient_occlusion: if wire {
+                0.0
+            } else if s.occlusion_3d || white {
+                0.85
+            } else {
+                0.0
+            },
+            white,
+            sun: sun_direction(s.sun_azimuth, s.sun_altitude, north),
+        }
+    }
+
     fn rebuild_geometry(&mut self, rs: &egui_wgpu::RenderState) {
         // the scene of this revision: shared if built, else the newest a
         // worker has finished while it builds this one, so an edit or a
@@ -2831,6 +2932,9 @@ impl CreaBimApp {
         // wires on the dark ground all but vanished)
         let edge_colour = if mode == crate::render3d::RenderMode::Wireframe && self.dark_3d {
             [0.72, 0.74, 0.78]
+        } else if mode == crate::render3d::RenderMode::WhiteModel {
+            // the white model's edges: faint, as a pencil line on card
+            [0.62, 0.62, 0.63]
         } else {
             [0.10, 0.10, 0.11]
         };
@@ -2897,10 +3001,14 @@ impl CreaBimApp {
                 }
                 _ => None,
             };
-            let plain = if mode == crate::render3d::RenderMode::HiddenLine {
-                [0.97, 0.97, 0.96]
-            } else {
-                item.color
+            let plain = match mode {
+                crate::render3d::RenderMode::HiddenLine => [0.97, 0.97, 0.96],
+                // white card, the glass a darker grey-blue
+                crate::render3d::RenderMode::WhiteModel if item.surface[2] < 0.999 => {
+                    [0.42, 0.47, 0.52]
+                }
+                crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                _ => item.color,
             };
             let mut colors =
                 vec![if selected { tint(plain) } else { plain }; item.mesh.positions.len()];
@@ -2980,7 +3088,7 @@ impl CreaBimApp {
         // one plane at a time (MU18): while a face is the workplane, the
         // ground grid dims to a hint
         let face_plane = self.workplane.is_some();
-        if self.shell.settings.ground_grid {
+        if self.shell.settings.ground_grid && mode != crate::render3d::RenderMode::WhiteModel {
             // as far out as 50 lines each way, at least the old 50 m
             let reach = (spacing * 25.0).max(25.0);
             // quiet: a little off the paper, so edges and vertex dots
@@ -3196,10 +3304,14 @@ impl CreaBimApp {
                     }
                     _ => Default::default(),
                 };
-            let plain = if mode == crate::render3d::RenderMode::HiddenLine {
-                [0.97, 0.97, 0.96]
-            } else {
-                item.color
+            let plain = match mode {
+                crate::render3d::RenderMode::HiddenLine => [0.97, 0.97, 0.96],
+                // white card, the glass a darker grey-blue
+                crate::render3d::RenderMode::WhiteModel if item.surface[2] < 0.999 => {
+                    [0.42, 0.47, 0.52]
+                }
+                crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                _ => item.color,
             };
             for (t, c) in item.mesh.indices.as_chunks::<3>().0.iter().enumerate() {
                 let color = if face.contains(&t) {
@@ -3500,18 +3612,45 @@ impl CreaBimApp {
         self.rebuild_selection(rs);
         let ppp = ui.ctx().pixels_per_point();
         let size = [(rect.width() * ppp) as u32, (rect.height() * ppp) as u32];
+        let lighting = self.lighting_3d();
+        let background = self.background_3d();
         if let Some(vp) = &mut self.viewport {
+            if let Some(width) = self.export_3d.take() {
+                let height = ((width as f32) / aspect.max(0.1)).round() as u32;
+                let picked = rfd::FileDialog::new()
+                    .set_title("Save the 3D view as an image")
+                    .add_filter("PNG image", &["png"])
+                    .set_file_name("3D view.png")
+                    .save_file();
+                if let Some(path) = picked {
+                    self.status = match vp.render_image(
+                        rs,
+                        [width, height],
+                        self.camera.view_proj(aspect),
+                        self.camera.eye().to_array(),
+                        background,
+                        lighting,
+                    ) {
+                        Some(img) => match img.save(&path) {
+                            Ok(()) => format!(
+                                "3D view saved, {}×{} pixels: {}",
+                                img.width(),
+                                img.height(),
+                                path.display()
+                            ),
+                            Err(e) => format!("Couldn't save the image: {e}"),
+                        },
+                        None => "Couldn't make the image: the graphics card refused it".into(),
+                    };
+                }
+            }
             let tex = vp.render(
                 rs,
                 size,
                 self.camera.view_proj(aspect),
                 self.camera.eye().to_array(),
-                if self.paper_is_dark {
-                    BACKGROUND_3D_DARK
-                } else {
-                    BACKGROUND_3D
-                }
-                .map(f64::from),
+                background,
+                lighting,
             );
             ui.painter().image(
                 tex,
@@ -13645,6 +13784,7 @@ impl CreaBimApp {
         self.levels_window(&ctx);
         self.level_copy_window(&ctx);
         self.styles_window(&ctx);
+        self.sun_window(&ctx);
         self.templates_window(&ctx);
         self.units_window(&ctx);
         self.divide_window(&ctx);
@@ -13719,5 +13859,31 @@ impl CreaBimApp {
         };
         let r = creabim_store::save(&base, &self.doc);
         crate::actlog::line(format!("exit unsaved: recovery copy {base}: {r:?}"));
+    }
+}
+
+/// Toward the sun: `azimuth` degrees clockwise from true north, `altitude`
+/// above the horizon, true north `true_north` degrees anticlockwise from
+/// the drawings' up.
+pub(crate) fn sun_direction(azimuth: f64, altitude: f64, true_north: f64) -> [f32; 3] {
+    let heading = (90.0 + true_north - azimuth).to_radians();
+    let alt = altitude.clamp(1.0, 90.0).to_radians();
+    [
+        (alt.cos() * heading.cos()) as f32,
+        (alt.cos() * heading.sin()) as f32,
+        alt.sin() as f32,
+    ]
+}
+
+#[cfg(test)]
+mod sun_tests {
+    #[test]
+    fn the_sun_from_the_south_shines_toward_the_drawings_up() {
+        // a sun due south sits on the drawing's down side
+        let d = super::sun_direction(180.0, 45.0, 0.0);
+        assert!(d[0].abs() < 1e-6 && d[1] < -0.7 && d[2] > 0.7);
+        // true north turned 90° anticlockwise: south lies to the right
+        let d = super::sun_direction(180.0, 45.0, 90.0);
+        assert!(d[0] > 0.7 && d[1].abs() < 1e-6);
     }
 }
