@@ -592,6 +592,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
         description: a.description.clone().unwrap_or_default(),
         wrap_openings: Default::default(),
         wrap_returns: Default::default(),
+        wrap_ends: Default::default(),
     };
     c.insert(
         &a.id,

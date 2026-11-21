@@ -211,6 +211,11 @@ pub struct Assembly {
     /// is, or back into the wall, the opening kept its size.
     #[serde(default, skip_serializing_if = "ReturnSide::is_default")]
     pub wrap_returns: ReturnSide,
+    /// At a wall's free end (one meeting no other wall): which face's
+    /// layers marked to wrap turn round the end and close it, as Revit's
+    /// Wrapping at Ends; none leaves the end square.
+    #[serde(default, skip_serializing_if = "WrapSides::is_none")]
+    pub wrap_ends: WrapSides,
 }
 
 /// Where a wall's layers turn when they wrap into a reveal.
@@ -517,6 +522,72 @@ pub fn opening_wrap(
     OpeningWrap { zones }
 }
 
+/// How a wall's layers wrap round its free end (see
+/// [`Assembly::wrap_ends`]): as at an opening's jamb, the returns running
+/// across the end to the far face (to the core's middle when both faces
+/// wrap), the layers they cover stopping short of the end by them.
+pub fn end_wrap(a: &Assembly, wall: &Wall) -> OpeningWrap {
+    let sides = a.wrap_ends;
+    if sides.is_none() || a.usage != AssemblyUse::Wall {
+        return OpeningWrap::default();
+    }
+    let bands = wall_bands(a, wall);
+    let t = wall.thickness / 2.0;
+    let (core_lo, core_hi) = wall_core(a, wall);
+    let mid = (core_lo + core_hi) / 2.0;
+    let exterior = if wall.flip { t } else { -t };
+    let both = sides.exterior() && sides.interior();
+    let mut zones = Vec::new();
+    for (on, face) in [(sides.exterior(), exterior), (sides.interior(), -exterior)] {
+        if !on {
+            continue;
+        }
+        let stop = if both { mid } else { -face };
+        let reach = (stop - face).abs();
+        let mut order: Vec<&Band> = bands.iter().collect();
+        order.sort_by(|x, y| {
+            let d = |b: &Band| ((b.s0 + b.s1) / 2.0 - face).abs();
+            d(x).total_cmp(&d(y))
+        });
+        let mut inset = 0.0;
+        let mut returns = Vec::new();
+        for b in order {
+            let inner = if face < 0.0 { b.s1 } else { b.s0 };
+            let depth = (inner - face).abs();
+            if depth >= reach - 1e-6 {
+                break;
+            }
+            if !a.layers[b.index].wraps_openings() || b.function == LayerFunction::AirGap {
+                continue;
+            }
+            let thickness = a.layers[b.index]
+                .wrap_thickness
+                .map_or(b.s1 - b.s0, |t| t.clamp(MIN_LAYER, 1.0));
+            returns.push((
+                WrapReturn {
+                    layer: b.index,
+                    inset,
+                    thickness,
+                    from: inner.min(stop),
+                    to: inner.max(stop),
+                },
+                depth,
+                (b.s0, b.s1),
+            ));
+            inset += thickness;
+        }
+        if !returns.is_empty() {
+            zones.push(WrapZone {
+                face,
+                stop,
+                returns,
+                into_opening: false,
+            });
+        }
+    }
+    OpeningWrap { zones }
+}
+
 /// The thinnest layer the editor and validation accept: 1 mm.
 pub const MIN_LAYER: f64 = 0.001;
 
@@ -528,6 +599,7 @@ impl Assembly {
             description: String::new(),
             wrap_openings: WrapSides::None,
             wrap_returns: ReturnSide::IntoOpening,
+            wrap_ends: WrapSides::None,
         }
     }
 

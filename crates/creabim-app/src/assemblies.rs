@@ -220,7 +220,7 @@ pub(super) fn layer_table(
     let (core0, core1) = a.core();
     // walls: which layers turn into the reveals of doors and windows
     let wall = a.usage == AssemblyUse::Wall;
-    let wrapping = !a.wrap_openings.is_none();
+    let wrapping = !a.wrap_openings.is_none() || !a.wrap_ends.is_none();
     ui.label(
         egui::RichText::new(format!("{} face", a.usage.first_face()))
             .size(10.5)
@@ -423,6 +423,22 @@ pub(super) fn layer_table(
                 })
                 .response
                 .on_hover_text("At doors and windows, the layers ticked Wraps turn into the reveals from these faces of the wall and run to the frame or subframe. A door or window can go its own way in its Properties.");
+        });
+        crate::props::flow(ui, |ui| {
+            ui.label("Wrap at free ends");
+            egui::ComboBox::from_id_salt(("wrap_ends", id))
+                .icon(crate::props::combo_icon)
+                .width(if compact { 110.0 } else { 140.0 })
+                .selected_text(edited.wrap_ends.label())
+                .show_ui(ui, |ui| {
+                    for w in WrapSides::ALL {
+                        if ui.selectable_value(&mut edited.wrap_ends, w, w.label()).changed() {
+                            label = "Wrap layers at free ends";
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Where the wall ends meeting no other wall, the layers ticked Wraps on these faces turn round its end and close it, as Revit's Wrapping at Ends: the exterior insulation and render cover the end of the block.");
         });
         if wrapping {
             crate::props::flow(ui, |ui| {

@@ -1612,6 +1612,28 @@ fn slide_onto(
     (u > TOL && u < host_new.length() - TOL && s.abs() < 50.0).then_some(q)
 }
 
+/// Which ends of `wall` (start, end) are free: no other wall of its level
+/// meets them, at its end or along its body.
+pub fn free_ends(model: &Model, id: ElementId) -> [bool; 2] {
+    let Some(ElementKind::Wall(w)) = model.get(id).map(|e| &e.kind) else {
+        return [false; 2];
+    };
+    let free = |p: DVec2| {
+        !model.iter().any(|e| match &e.kind {
+            ElementKind::Wall(o) if e.id != id && o.level == w.level && o.length() > TOL => {
+                let d = o.direction();
+                let u = (p - o.start).dot(d);
+                let off = (p - o.start).perp_dot(d).abs();
+                u > -o.thickness / 2.0 - w.thickness / 2.0 - TOL
+                    && u < o.length() + o.thickness / 2.0 + w.thickness / 2.0 + TOL
+                    && off <= o.thickness / 2.0 + w.thickness / 2.0 + TOL
+            }
+            _ => false,
+        })
+    };
+    [free(w.start), free(w.end)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1743,6 +1765,7 @@ mod tests {
                 description: String::new(),
                 wrap_openings: Default::default(),
                 wrap_returns: Default::default(),
+                wrap_ends: Default::default(),
             }),
         );
         let aid = a.id;
