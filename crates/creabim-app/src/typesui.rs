@@ -994,9 +994,17 @@ impl CreaBimApp {
 
     /// The Types window, when open.
     pub(super) fn types_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("types") {
+            self.dialog_end("types", keep);
+            self.types.open = false;
+        }
         if !self.types.open {
+            self.dialog_end("types", true);
             return;
         }
+        self.dialog_begin("types");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut asks = vec![];
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
@@ -1010,7 +1018,13 @@ impl CreaBimApp {
             ])
             .min_width(600.0)
             .collapsible(false)
-            .show(ctx, |ui| self.types_body(ui, &mut asks));
+            .show(ctx, |ui| {
+                self.types_body(ui, &mut asks);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("types", keep));
+        }
         self.types.open = open;
         for ask in asks {
             self.run_types(ask);

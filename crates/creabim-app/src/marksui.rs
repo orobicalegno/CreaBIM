@@ -130,9 +130,17 @@ impl CreaBimApp {
 
     /// The Mark numbering dialog, when open.
     pub(super) fn marks_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("marks") {
+            self.dialog_end("marks", keep);
+            self.marks.open = false;
+        }
         if !self.marks.open {
+            self.dialog_end("marks", true);
             return;
         }
+        self.dialog_begin("marks");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let before = marks::rules(self.doc.model());
         let mut rules = before.clone();
@@ -215,7 +223,11 @@ impl CreaBimApp {
                 });
                 ui.separator();
                 self.duplicates_list(ui);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
             });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("marks", keep));
+        }
         self.marks.open = open;
         if rules != before {
             let tx = marks::set_rules(self.doc.model(), rules.clone());

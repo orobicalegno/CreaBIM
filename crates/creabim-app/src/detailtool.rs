@@ -1198,13 +1198,18 @@ pub fn detail_fields(
                         label = "Line fill";
                     }
                     for h in Hatch::ALL {
-                        if h != Hatch::Empty
-                            && ui
+                        if h == Hatch::Empty {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            crate::app::materials::hatch_swatch(ui, h, 18.0);
+                            if ui
                                 .selectable_value(&mut d.fill, Some(h), h.label())
                                 .changed()
-                        {
-                            label = "Line fill";
-                        }
+                            {
+                                label = "Line fill";
+                            }
+                        });
                     }
                 });
         }
@@ -1299,16 +1304,22 @@ pub fn detail_fields(
             });
         }
         DetailKind::Region { hatch } => {
-            egui::ComboBox::from_id_salt("detail.hatch")
-                .icon(crate::props::combo_icon)
-                .selected_text(hatch.label())
-                .show_ui(ui, |ui| {
-                    for h in Hatch::ALL {
-                        if ui.selectable_value(hatch, h, h.label()).changed() {
-                            label = "Detail hatch";
+            ui.horizontal(|ui| {
+                crate::app::materials::hatch_swatch(ui, *hatch, 22.0);
+                egui::ComboBox::from_id_salt("detail.hatch")
+                    .icon(crate::props::combo_icon)
+                    .selected_text(hatch.label())
+                    .show_ui(ui, |ui| {
+                        for h in Hatch::ALL {
+                            ui.horizontal(|ui| {
+                                crate::app::materials::hatch_swatch(ui, h, 18.0);
+                                if ui.selectable_value(hatch, h, h.label()).changed() {
+                                    label = "Detail hatch";
+                                }
+                            });
                         }
-                    }
-                });
+                    });
+            });
             label = hatch_rows(ui, &mut d.hatch_scale, &mut d.hatch_angle, label);
         }
         _ => {}

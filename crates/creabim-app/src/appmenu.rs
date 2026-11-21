@@ -1543,7 +1543,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(file, ["new.project", "new.sheet"]);
+        // (New sheet is in the View menu, with the other views)
+        assert_eq!(file, ["new.project"]);
         let help = app.help_menu();
         assert!(help.iter().any(|i| matches!(i, Item::Sub { label, items, .. } if label == "Samples to learn from" && items.len() == 6)));
     }

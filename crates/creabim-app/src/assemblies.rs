@@ -642,9 +642,17 @@ impl CreaBimApp {
 
     /// The assembly editor window, when open.
     pub(super) fn assemblies_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("asm") {
+            self.dialog_end("asm", keep);
+            self.asm.open = false;
+        }
         if !self.asm.open {
+            self.dialog_end("asm", true);
             return;
         }
+        self.dialog_begin("asm");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut asks = vec![];
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
@@ -655,7 +663,13 @@ impl CreaBimApp {
             .default_size([760.0, (area.height() - 40.0).clamp(360.0, 600.0)])
             .min_width(620.0)
             .collapsible(false)
-            .show(ctx, |ui| self.assemblies_body(ui, &mut asks));
+            .show(ctx, |ui| {
+                self.assemblies_body(ui, &mut asks);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("asm", keep));
+        }
         self.asm.open = open;
         for ask in asks {
             self.run_asm(ask);

@@ -128,6 +128,12 @@ impl CreaBimApp {
                 "Enter delta length (negative shortens):",
                 Wants::Number(NumberFor::LengthenDelta),
             ),
+            "GUTTER" => self.cmd_pick_start(
+                name,
+                "Click near each eave of a roof the gutter runs along; Enter places it:",
+                0,
+                Finish::Gutter,
+            ),
             "STRETCH" => self.cmd_pick_start(
                 name,
                 "Specify crossing window corners, then base point and second point:",
@@ -1073,6 +1079,7 @@ impl CreaBimApp {
                 },
                 None => self.say("BREAKATPOINT: pick linework."),
             },
+            (Finish::Gutter, pts) if !pts.is_empty() => self.place_gutter(pts),
             (Finish::Stretch, [c1, c2, base, to, ..]) => {
                 let (lo, hi) = (c1.min(*c2), c1.max(*c2));
                 let by = *to - *base;
@@ -1546,6 +1553,182 @@ impl CreaBimApp {
                     self.say("Every layer on and unlocked.");
                 }
             }
+        }
+    }
+}
+
+impl CreaBimApp {
+    /// AutoCAD's ADDSELECTED: the command that draws what is selected,
+    /// set as it is (its type; linework's kind, layer and line type).
+    pub(super) fn add_selected(&mut self, ctx: &egui::Context) {
+        let Some(e) = self
+            .selection
+            .active
+            .and_then(|id| self.doc.model().get(id))
+            .cloned()
+        else {
+            self.status = "Select an object first.".into();
+            return;
+        };
+        self.selection.clear();
+        match &e.kind {
+            ElementKind::Detail(d) => {
+                self.plan.details.layer = d.layer.clone();
+                self.plan.details.linetype = d.linetype;
+                match d.kind.as_draft() {
+                    Some((shape, _)) => {
+                        let cmd = match shape {
+                            DraftShape::Line if d.points.len() > 2 => "PLINE",
+                            DraftShape::Line => "LINE",
+                            DraftShape::Closed => "PLINE",
+                            DraftShape::Rectangle => "RECTANG",
+                            DraftShape::Polygon { .. } => "POLYGON",
+                            DraftShape::Circle => "CIRCLE",
+                            DraftShape::Arc => "ARC",
+                            DraftShape::Ellipse => "ELLIPSE",
+                            DraftShape::Spline => "SPLINE",
+                        };
+                        self.cmd_start(ctx, cmd);
+                    }
+                    None => {
+                        self.pick_tool(ctx, crate::planview::Tool::Detail);
+                        self.plan.details.pick(d.kind);
+                        self.plan.details.layer = d.layer.clone();
+                        self.say(format!("ADDSELECTED: {}.", d.kind.label()));
+                    }
+                }
+            }
+            ElementKind::Note(_) => self.cmd_start(ctx, "TEXT"),
+            ElementKind::Dimension(_) => self.cmd_start(ctx, "DIMLINEAR"),
+            _ => {
+                use crate::planview::Tool;
+                let model = self.doc.model();
+                let cat = creabim_core::TypeCategory::of(&e.kind);
+                let tool = [
+                    Tool::Wall,
+                    Tool::Door,
+                    Tool::Window,
+                    Tool::Slab,
+                    Tool::Roof,
+                    Tool::Column,
+                    Tool::Beam,
+                    Tool::Footing,
+                ]
+                .into_iter()
+                .find(|t| super::typesui::category_of_tool(*t) == cat && cat.is_some());
+                let Some(tool) = tool else {
+                    self.status = format!("{}: draw another with its own tool.", e.name);
+                    return;
+                };
+                if let (Some(c), Some((t, _))) = (cat, creabim_core::types::type_of(model, &e)) {
+                    let tid = t.id;
+                    self.plan.types.insert(c, tid);
+                }
+                self.pick_tool(ctx, tool);
+                self.say(format!("ADDSELECTED: {} like {}.", tool.label(), e.name));
+            }
+        }
+    }
+}
+
+impl CreaBimApp {
+    /// GUTTER: a half-round gutter along the eaves picked, on each roof
+    /// they belong to, following it (see [`creabim_core::parts::Path::Roof`]).
+    fn place_gutter(&mut self, pts: &[DVec2]) {
+        use creabim_core::parts::{Part, Path, RoofEdges};
+        let model = self.doc.model();
+        // each point: the nearest eave edge of any roof, within 1.5 m
+        let mut picked: Vec<(ElementId, ElementId, Vec<usize>)> = vec![];
+        for p in pts {
+            let mut best: Option<(f64, ElementId, ElementId, usize)> = None;
+            for e in model.iter() {
+                let ElementKind::Roof(r) = &e.kind else {
+                    continue;
+                };
+                let eaves = r.eave_outline();
+                let n = eaves.len();
+                for i in 0..n {
+                    let (a, b) = (eaves[i], eaves[(i + 1) % n]);
+                    let ab = b - a;
+                    let t = ((*p - a).dot(ab) / ab.length_squared().max(1e-12)).clamp(0.0, 1.0);
+                    let d = (a + ab * t).distance(*p);
+                    if d < 1.5 && best.is_none_or(|x| d < x.0) {
+                        best = Some((d, e.id, r.level, i));
+                    }
+                }
+            }
+            if let Some((_, roof, level, i)) = best {
+                match picked.iter_mut().find(|x| x.0 == roof) {
+                    Some(x) => {
+                        if !x.2.contains(&i) {
+                            x.2.push(i);
+                        }
+                    }
+                    None => picked.push((roof, level, vec![i])),
+                }
+            }
+        }
+        if picked.is_empty() {
+            self.say("GUTTER: no roof's eave near those points. Click close to the roof's outer edge in a plan.");
+            return;
+        }
+        let profile = creabim_core::profiles::preset("Gutter").unwrap_or_default();
+        let mut tx = Transaction::new("Gutter");
+        let mut ids = vec![];
+        // eaves next to each other make one run round the corner; apart
+        // (the two eaves of a gable), a gutter each
+        let mut runs: Vec<(ElementId, ElementId, Vec<usize>)> = vec![];
+        for (roof, level, mut edges) in picked {
+            let n = match model.get(roof).map(|e| &e.kind) {
+                Some(ElementKind::Roof(r)) => r.eave_outline().len(),
+                _ => continue,
+            };
+            edges.sort_unstable();
+            if edges.len() == n {
+                runs.push((roof, level, edges));
+                continue;
+            }
+            // start each run where the edge before isn't picked
+            let starts: Vec<usize> = edges
+                .iter()
+                .copied()
+                .filter(|e| !edges.contains(&((e + n - 1) % n)))
+                .collect();
+            for s in starts {
+                let mut run = vec![s];
+                let mut e = (s + 1) % n;
+                while edges.contains(&e) && e != s {
+                    run.push(e);
+                    e = (e + 1) % n;
+                }
+                runs.push((roof, level, run));
+            }
+        }
+        for (roof, level, edges) in runs {
+            let mut part = Part::sweep(
+                level,
+                profile.clone(),
+                Path::Roof(RoofEdges {
+                    roof,
+                    edges,
+                    // its middle just clear of the fascia, its rim under
+                    // the roof's edge
+                    out: 0.08,
+                    down: 0.08,
+                }),
+            );
+            part.profile = Some("Gutter".into());
+            let e = Element::new("Gutter", ElementKind::Part(part));
+            ids.push(e.id);
+            tx = tx.insert(e);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => {
+                self.selection.clear();
+                self.selection.extend(ids, false);
+                self.say("GUTTER placed. It follows the roof; Properties sets how far out and how low it sits, and its profile.");
+            }
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
         }
     }
 }

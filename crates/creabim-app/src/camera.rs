@@ -282,9 +282,11 @@ impl OrbitCamera {
     /// `rise` up, in metres; the view keeps its direction.
     pub fn walk(&mut self, ahead: f32, side: f32, rise: f32) {
         let (yaw, _) = self.view_angles();
-        // the camera looks from the eye toward the target: opposite its yaw
-        let fwd = -Vec3::new(yaw.cos(), yaw.sin(), 0.0);
-        let right = fwd.cross(Vec3::Z).normalize_or_zero();
+        // forward is where the eye looks, up or down too: looking down,
+        // walking on goes down (a fly-through, as the user asked)
+        let flat = -Vec3::new(yaw.cos(), yaw.sin(), 0.0);
+        let fwd = (self.target - self.eye()).normalize_or(flat);
+        let right = flat.cross(Vec3::Z).normalize_or_zero();
         self.target += fwd * ahead + right * side + Vec3::Z * rise;
     }
 
@@ -404,15 +406,16 @@ mod tests {
         let eye = c.eye();
         c.look_round(Vec2::new(40.0, 10.0));
         assert!(c.eye().distance(eye) < 1e-4);
-        // forward along the ground, whatever the head's tilt
+        // forward where the eye looks: down too, when it looks down
         let before = c.eye();
+        let look = (c.target - c.eye()).normalize();
         c.walk(2.0, 0.0, 0.0);
         let step = c.eye() - before;
-        assert!((step.length() - 2.0).abs() < 1e-4 && step.z.abs() < 1e-5);
-        let fwd = c.target - c.eye();
-        assert!(Vec2::new(step.x, step.y).dot(Vec2::new(fwd.x, fwd.y)) > 0.0);
+        assert!((step.length() - 2.0).abs() < 1e-4);
+        assert!(step.normalize().dot(look) > 0.999, "{step} {look}");
+        let z = c.eye().z;
         c.walk(0.0, 0.0, 0.5);
-        assert!((c.eye().z - before.z - 0.5).abs() < 1e-4);
+        assert!((c.eye().z - z - 0.5).abs() < 1e-4);
     }
 
     #[test]

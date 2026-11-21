@@ -94,6 +94,8 @@ pub enum Finish {
     Distance,
     /// OFFSET's distance, from two points clicked.
     OffsetDist,
+    /// GUTTER: points near the roof eaves it runs along.
+    Gutter,
     Id,
     Area,
     Circle2P,
@@ -155,6 +157,30 @@ pub enum NumberFor {
 
 /// A command, by its name or one of its aliases: English and Italian
 /// AutoCAD, with a leading `_` or `-` taken off.
+/// AutoCAD's AutoComplete: the commands a word being typed could be,
+/// as (command, the alias it matches), best first: the command's own name,
+/// then its aliases, shortest first.
+pub fn suggestions(word: &str) -> Vec<(&'static str, &'static str)> {
+    let w = word.trim().trim_start_matches('_').to_uppercase();
+    if w.is_empty() || !w.chars().all(|c| c.is_ascii_alphabetic()) {
+        return vec![];
+    }
+    let mut out: Vec<(usize, &'static str, &'static str)> = vec![];
+    for (name, aliases) in ALIASES {
+        let hit = aliases
+            .split_whitespace()
+            .filter(|a| a.starts_with(&w))
+            .min_by_key(|a| a.len());
+        if let Some(a) = hit {
+            let rank = if name.starts_with(&w) { 0 } else { 1 + a.len() };
+            out.push((rank, name, a));
+        }
+    }
+    out.sort_by_key(|(r, n, _)| (*r, n.len()));
+    out.dedup_by_key(|x| x.1);
+    out.into_iter().take(8).map(|(_, n, a)| (n, a)).collect()
+}
+
 pub fn find(word: &str) -> Option<&'static str> {
     let w = word
         .trim()
@@ -201,6 +227,7 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("ARRAY", "ARRAY AR ARRAYRECT SERIE SERIERETT"),
     ("ARRAYPOLAR", "ARRAYPOLAR SERIEPOLARE"),
     ("BREAK", "BREAK BR SPEZZA"),
+    ("GUTTER", "GUTTER GRONDA GRO"),
     ("BREAKATPOINT", "BREAKATPOINT BRP SPEZZAINPUNTO"),
     ("JOIN", "JOIN J UNISCI"),
     ("LENGTHEN", "LENGTHEN LEN ALLUNGA"),
@@ -1394,6 +1421,54 @@ impl CreaBimApp {
                         });
                     });
             });
+        // AutoComplete: what is being typed could be these; a click runs
+        // one, Tab takes the first
+        if self.cmd.running.is_none() {
+            let list = suggestions(&self.cmd.text);
+            if !list.is_empty() {
+                let h = 22.0 * list.len() as f32 + 10.0;
+                let mut pick = None;
+                egui::Area::new(egui::Id::new("cmdline.suggest"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(egui::pos2(at.x + 22.0, at.y - h - 4.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::new()
+                            .fill(bg)
+                            .corner_radius(4.0)
+                            .inner_margin(egui::Margin::symmetric(6, 4))
+                            .stroke(egui::Stroke::new(1.0, faint.gamma_multiply(0.5)))
+                            .show(ui, |ui| {
+                                ui.set_min_width(220.0);
+                                let font = egui::FontId::monospace(12.0);
+                                for (i, (name, alias)) in list.iter().enumerate() {
+                                    let text = if alias == name {
+                                        name.to_string()
+                                    } else {
+                                        format!("{name}  ({alias})")
+                                    };
+                                    let r = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(text)
+                                                .font(font.clone())
+                                                .color(if i == 0 { ink } else { faint }),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    if r.clicked() {
+                                        pick = Some(*name);
+                                    }
+                                }
+                            });
+                    });
+                if let Some(name) = pick {
+                    self.cmd.text.clear();
+                    self.cmd_start(ctx, name);
+                }
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+                    self.cmd.text = list[0].0.to_string();
+                }
+            }
+        }
         // the caret blinks only while something is typed or asked for
         if !self.cmd.text.is_empty() || self.cmd.running.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -1404,6 +1479,15 @@ impl CreaBimApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_suggests_the_commands_it_could_be() {
+        let s = suggestions("li");
+        assert_eq!(s[0].0, "LINE");
+        assert!(suggestions("str").iter().any(|x| x.0 == "STRETCH"));
+        assert!(suggestions("ta").iter().any(|x| x.0 == "TRIM"));
+        assert!(suggestions("1,2").is_empty());
+    }
 
     #[test]
     fn aliases_find_their_commands_in_english_and_italian() {

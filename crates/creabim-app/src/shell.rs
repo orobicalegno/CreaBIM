@@ -426,7 +426,40 @@ impl CreaBimApp {
     }
 
     /// The items of a menu or dropdown, by its key.
+    /// A menu's items, each command in one menu only: entries that came
+    /// into two or three menus over time are kept where they belong (Levels
+    /// in Create, Types in Materials, styles and marks in Annotation,
+    /// selecting in Select, sheets and schedules in View).
     pub(super) fn menu_items(&self, key: &str) -> Vec<Item> {
+        let mut items = self.menu_items_all(key);
+        let drop: &[&str] = match key {
+            "menu:File" => &["levels", "styles", "marks", "new.sheet", "new.schedule"],
+            "menu:View" => &["levels"],
+            "menu:Create" => &["types.browser"],
+            "menu:Edit" => &["cmd:SelectAll", "cmd:SelectNone", "similar"],
+            "menu:Window" => &["open"],
+            _ => &[],
+        };
+        if !drop.is_empty() {
+            prune(&mut items, drop);
+        }
+        // in View's submenus: what View has at its top already
+        if key == "menu:View" {
+            for it in items.iter_mut() {
+                if let Item::Sub {
+                    label, items: sub, ..
+                } = it
+                {
+                    if label == "3D view visibility" {
+                        prune(sub, &["xray", "plan3d", "ground.grid"]);
+                    }
+                }
+            }
+        }
+        items
+    }
+
+    fn menu_items_all(&self, key: &str) -> Vec<Item> {
         if let Some(items) = self.area_menu(key) {
             return items;
         }
@@ -667,6 +700,12 @@ impl CreaBimApp {
                         );
                     }
                     items.push(Item::Separator);
+                    // AutoCAD's Add Selected: draw another like it
+                    items.push(
+                        Item::new("addselected", "Add selected (create one like it)")
+                            .icon("plus")
+                            .hint("Starts the command that draws this kind of object, with its type, layer and line type"),
+                    );
                     items.extend(self.wall_menu_items());
                     items.extend(self.join_menu_items());
                     items.extend(self.level_menu_items());
@@ -1744,6 +1783,7 @@ impl CreaBimApp {
                 }
             }
             "window.next" => self.next_project(),
+            "addselected" => self.add_selected(ctx),
             "window.close" => {
                 if self.unsaved() && arg != "discard" {
                     self.status = format!(
@@ -2139,6 +2179,7 @@ impl CreaBimApp {
             "units" => self.levels.units_open = true,
             "marks" => self.marks.open = true,
             "graphicstyles" => self.gstyles.open = true,
+            "hatches" => self.gstyles.open_patterns(),
             "underlay" => {
                 if let Some((view, level)) = self.active_plan() {
                     let u = match arg {
@@ -3944,10 +3985,8 @@ impl CreaBimApp {
         if !by_kind.is_empty() {
             items.push(Item::sub("All by type", by_kind).icon("layers"));
         }
-        let similar = self.similar_items();
-        if !similar.is_empty() {
-            items.push(Item::sub("Select similar", similar).icon("copy"));
-        }
+        // (Select similar is a submenu of its own already)
+        items.extend(self.similar_items());
         items
     }
 
@@ -5763,5 +5802,39 @@ pub(crate) fn window(title: impl Into<egui::WidgetText>) -> egui::Window<'static
     match NATIVE.with(|n| n.get()) {
         Some(r) if r.width() > 200.0 && r.height() > 150.0 => w.constrain_to(r),
         _ => w,
+    }
+}
+
+/// Take out of `items` (and their submenus) the actions whose id is, or
+/// starts with, one of `ids` followed by `:` (a family, like
+/// `new.schedule:3`); a submenu left empty goes too.
+fn prune(items: &mut Vec<Item>, ids: &[&str]) {
+    let gone = |id: &str| {
+        ids.iter()
+            .any(|d| id == *d || id.strip_prefix(*d).is_some_and(|r| r.starts_with(':')))
+    };
+    items.retain_mut(|it| match it {
+        Item::Action { id, .. } => !gone(id),
+        Item::Sub { items: sub, .. } => {
+            prune(sub, ids);
+            sub.iter()
+                .any(|x| matches!(x, Item::Action { .. } | Item::Sub { .. }))
+        }
+        _ => true,
+    });
+    // no separator left at either end, nor two together
+    while matches!(items.first(), Some(Item::Separator)) {
+        items.remove(0);
+    }
+    while matches!(items.last(), Some(Item::Separator)) {
+        items.pop();
+    }
+    let mut i = 1;
+    while i < items.len() {
+        if matches!(items[i], Item::Separator) && matches!(items[i - 1], Item::Separator) {
+            items.remove(i);
+        } else {
+            i += 1;
+        }
     }
 }

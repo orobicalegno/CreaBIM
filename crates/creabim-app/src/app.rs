@@ -60,7 +60,7 @@ mod marksui;
 #[path = "mastersui.rs"]
 mod mastersui;
 #[path = "materials.rs"]
-mod materials;
+pub(crate) mod materials;
 #[path = "objectsui.rs"]
 mod objectsui;
 #[path = "openprojects.rs"]
@@ -158,6 +158,8 @@ pub struct CreaBimApp {
     cmd: cmdline::CmdLine,
     /// What each open window found when it opened, for its Cancel.
     dialogs: std::collections::HashMap<&'static str, osnapui::DialogSnap>,
+    /// Save (true) or Cancel pressed in a window, to act on next frame.
+    dialog_close: Vec<(&'static str, bool)>,
     /// Report a problem asked for: the themed window is open; whether to
     /// put the project in.
     report_ask: Option<bool>,
@@ -453,6 +455,7 @@ impl CreaBimApp {
             log_ui: Default::default(),
             cmd: Default::default(),
             dialogs: Default::default(),
+            dialog_close: vec![],
             report_ask: None,
             close_ask: false,
             close_state: Default::default(),
@@ -3356,7 +3359,14 @@ impl CreaBimApp {
         if mid && ctrl_now {
             self.camera.zoom(-response.drag_delta().y / 60.0);
         } else {
-            let pan = response.dragged_by(egui::PointerButton::Secondary)
+            // Shift + right drag aims the camera: it turns where it stands,
+            // its target moving (a camera's eye stays put)
+            let aim = response.dragged_by(egui::PointerButton::Secondary) && shift_now;
+            if aim {
+                self.camera
+                    .look_round(GVec2::new(response.drag_delta().x, response.drag_delta().y));
+            }
+            let pan = (response.dragged_by(egui::PointerButton::Secondary) && !aim)
                 || (mid
                     && if archicad {
                         !shift_now
@@ -10100,11 +10110,10 @@ impl CreaBimApp {
                 }
                 ElementKind::Material(m) => {
                     materials::preview(ui, m, 72.0);
-                    let pats: Vec<String> = creabim_core::styles::active_pack(self.doc.model())
-                        .patterns
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect();
+                    let pats: Vec<creabim_core::styles::HatchPattern> =
+                        creabim_core::styles::active_pack(self.doc.model())
+                            .patterns
+                            .clone();
                     label = materials::material_fields(ui, m, &pats);
                     let users = creabim_core::library::users(self.doc.model(), id).len();
                     ui.label(egui::RichText::new(format!("Used by {users} elements.")).weak());
@@ -11722,21 +11731,14 @@ impl eframe::App for CreaBimApp {
     /// system ending it, a close the window never heard): unsaved work is
     /// kept in a recovery copy beside the project, never lost.
     fn on_exit(&mut self) {
-        if self.close_ok || !self.unsaved() {
-            return;
-        }
-        let base = if self.path.is_empty() {
-            std::env::temp_dir()
-                .join("Volumen recovered.creabim")
-                .display()
-                .to_string()
-        } else {
-            with_extension(&self.path, "recovered.creabim")
-        };
-        let r = creabim_store::save(&base, &self.doc);
-        crate::actlog::line(format!("exit unsaved: recovery copy {base}: {r:?}"));
+        self.recovery_copy();
+        // everything worth keeping is written: leave at once, rather than
+        // taking apart a big model, its undo history, drawings and the
+        // GPU's buffers piece by piece (a close that seemed to hang)
+        self.shell.settings.store();
+        crate::actlog::line("exit");
+        std::process::exit(0);
     }
-
     /// Keys typed while a web pane had the keyboard reach the views.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if self.shell.feed_keys(raw_input) {
@@ -13200,6 +13202,7 @@ impl CreaBimApp {
 
     fn frame_body(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.autosave(&ui.ctx().clone());
+        self.add_pending_pattern();
         let _perf = Perf::new("frame");
         // never lose work to a close: unsaved changes ask first, those of
         // a project waiting in the Window menu too (shown to ask)
@@ -13697,5 +13700,23 @@ impl CreaBimApp {
                 self.placement = PlanPlacement::Docked;
             }
         }
+    }
+}
+
+impl CreaBimApp {
+    fn recovery_copy(&mut self) {
+        if self.close_ok || !self.unsaved() {
+            return;
+        }
+        let base = if self.path.is_empty() {
+            std::env::temp_dir()
+                .join("Volumen recovered.creabim")
+                .display()
+                .to_string()
+        } else {
+            with_extension(&self.path, "recovered.creabim")
+        };
+        let r = creabim_store::save(&base, &self.doc);
+        crate::actlog::line(format!("exit unsaved: recovery copy {base}: {r:?}"));
     }
 }

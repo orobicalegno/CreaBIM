@@ -220,9 +220,17 @@ impl CreaBimApp {
 
     /// The Levels manager window, when open.
     pub(super) fn levels_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("levels") {
+            self.dialog_end("levels", keep);
+            self.levels.open = false;
+        }
         if !self.levels.open {
+            self.dialog_end("levels", true);
             return;
         }
+        self.dialog_begin("levels");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut asks = vec![];
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
@@ -233,7 +241,13 @@ impl CreaBimApp {
             .constrain_to(area)
             .min_width(660.0)
             .collapsible(false)
-            .show(ctx, |ui| self.levels_contents(ui, &mut asks));
+            .show(ctx, |ui| {
+                self.levels_contents(ui, &mut asks);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("levels", keep));
+        }
         self.levels.open = open;
         if !open {
             self.levels.delete = None;
@@ -601,9 +615,17 @@ impl CreaBimApp {
     /// annotation (A5-2): the status bar's Units menu and a dimension's
     /// "Number formats…" open it.
     pub(super) fn units_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("units") {
+            self.dialog_end("units", keep);
+            self.levels.units_open = false;
+        }
         if !self.levels.units_open {
+            self.dialog_end("units", true);
             return;
         }
+        self.dialog_begin("units");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut units = self.doc.model().units();
         let before = units;
@@ -660,7 +682,11 @@ impl CreaBimApp {
                         }
                     });
                 });
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
             });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("units", keep));
+        }
         self.levels.units_open = open;
         self.levels.units_kind = kind;
         if units != before {

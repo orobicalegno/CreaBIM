@@ -32,6 +32,12 @@ impl CreaBimApp {
         );
     }
 
+    /// Save or Cancel pressed in window `key`'s last frame.
+    pub(super) fn take_dialog_close(&mut self, key: &str) -> Option<bool> {
+        let i = self.dialog_close.iter().position(|(k, _)| *k == key)?;
+        Some(self.dialog_close.remove(i).1)
+    }
+
     /// Save and Cancel at a window's foot: Some(true) to keep what changed,
     /// Some(false) to put it back.
     pub(super) fn dialog_footer(ui: &mut egui::Ui) -> Option<bool> {

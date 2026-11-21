@@ -24,6 +24,14 @@ pub(super) enum Page {
     Marks,
 }
 
+impl StylesUi {
+    /// Open the window on its Patterns page.
+    pub(super) fn open_patterns(&mut self) {
+        self.open = true;
+        self.page = Page::Patterns;
+    }
+}
+
 /// The window's own state, for the session.
 #[derive(Default)]
 pub(super) struct StylesUi {
@@ -773,9 +781,17 @@ impl CreaBimApp {
 
     /// The Graphic styles window, when open.
     pub(super) fn graphic_styles_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("gstyles") {
+            self.dialog_end("gstyles", keep);
+            self.gstyles.open = false;
+        }
         if !self.gstyles.open {
+            self.dialog_end("gstyles", true);
             return;
         }
+        self.dialog_begin("gstyles");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let (id, in_model) = self.edited_pack();
         // while an option is previewed, the window shows the pack as it was
@@ -899,7 +915,11 @@ impl CreaBimApp {
                         }
                     }
                 });
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
             });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("gstyles", keep));
+        }
         self.gstyles.open = open;
         if pack != before {
             self.end_preview();
@@ -1192,7 +1212,13 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
         }
         ui.menu_button("Copy a built-in", |ui| {
             for h in creabim_core::Hatch::ALL {
-                if ui.button(h.label()).clicked() {
+                let clicked = ui
+                    .horizontal(|ui| {
+                        crate::app::materials::hatch_swatch(ui, h, 18.0);
+                        ui.button(h.label()).clicked()
+                    })
+                    .inner;
+                if clicked {
                     let mut p = styles::builtin_pattern(h);
                     if pack.patterns.iter().any(|x| x.name == p.name) {
                         p.name = format!("{} copy", p.name);
