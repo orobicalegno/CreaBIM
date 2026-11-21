@@ -3379,11 +3379,12 @@ impl CreaBimApp {
                 } else {
                     !classic && !shift_now
                 };
-            // on foot a middle or right drag turns the head
+            // on foot a right drag moves the camera, as it does anywhere
+            // (Shift + right aims it, above); the middle button turns the head
             let (pan, orbit) = if self.walking {
                 (
-                    false,
-                    mid || response.dragged_by(egui::PointerButton::Secondary),
+                    response.dragged_by(egui::PointerButton::Secondary) && !aim,
+                    mid,
                 )
             } else {
                 (pan, orbit)

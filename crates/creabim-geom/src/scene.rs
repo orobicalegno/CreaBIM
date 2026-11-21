@@ -794,8 +794,15 @@ fn apply_joins(model: &Model, items: &mut [SceneItem]) {
     let rules = creabim_core::joins::rules(model);
     let is = |id: ElementId, wall: bool| match model.get(id).map(|e| &e.kind) {
         Some(ElementKind::Wall(w)) => wall && w.curtain.is_none(),
-        // a flat or pitched roof meets its walls as a slab does
-        Some(ElementKind::Slab(_) | ElementKind::Roof(_)) => !wall,
+        Some(ElementKind::Slab(_)) => !wall,
+        // a flat roof meets the walls beside it as a slab does; a pitched
+        // one is left to its walls' attached tops (it was cut by them)
+        Some(ElementKind::Roof(r)) => !wall && r.effective_shape() == creabim_core::RoofShape::Flat,
+        _ => false,
+    };
+    // a wall whose top is attached to that roof already stops under it
+    let attached = |w: ElementId, roof: ElementId| match model.get(w).map(|e| &e.kind) {
+        Some(ElementKind::Wall(w)) => w.attach_top.contains(&roof),
         _ => false,
     };
     let strength = |i: &SceneItem| {
@@ -828,7 +835,7 @@ fn apply_joins(model: &Model, items: &mut [SceneItem]) {
             let (Some(bw), Some(bs)) = (boxes[w], boxes[sl]) else {
                 continue;
             };
-            if !overlap(bw, bs) {
+            if !overlap(bw, bs) || attached(items[w].id, items[sl].id) {
                 continue;
             }
             let (a, b) = (&items[w], &items[sl]);
