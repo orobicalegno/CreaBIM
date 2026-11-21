@@ -369,7 +369,13 @@ impl CreaBimApp {
     /// Typing in a drawing goes to the command line: the keys are taken
     /// before the views and the shortcuts see them.
     pub(super) fn cmd_keys(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.egui_wants_keyboard_input() {
+        // Esc always ends the command: a field that had the keyboard
+        // (Properties, a box of the strip) lets it go too, rather than
+        // swallowing the Esc
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if ctx.egui_wants_keyboard_input() {
+                ctx.memory_mut(|m| m.stop_text_input());
+            }
             self.cmd.esc = true;
         }
         // a move, rotate or scale running takes its typed length itself
@@ -380,7 +386,7 @@ impl CreaBimApp {
             return;
         }
         let typing = !self.cmd.text.is_empty();
-        let busy = self.cmd.running.is_some();
+        let busy = self.cmd.running.is_some() || self.plan.details.choosing_cutters;
         let idle = self.plan.tool == Tool::Select;
         let mut text = String::new();
         let (mut enter, mut esc, mut back, mut up, mut down) = (false, false, false, false, false);
@@ -498,6 +504,24 @@ impl CreaBimApp {
 
     /// The command line's answer to a line typed (empty: Enter alone).
     pub(super) fn cmd_enter(&mut self, ctx: &egui::Context, t: &str) {
+        // TRIM and EXTEND: Enter ends picking the cutting edges
+        if t.is_empty() && self.plan.tool == Tool::Detail && self.plan.details.choosing_cutters {
+            self.plan.details.choosing_cutters = false;
+            let n = self.plan.details.cutters.len();
+            let what = match self.plan.details.edit {
+                Some(crate::detailtool::DraftEdit::Extend) => "extend",
+                _ => "trim",
+            };
+            self.say(format!(
+                "{}. Select the objects to {what}: click each, or drag a fence line across them. Enter or Esc ends.",
+                if n == 0 {
+                    "Every line cuts".to_string()
+                } else {
+                    format!("{n} cutting edges")
+                }
+            ));
+            return;
+        }
         if !t.is_empty() && self.cmd.recent.last().map(|s| s.as_str()) != Some(t) {
             self.cmd.recent.push(t.to_string());
         }
@@ -1082,8 +1106,18 @@ impl CreaBimApp {
             "ROTATE" => selection_cmd(self, ctx, Command::Rotate),
             "MIRROR" => selection_cmd(self, ctx, Command::Mirror),
             "SCALE" => selection_cmd(self, ctx, Command::Scale),
-            "TRIM" => edit(self, ctx, D::Trim),
-            "EXTEND" => edit(self, ctx, D::Extend),
+            "TRIM" | "EXTEND" => {
+                edit(self, ctx, if name == "TRIM" { D::Trim } else { D::Extend });
+                self.selection.clear();
+                self.say(format!(
+                    "{name}: select the {} edges, then Enter (Enter alone: every line).",
+                    if name == "TRIM" {
+                        "cutting"
+                    } else {
+                        "boundary"
+                    }
+                ));
+            }
             "FILLET" => {
                 self.pick_tool(ctx, Tool::Detail);
                 let r = crate::units::len(self.plan.details.radius);
@@ -1253,15 +1287,32 @@ impl CreaBimApp {
             .cmd_pick
             .as_ref()
             .is_some_and(|(_, p)| p.len() == 1);
+        if let Some(t) = self.plan.tool_request.take() {
+            self.cmd.running = None;
+            self.plan.cmd_pick = None;
+            self.pick_tool(ctx, t);
+        }
         // a quick right-click: Enter for what runs, else the last command
         if std::mem::take(&mut self.plan.right_quick) && self.plan.modal.is_none() {
-            if self.cmd.running.is_some() || self.plan.outline.is_some() {
+            let idle_tool = self.plan.tool != Tool::Select
+                && self.plan.details.path.is_empty()
+                && self.plan.details.edit.is_none()
+                && self.plan.pending.is_none();
+            if self.plan.tool == Tool::Detail && self.plan.details.edit.is_some() {
+                // in TRIM, EXTEND and the other edits: Enter
+                if self.plan.details.choosing_cutters {
+                    self.cmd_enter(ctx, "");
+                } else {
+                    self.cmd.esc = true;
+                }
+            } else if (self.cmd.running.is_some() && !idle_tool) || self.plan.outline.is_some() {
                 self.cmd_enter(ctx, "");
-            } else if self.plan.tool != Tool::Select {
-                // Enter ends a tool that draws nothing just now
-                self.cmd.esc = true;
             } else if let Some(c) = self.cmd.last.clone() {
+                // nothing being drawn: the last command again, as AutoCAD
+                self.cmd.running = None;
                 self.cmd_start(ctx, &c);
+            } else if self.plan.tool != Tool::Select {
+                self.cmd.esc = true;
             }
         }
         if std::mem::take(&mut self.plan.north_request) {
@@ -1270,10 +1321,7 @@ impl CreaBimApp {
         }
         // Esc ends the command: back to selecting, what is drawn kept, and
         // nothing left selected (the piece just drawn neither), as AutoCAD
-        if std::mem::take(&mut self.cmd.esc)
-            && self.plan.modal.is_none()
-            && !ctx.egui_wants_keyboard_input()
-        {
+        if std::mem::take(&mut self.cmd.esc) && self.plan.modal.is_none() {
             if self.plan.tool != Tool::Select || self.cmd.running.is_some() {
                 crate::detailtool::keep(&mut self.doc, &mut self.plan, &mut self.selection);
                 self.plan.cmd_pick = None;
@@ -1284,6 +1332,12 @@ impl CreaBimApp {
             }
             self.selection.clear();
             self.plan.boxsel = None;
+            // nothing left looking picked: edit mode, the hover, a face
+            self.plan.edit = None;
+            self.plan.hover = None;
+            self.face = None;
+            self.plan.nav_mesh = None;
+            ctx.request_repaint();
         }
         if !self.shell.settings.command_line {
             return;

@@ -440,6 +440,10 @@ pub struct PlanState {
     /// act on (Enter, or the last command again).
     pub right_down: f64,
     pub right_quick: bool,
+    /// The right button moved (a pan) since it went down.
+    pub right_dragged: bool,
+    /// A tool the view asks the app to pick (Select, for a context menu).
+    pub tool_request: Option<Tool>,
     /// With [`Mode::Grip`] armed: the grip it drives (from the edge palette).
     pub armed_grip: Option<crate::handles::HandleKind>,
     /// With [`Mode::Offset`] armed: change the original, no copy (the edge
@@ -708,6 +712,8 @@ impl Default for PlanState {
             armed_follow: false,
             right_down: 0.0,
             right_quick: false,
+            right_dragged: false,
+            tool_request: None,
             armed_grip: None,
             in_place: false,
             commands: vec![],
@@ -1051,6 +1057,11 @@ pub fn show(
     if response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
     {
         state.right_down = ui.input(|i| i.time);
+        state.right_dragged = false;
+    }
+    // a right drag pans: no click then
+    if state.right_down > 0.0 && response.dragged_by(egui::PointerButton::Secondary) {
+        state.right_dragged = true;
     }
     // TRIM and EXTEND take a window too, as AutoCAD's: a click trims the
     // stretch under it, a drag across lines trims each where it is crossed
@@ -1083,15 +1094,14 @@ pub fn show(
                 }
             }
         }
+        // a fence: the line dragged; what it crosses is trimmed there
         if let Some((a, b)) = state.fence {
-            let r = Rect::from_two_pos(a, b);
-            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(80, 200, 120, 30));
-            painter.rect_stroke(
-                r,
-                0.0,
-                Stroke::new(1.0, Color32::from_rgb(60, 160, 90)),
-                egui::StrokeKind::Inside,
-            );
+            painter.extend(egui::Shape::dashed_line(
+                &[a, b],
+                Stroke::new(1.6, Color32::from_rgb(220, 70, 50)),
+                7.0,
+                4.0,
+            ));
         }
     }
 
@@ -1749,7 +1759,10 @@ pub fn show(
         .and_then(|m| m.snap_exclude(doc));
     let exclude = match (moving, tool) {
         (Some(ids), _) => ids,
-        (None, Tool::Select) => selection
+        // what is selected snaps like the rest (an object just drawn, or
+        // one being stretched, picked or measured), except while one of
+        // its own grips is dragged or its corners edited
+        (None, Tool::Select) if state.grip.is_some() || state.edit.is_some() => selection
             .active
             .map(|id| joined_with(doc, id))
             .unwrap_or_default(),
@@ -1851,6 +1864,62 @@ pub fn show(
                 Some(xf.to_world(p).extend(0.0)),
             )
         });
+    // what is being drawn snaps too, before it is made: the corners and
+    // middles of the path so far (to close it on its first point), and a
+    // command's points
+    let tracked = {
+        let mut own: Vec<DVec2> = vec![];
+        if tool == Tool::Detail && state.details.view == Some(view) {
+            own.extend(state.details.path.iter().copied());
+        }
+        if let Some((v, pts)) = &state.cmd_pick {
+            if v.is_none_or(|v| v == view) {
+                own.extend(pts.iter().copied());
+            }
+        }
+        let p = response.hover_pos().filter(|_| host.is_none() && !zooming);
+        match (p, own.len()) {
+            (Some(p), n) if n >= 1 => {
+                let mut s = Snapper::new();
+                for w in own.windows(2) {
+                    s.add_segment(
+                        w[0].extend(0.0),
+                        w[1].extend(0.0),
+                        snaps::Source::Edge,
+                        None,
+                    );
+                }
+                if own.len() == 1 {
+                    s.add_segment(
+                        own[0].extend(0.0),
+                        own[0].extend(0.0) + DVec3::X * 1e-3,
+                        snaps::Source::Edge,
+                        None,
+                    );
+                }
+                let mine = s
+                    .snap(&snap_cfg, p, &pane_project, None, None)
+                    .filter(|m| matches!(m.kind, SnapKind::Endpoint | SnapKind::Midpoint));
+                let dist = |q: DVec3| pane_project(q).map_or(f32::MAX, |c| c.distance(p));
+                match (mine, &tracked) {
+                    (Some(m), Some(t))
+                        if !matches!(
+                            t.snap.kind,
+                            SnapKind::Endpoint
+                                | SnapKind::Midpoint
+                                | SnapKind::Intersection
+                                | SnapKind::Center
+                        ) || dist(m.p) < dist(t.snap.p) - 0.5 =>
+                    {
+                        Some(snaps::Guided::plain(m, None))
+                    }
+                    (Some(m), None) => Some(snaps::Guided::plain(m, None)),
+                    _ => tracked,
+                }
+            }
+            _ => tracked,
+        }
+    };
     let tool_snap = tracked.as_ref().map(|t| t.snap);
     let tool_align = tracked.as_ref().and_then(|t| t.align);
     let now = ui.input(|i| i.time);
@@ -3027,11 +3096,21 @@ pub fn show(
     if let (Some(space), Some(c)) = (space, state.cursor) {
         draw_cursor(&painter, xf.to_screen(model_to_pane(space, c)));
     }
-    let right = response.secondary_clicked() && !shift;
+    // the right button let go after going down here, without a pan: a
+    // click, however long it was held (egui's own click ends at 0.8 s, so
+    // a long press opened nothing)
+    let released = state.right_down > 0.0
+        && ui.input(|i| i.pointer.button_released(egui::PointerButton::Secondary));
+    let right = released && !state.right_dragged && !shift;
+    let pressed_for = ui.input(|i| i.time) - state.right_down;
+    if released {
+        state.right_down = 0.0;
+    }
     // AutoCAD's time-sensitive right-click: held a moment, the menu; a
     // quick click, Enter (or the last command again, with none running)
-    let held = right && ui.input(|i| i.time) - state.right_down >= 0.25;
-    if right && !held && tool != Tool::Detail {
+    let held = right && pressed_for >= 0.25;
+    let drawing_path = tool == Tool::Detail && !state.details.path.is_empty();
+    if right && !held && !drawing_path {
         state.right_quick = true;
     }
     let esc =
@@ -3051,7 +3130,11 @@ pub fn show(
     if esc {
         state.step_back();
     }
-    let menu = held && !state.step_back() && tool == Tool::Select;
+    let menu = held && !state.step_back() && state.modal.is_none() && !drawing_path;
+    // a menu asked for with another tool in hand: back to selecting first
+    if menu && tool != Tool::Select {
+        state.tool_request = Some(Tool::Select);
+    }
     if menu {
         // right-click on something not yet selected selects it first
         if let Some(p) = response.interact_pointer_pos() {
@@ -3073,7 +3156,7 @@ pub fn show(
             state.menu_at = space.map(|space| pane_to_model(space, w, level_z));
         }
     }
-    if tool == Tool::Select && state.modal.is_none() && state.web_menus {
+    if state.modal.is_none() && state.web_menus && (tool == Tool::Select || menu) {
         if menu {
             state.menu_request = response.interact_pointer_pos();
         }

@@ -2596,7 +2596,7 @@ pub struct Guided {
 }
 
 impl Guided {
-    fn plain(snap: Snap, align: Option<Alignment>) -> Self {
+    pub fn plain(snap: Snap, align: Option<Alignment>) -> Self {
         Self {
             snap,
             align,

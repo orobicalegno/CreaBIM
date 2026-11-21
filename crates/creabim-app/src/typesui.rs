@@ -30,6 +30,10 @@ pub(super) enum TypeAsk {
     Delete(ElementId),
     Rename(ElementId, String),
     Edit(ElementId, &'static str, ElementType),
+    /// The layers of a type's assembly changed (assembly, label, new).
+    Layers(ElementId, &'static str, creabim_core::assembly::Assembly),
+    /// Give the type a copy of the layers it shares, its own to change.
+    OwnLayers(ElementId),
     SelectInstances(ElementId),
     /// Make the selected elements (those it fits) of this type, or of none.
     Assign(Option<ElementId>),
@@ -219,6 +223,62 @@ fn assembly_pick(
             });
     });
     changed
+}
+
+/// The assembly a type is built of, when it is layered.
+fn type_assembly(t: &ElementType) -> Option<ElementId> {
+    match &t.params {
+        TypeParams::Wall(w) if w.curtain.is_none() => w.assembly,
+        TypeParams::Slab(s) | TypeParams::Roof(s) => s.assembly,
+        _ => None,
+    }
+}
+
+/// A layered type's layers, edited right here as in Revit's Edit Type ›
+/// Structure; a note and a way out when other types share them.
+fn type_layers(ui: &mut egui::Ui, model: &Model, id: ElementId, t: &ElementType) -> Vec<TypeAsk> {
+    let mut asks = vec![];
+    let Some(aid) = type_assembly(t) else {
+        return asks;
+    };
+    let Some(ElementKind::Assembly(a)) = model.get(aid).map(|e| &e.kind) else {
+        return asks;
+    };
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Layers").strong());
+    let others: Vec<String> = model
+        .iter()
+        .filter(|e| e.id != id)
+        .filter_map(|e| match &e.kind {
+            ElementKind::ElementType(o) if type_assembly(o) == Some(aid) => Some(e.name.clone()),
+            _ => None,
+        })
+        .collect();
+    if !others.is_empty() {
+        crate::props::flow(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Shared with {}: changing them changes those too.",
+                    others.join(", ")
+                ))
+                .weak()
+                .small(),
+            );
+            if ui
+                .small_button("Make them this type's own")
+                .on_hover_text(
+                    "A copy of the layers for this type only, as each Revit type has its own",
+                )
+                .clicked()
+            {
+                asks.push(TypeAsk::OwnLayers(id));
+            }
+        });
+    }
+    if let Some((label, new)) = super::assemblies::layer_table(ui, model, aid, a, true) {
+        asks.push(TypeAsk::Layers(aid, label, new));
+    }
+    asks
 }
 
 /// The thickness an assembly gives, if it is one.
@@ -901,7 +961,7 @@ impl CreaBimApp {
         ui.label(egui::RichText::new(format!("{} · {}", t.ifc_class(), t.summary(model))).weak());
         let label = type_fields(ui, model, &mut t);
         let n = types::instances(model, id).len();
-        let mut asks = vec![];
+        let mut asks = type_layers(ui, model, id, &t);
         crate::props::flow(ui, |ui| {
             ui.label(match n {
                 0 => "No instances yet.".to_string(),
@@ -944,7 +1004,10 @@ impl CreaBimApp {
             .open(&mut open)
             .default_pos(area.min + Vec2::new(36.0, 36.0))
             .constrain_to(area)
-            .default_size([720.0, (area.height() - 40.0).clamp(360.0, 620.0)])
+            .default_size([
+                920.0_f32.min(area.width() - 60.0),
+                (area.height() - 40.0).clamp(360.0, 620.0),
+            ])
             .min_width(600.0)
             .collapsible(false)
             .show(ctx, |ui| self.types_body(ui, &mut asks));
@@ -1086,6 +1149,7 @@ impl CreaBimApp {
                 ui.add_space(6.0);
                 let mut new = t.clone();
                 let label = type_fields(ui, model, &mut new);
+                asks.extend(type_layers(ui, model, id, &new));
                 if !label.is_empty() {
                     asks.push(TypeAsk::Edit(id, label, new));
                 }
@@ -1164,11 +1228,24 @@ impl CreaBimApp {
                 }
             }
             TypeAsk::Duplicate(id) => {
-                if let Some(e) = types::duplicate(self.doc.model(), id) {
+                if let Some(mut e) = types::duplicate(self.doc.model(), id) {
                     let new = e.id;
-                    let r = self
-                        .doc
-                        .commit(Transaction::new("Duplicate type").insert(e));
+                    let mut tx = Transaction::new("Duplicate type");
+                    // its layers are copied with it, as Revit's types each
+                    // have their own: the copy's can change on their own
+                    if let ElementKind::ElementType(t) = &mut e.kind {
+                        if let Some(ae) = type_assembly(t).and_then(|a| self.doc.model().get(a)) {
+                            let copy = Element::new(format!("{} layers", e.name), ae.kind.clone());
+                            let cid = copy.id;
+                            match &mut t.params {
+                                TypeParams::Wall(w) => w.assembly = Some(cid),
+                                TypeParams::Slab(s) | TypeParams::Roof(s) => s.assembly = Some(cid),
+                                _ => {}
+                            }
+                            tx = tx.insert(copy);
+                        }
+                    }
+                    let r = self.doc.commit(tx.insert(e));
                     self.types.current = Some(new);
                     self.report(r, "Duplicated the type.");
                 }
@@ -1214,6 +1291,43 @@ impl CreaBimApp {
                             n => format!("{label}: {} follow.", plural(n, "instance")),
                         },
                     );
+                }
+            }
+            TypeAsk::Layers(aid, label, a) => {
+                if let Err(e) = a.validate() {
+                    self.status = format!("Can't: {e}.");
+                    return;
+                }
+                if let Some(tx) = creabim_core::assembly::edit(self.doc.model(), aid, a, label) {
+                    let r = self.doc.commit_merged(tx);
+                    self.report(r, format!("{label}."));
+                }
+            }
+            TypeAsk::OwnLayers(id) => {
+                let model = self.doc.model();
+                let Some(te) = model.get(id).cloned() else {
+                    return;
+                };
+                let ElementKind::ElementType(t) = &te.kind else {
+                    return;
+                };
+                let Some(aid) = type_assembly(t) else { return };
+                let Some(ae) = model.get(aid) else { return };
+                let mut copy = Element::new(format!("{} layers", te.name), ae.kind.clone());
+                copy.name = format!("{} layers", te.name);
+                let cid = copy.id;
+                let mut nt = t.clone();
+                match &mut nt.params {
+                    TypeParams::Wall(w) => w.assembly = Some(cid),
+                    TypeParams::Slab(s) | TypeParams::Roof(s) => s.assembly = Some(cid),
+                    _ => {}
+                }
+                let r = self.doc.commit(Transaction::new("Own layers").insert(copy));
+                if r.is_ok() {
+                    if let Some(tx) = types::edit(self.doc.model(), id, nt, "Own layers") {
+                        let r = self.doc.commit_merged(tx);
+                        self.report(r, "The type has its own layers now.");
+                    }
                 }
             }
             TypeAsk::SelectInstances(id) => {

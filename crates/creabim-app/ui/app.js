@@ -191,7 +191,8 @@
       // then the active view's own settings at the right. What doesn't fit
       // goes in a More menu at the end (the app picks what, from the
       // widths measured below).
-      `<div class="bar3"><div class="toolname">${S.tool.icon ? icon(S.tool.icon) : ""}<b>${esc(S.tool.label)}</b>` +
+      (S.strip === false ? `<div class="bar3 hidden-strip"></div>` : "") +
+      `<div class="bar3${S.strip === false ? " gone" : ""}"><div class="toolname">${S.tool.icon ? icon(S.tool.icon) : ""}<b>${esc(S.tool.label)}</b>` +
       (S.tool.help ? `<button class="qhelp ${S.popup === "toolhelp" ? "open" : ""}" data-popup="toolhelp" title="How to use the ${esc(S.tool.label)} tool (F1 opens its page)">${icon("circle-help")}</button>` : "") + `</div>` +
       (S.tool_options.length ? `<div class="options tool-opts">${shown(S.tool_options).map((c) => control(c)).join("")}</div>` +
         // Select keeps its hint after its tools: what is selected (MU39)

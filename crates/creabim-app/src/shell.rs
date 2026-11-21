@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 /// Height of the top bar (menus, tools and the tool options strip) and the
 /// status bar, in points.
 pub(super) const TOP_H: f32 = 105.0;
+/// The top bands without the tool options strip (Select, with nothing to set).
+pub(super) const TOP_H_SHORT: f32 = 75.0;
 pub(super) const STATUS_H: f32 = 26.0;
 /// Size of the 3D view's navigation buttons.
 const NAV_W: f32 = 420.0;
@@ -487,7 +489,9 @@ impl CreaBimApp {
             "menu:Help" => self.help_menu(),
             "menu:Window" => self.window_menu(),
             "menu:Create" => self.create_menu(),
-            "menu:Disegna" => self.draw_menu(),
+            "menu:Disegna" => self.draw_menu_part(0),
+            "menu:Modifica" => self.draw_menu_part(1),
+            "menu:Strumenti" => self.draw_menu_part(2),
             "menu:Select" => self.select_bar_menu(),
             "menu:Annotation" => self.annotation_menu(),
             // the current layer, picked from the Home tab
@@ -1031,6 +1035,29 @@ impl CreaBimApp {
     /// palette, with the views and sheets the File menu can also make.
     /// Disegna: AutoCAD's drawing and editing commands, in Italian, each
     /// with its alias; they run on the command line.
+    /// The AutoCAD menus, each its own: Disegna (0), Modifica (1) and
+    /// Strumenti (2), split from one list at their headers.
+    fn draw_menu_part(&self, part: usize) -> Vec<Item> {
+        let all = self.draw_menu();
+        let mut parts: Vec<Vec<Item>> = vec![vec![]];
+        for it in all {
+            match &it {
+                Item::Header(h) if h == "Modifica" || h == "Strumenti" => parts.push(vec![]),
+                _ => {}
+            }
+            parts.last_mut().expect("one").push(it);
+        }
+        let mut out = parts.into_iter().nth(part).unwrap_or_default();
+        // no header of its own on top, nor a separator at the end
+        if matches!(out.first(), Some(Item::Header(_))) {
+            out.remove(0);
+        }
+        while matches!(out.last(), Some(Item::Separator)) {
+            out.pop();
+        }
+        out
+    }
+
     fn draw_menu(&self) -> Vec<Item> {
         let c = |cmd: &str, label: &str, key: &'static str, icon: &'static str| {
             Item::new(format!("cmdline:{cmd}"), label)
@@ -4059,10 +4086,12 @@ impl CreaBimApp {
             .map(|(i, t)| json!({"id": format!("tab:{i}"), "label": t, "on": i == tab}))
             .collect();
         let (tool_head, tool_options, options, more) = self.option_strip(ctx);
+        let strip = self.strip_shown(ctx);
         json!({
+            "strip": strip,
             "theme": self.theme(),
             "popup": self.popup_key(),
-            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Materials", "Window", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
+            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Modifica", "Strumenti", "Materials", "Window", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
             "quick": quick,
             // the selection count is in the status bar, where it belongs
             "doc": {
@@ -4084,6 +4113,24 @@ impl CreaBimApp {
             "options": options,
             "more": more,
         })
+    }
+
+    /// Is the tool options strip shown? Not for Select with nothing in it
+    /// to set: a line that only said how to select.
+    pub(super) fn strip_shown(&self, ctx: &egui::Context) -> bool {
+        if self.plan.tool != crate::planview::Tool::Select || self.plan.modal.is_some() {
+            return true;
+        }
+        let (_, tool_options, options, _) = self.option_strip(ctx);
+        !tool_options.is_empty() || !options.is_empty()
+    }
+
+    pub(super) fn top_h(&self, ctx: &egui::Context) -> f32 {
+        if self.shell.web.is_some() && !self.strip_shown(ctx) {
+            TOP_H_SHORT
+        } else {
+            TOP_H
+        }
     }
 
     /// The tool options strip: the tool's head and options, the view's
@@ -5123,7 +5170,7 @@ impl CreaBimApp {
         let ppp = ctx.pixels_per_point();
         let none = egui::Frame::NONE;
         let top = egui::Panel::top("web_top")
-            .exact_size(TOP_H)
+            .exact_size(self.top_h(&ctx))
             .resizable(false)
             .show_separator_line(false)
             .frame(none)
@@ -5315,7 +5362,8 @@ impl CreaBimApp {
             // the Create menu lists every tool: its sections side by side
             let columns = match p.key.as_str() {
                 "menu:Create" => 3,
-                "menu:Disegna" => 3,
+                "menu:Disegna" => 2,
+                "menu:Modifica" => 2,
                 _ => 1,
             };
             (

@@ -11775,7 +11775,7 @@ impl eframe::App for CreaBimApp {
         // when there is no room below
         let bands = if self.shell.web.is_some() {
             egui::epaint::MarginF32 {
-                top: shell::TOP_H,
+                top: self.top_h(ctx),
                 bottom: shell::STATUS_H,
                 ..Default::default()
             }

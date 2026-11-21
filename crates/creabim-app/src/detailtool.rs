@@ -54,6 +54,11 @@ pub struct DetailSettings {
     /// A polar array's count and the angle it is spread over, degrees.
     pub count: u32,
     pub angle: f64,
+    /// TRIM's cutting edges (EXTEND's boundaries), picked first as in
+    /// AutoCAD; none picked, every line cuts.
+    pub cutters: Vec<ElementId>,
+    /// Still picking them (Enter goes on to what to trim).
+    pub choosing_cutters: bool,
 }
 
 /// A change to the project's drafting layers made from Properties.
@@ -146,6 +151,8 @@ impl Default for DetailSettings {
             step: DVec2::new(1.0, 1.0),
             count: 6,
             angle: 360.0,
+            cutters: vec![],
+            choosing_cutters: false,
         }
     }
 }
@@ -188,6 +195,8 @@ impl DetailSettings {
 
     /// Pick an edit of linework: the next clicks edit instead of drawing.
     pub fn pick_edit(&mut self, edit: DraftEdit) {
+        self.choosing_cutters = matches!(edit, DraftEdit::Trim | DraftEdit::Extend);
+        self.cutters.clear();
         self.edit = Some(edit);
         self.picked = None;
         self.path.clear();
@@ -377,59 +386,38 @@ pub fn fence_edit(
     let Some(edit) = state.details.edit else {
         return Ok(());
     };
-    let (lo, hi) = (a.min(b), a.max(b));
-    let inside = |p: DVec2| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
-    let edges = [
-        (lo, DVec2::new(hi.x, lo.y)),
-        (DVec2::new(hi.x, lo.y), hi),
-        (hi, DVec2::new(lo.x, hi.y)),
-        (DVec2::new(lo.x, hi.y), lo),
-    ];
     let lines = linework(doc.model(), view);
+    let cutters = state.details.cutters.clone();
     let others = |i: usize| -> Vec<&DetailItem> {
         lines
             .iter()
             .enumerate()
-            .filter(|(k, _)| *k != i)
+            .filter(|(k, l)| *k != i && (cutters.is_empty() || cutters.contains(&l.0.id)))
             .map(|(_, l)| &l.1)
             .collect()
     };
-    // where a piece's path passes through the box: the middle of the
-    // first stretch of it inside (for an end inside, that end)
-    let through = |d: &DetailItem| -> Option<DVec2> {
-        let (path, closed) = d.draft_path()?;
-        let mut path = path;
+    // where the fence line crosses a piece: the first crossing along it
+    let crossing = |d: &DetailItem| -> Option<DVec2> {
+        let (mut path, closed) = d.draft_path()?;
         if closed {
             path.push(*path.first()?);
         }
+        let mut best: Option<(f64, DVec2)> = None;
         for w in path.windows(2) {
             let (p, q) = (w[0], w[1]);
-            let mut ts: Vec<f64> = vec![];
-            if inside(p) {
-                ts.push(0.0);
+            let (r, s2) = (q - p, b - a);
+            let den = r.perp_dot(s2);
+            if den.abs() < 1e-15 {
+                continue;
             }
-            if inside(q) {
-                ts.push(1.0);
-            }
-            for (c, e) in edges {
-                let (r, s2) = (q - p, e - c);
-                let den = r.perp_dot(s2);
-                if den.abs() < 1e-15 {
-                    continue;
-                }
-                let t = (c - p).perp_dot(s2) / den;
-                let u = (c - p).perp_dot(r) / den;
-                if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
-                    ts.push(t);
-                }
-            }
-            if ts.len() >= 2 {
-                ts.sort_by(f64::total_cmp);
-                let t = (ts[0] + ts[ts.len() - 1]) / 2.0;
-                return Some(p + (q - p) * t);
+            let t = (a - p).perp_dot(s2) / den;
+            let u = (a - p).perp_dot(r) / den;
+            if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) && best.is_none_or(|x| u < x.0)
+            {
+                best = Some((u, p + r * t));
             }
         }
-        None
+        best.map(|x| x.1)
     };
     let mut tx = Transaction::new(match edit {
         DraftEdit::Extend => "Extend lines",
@@ -437,7 +425,10 @@ pub fn fence_edit(
     });
     let mut n = 0;
     for (i, (e, d)) in lines.iter().enumerate() {
-        let Some(at) = through(d) else { continue };
+        if cutters.contains(&e.id) {
+            continue;
+        }
+        let Some(at) = crossing(d) else { continue };
         match edit {
             DraftEdit::Extend => {
                 if let Some(longer) = de::extend(d, &others(i), at) {
@@ -466,10 +457,10 @@ pub fn fence_edit(
         }
     }
     state.status = Some(if n == 0 {
-        "Nothing crossed by the window could be trimmed or extended.".into()
+        "Nothing the fence crosses could be trimmed or extended.".into()
     } else {
         format!(
-            "{} {n} lines. Drag another window, or click a stretch.",
+            "{} {n} lines. Draw another fence, or click a stretch.",
             if edit == DraftEdit::Extend {
                 "Extended"
             } else {
@@ -508,14 +499,38 @@ fn edit_click(
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i)
     };
+    let cutters = state.details.cutters.clone();
     let others = |i: usize| -> Vec<&DetailItem> {
         lines
             .iter()
             .enumerate()
-            .filter(|(k, _)| *k != i)
+            .filter(|(k, l)| *k != i && (cutters.is_empty() || cutters.contains(&l.0.id)))
             .map(|(_, l)| &l.1)
             .collect()
     };
+    // TRIM and EXTEND pick their cutting edges first: a click adds or
+    // takes one away, Enter goes on
+    if state.details.choosing_cutters && matches!(edit, DraftEdit::Trim | DraftEdit::Extend) {
+        let Some(i) = under(raw) else {
+            state.status =
+                Some("Select the cutting edges, then Enter (Enter alone: every line cuts).".into());
+            return Ok(());
+        };
+        let id = lines[i].0.id;
+        let c = &mut state.details.cutters;
+        if let Some(k) = c.iter().position(|x| *x == id) {
+            c.remove(k);
+        } else {
+            c.push(id);
+        }
+        selection.clear();
+        selection.extend(c.clone(), false);
+        state.status = Some(format!(
+            "{} cutting edges. Select more, or Enter to go on.",
+            c.len()
+        ));
+        return Ok(());
+    }
     let changed = |e: &Element, d: DetailItem| {
         let mut after = e.clone();
         after.kind = ElementKind::Detail(d);
@@ -1699,6 +1714,57 @@ mod tests {
     use super::*;
     use crate::planview::Tool;
 
+    #[test]
+    fn trim_cuts_back_to_the_edges_picked_first_and_a_fence_trims_what_it_crosses() {
+        let (mut doc, v) = doc_with_section();
+        let line = |a: DVec2, b: DVec2| {
+            Element::new(
+                "Line",
+                ElementKind::Detail(DetailItem::new(
+                    v,
+                    creabim_core::DetailKind::draft(creabim_core::DraftShape::Line),
+                    vec![a, b],
+                )),
+            )
+        };
+        let p = DVec2::new;
+        // a cutting edge across, two edges more, and two lines through them
+        let cut = line(p(0.0, 1.0), p(4.0, 1.0));
+        let other = line(p(0.0, 2.0), p(4.0, 2.0));
+        let a = line(p(1.0, 0.0), p(1.0, 3.0));
+        let b = line(p(3.0, 0.0), p(3.0, 3.0));
+        let (cid, aid, bid) = (cut.id, a.id, b.id);
+        doc.commit(
+            Transaction::new("setup")
+                .insert(cut)
+                .insert(other)
+                .insert(a)
+                .insert(b),
+        )
+        .unwrap();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        state.details.pick_edit(DraftEdit::Trim);
+        let mut sel = Selection::default();
+        // the cutting edge first
+        detail_click(&mut doc, v, p(0.5, 1.0), p(0.5, 1.0), &mut state, &mut sel).unwrap();
+        assert_eq!(state.details.cutters, vec![cid]);
+        state.details.choosing_cutters = false;
+        // a click below it on a: trimmed back to the cutting edge only (the
+        // other edge at 2 doesn't count)
+        detail_click(&mut doc, v, p(1.0, 0.5), p(1.0, 0.5), &mut state, &mut sel).unwrap();
+        fn pts(doc: &Document, id: ElementId) -> Vec<DVec2> {
+            match &doc.model().get(id).unwrap().kind {
+                ElementKind::Detail(d) => d.points.clone(),
+                _ => panic!(),
+            }
+        }
+        assert_eq!(pts(&doc, aid), vec![p(1.0, 1.0), p(1.0, 3.0)]);
+        // a fence across b below the edge
+        fence_edit(&mut doc, v, p(2.5, 0.5), p(3.5, 0.5), &mut state).unwrap();
+        assert_eq!(pts(&doc, bid), vec![p(3.0, 1.0), p(3.0, 3.0)]);
+    }
+
     fn doc_with_section() -> (Document, ElementId) {
         let mut doc = Document::new();
         let v = Element::new(
@@ -1905,8 +1971,10 @@ mod tests {
             }
         }
         assert_eq!(lines(&doc).len(), 3);
-        // trim the floor line between the uprights: two pieces of it are left
+        // trim the floor line between the uprights (Enter at once: every
+        // line cuts): two pieces of it are left
         state.details.pick_edit(DraftEdit::Trim);
+        state.details.choosing_cutters = false;
         let at = p(2.0, 0.0);
         detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
         assert_eq!(lines(&doc).len(), 4);

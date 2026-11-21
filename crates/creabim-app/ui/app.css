@@ -1251,3 +1251,4 @@ html[data-theme="blueprint"] .cs h2 .fn, html[data-theme="ink"] .cs h2 .fn { col
 .bar1 .brand .logo { background: #FFFFFF !important; color: #111111 !important; box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); }
 .bar1 .brand .logo svg.mark { width: 22px; height: 22px; }
 .nest .vm-mark { fill: currentColor; }
+.bar3.gone, .bar3.hidden-strip { display: none !important; }
