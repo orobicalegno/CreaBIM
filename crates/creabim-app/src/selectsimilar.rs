@@ -163,6 +163,27 @@ impl CreaBimApp {
                 .enabled(tags)
                 .hint("Tags of the same kind (door tags, window tags…) in the same view"),
         ];
+        // linework: as AutoCAD's SELECTSIMILAR, the same kind on the same
+        // layer, in the view it is drawn in
+        let drafting = ids.iter().any(|id| {
+            matches!(
+                model.get(*id).map(|e| &e.kind),
+                Some(ElementKind::Detail(_))
+            )
+        });
+        if drafting {
+            items.insert(
+                0,
+                Item::new("similar:draft", "Similar linework (same kind and layer)")
+                    .hint("Every line, polyline, circle, hatch… like the selected ones, on the same drafting layer, in this view"),
+            );
+            items.insert(
+                1,
+                Item::new("similar:draftlayer", "All linework on the same layer").hint(
+                    "Every piece of linework on the selection's drafting layers, in this view",
+                ),
+            );
+        }
         let only = self.keep_only_items();
         if !only.is_empty() {
             items.push(Item::Separator);
@@ -233,6 +254,35 @@ impl CreaBimApp {
         let ids = self.selection.all();
         if ids.is_empty() {
             self.status = "Select something first, then pick Select similar.".into();
+            return;
+        }
+        if what == "draft" || what == "draftlayer" {
+            let model = self.doc.model();
+            let keys: Vec<(ElementId, Option<String>, String)> = ids
+                .iter()
+                .filter_map(|id| match &model.get(*id)?.kind {
+                    ElementKind::Detail(d) => {
+                        Some((d.view, d.layer.clone(), d.kind.label().to_string()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let same: Vec<ElementId> = model
+                .iter()
+                .filter(|e| match &e.kind {
+                    ElementKind::Detail(d) => keys.iter().any(|(v, l, k)| {
+                        d.view == *v
+                            && d.layer == *l
+                            && (what == "draftlayer" || d.kind.label() == k)
+                    }),
+                    _ => false,
+                })
+                .map(|e| e.id)
+                .collect();
+            let n = same.len();
+            self.selection.clear();
+            self.selection.extend(same, false);
+            self.status = format!("{n} pieces of linework selected.");
             return;
         }
         if let Some(i) = what.strip_prefix("only.") {

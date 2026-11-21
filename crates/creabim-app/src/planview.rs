@@ -433,6 +433,17 @@ pub struct PlanState {
     /// A move, rotate or scale picked from a button or menu, started by the
     /// next view the pointer is over: (mode, copy first).
     pub armed: Option<(Mode, bool)>,
+    /// The armed move starts following the pointer at once (Duplicate,
+    /// Paste): the copy hangs on the cursor until a click places it.
+    pub armed_follow: bool,
+    /// When the right button last went down, and a quick right-click to
+    /// act on (Enter, or the last command again).
+    pub right_down: f64,
+    pub right_quick: bool,
+    /// The right button moved (a pan) since it went down.
+    pub right_dragged: bool,
+    /// A tool the view asks the app to pick (Select, for a context menu).
+    pub tool_request: Option<Tool>,
     /// With [`Mode::Grip`] armed: the grip it drives (from the edge palette).
     pub armed_grip: Option<crate::handles::HandleKind>,
     /// With [`Mode::Offset`] armed: change the original, no copy (the edge
@@ -449,6 +460,12 @@ pub struct PlanState {
     pub menu_request: Option<egui::Pos2>,
     /// Where Shift + right-click asked for AutoCAD's object snap menu.
     pub osnap_menu_request: Option<egui::Pos2>,
+    /// The north icon was double-clicked: set the north.
+    pub north_request: bool,
+    /// A TRIM or EXTEND window being dragged (screen corners), and one
+    /// finished, to act on (view, corners).
+    pub fence: Option<(Pos2, Pos2)>,
+    pub fence_done: Option<(ElementId, Pos2, Pos2)>,
     /// A point typed on the command line, for this view's tool to take as
     /// a click there (drawing coordinates), exactly, with no snap.
     pub forced_point: Option<(ElementId, DVec2)>,
@@ -458,11 +475,19 @@ pub struct PlanState {
     pub cursor_at: Option<(ElementId, DVec2)>,
     /// Enter on an empty command line: finish the shape being drawn.
     pub cmd_finish: bool,
+    /// The point a command asks for now is a window's far corner: no
+    /// ORTHO or POLAR from the first (AutoCAD's crossing window).
+    pub pick_window: bool,
     /// A command collecting points of its own (DIST, ID, CIRCLE 3P…): the
     /// view and the points so far. Clicks go here, not to the tool.
     pub cmd_pick: Option<(Option<ElementId>, Vec<DVec2>)>,
     /// What a command shows as it goes (a polyline with its arcs).
     pub cmd_preview: Option<(ElementId, Vec<DVec2>)>,
+    /// Until when the view counts as moving (a wheel turn, a pan): the
+    /// hatches wait till then.
+    pub nav_until: f64,
+    /// The drawing as last drawn, reused while zooming and panning.
+    pub nav_mesh: Option<NavMesh>,
     /// The UCS plans work in, the ones before it (UCS Previous), and how
     /// far each plan view is turned (PLAN).
     pub ucs: Ucs,
@@ -684,6 +709,11 @@ impl Default for PlanState {
             move_target: modal::Target::default(),
             cursor: None,
             armed: None,
+            armed_follow: false,
+            right_down: 0.0,
+            right_quick: false,
+            right_dragged: false,
+            tool_request: None,
             armed_grip: None,
             in_place: false,
             commands: vec![],
@@ -706,17 +736,23 @@ impl Default for PlanState {
             chain: (None, vec![]),
             rested: (None, vec![]),
             osnap_menu_request: None,
+            north_request: false,
+            pick_window: false,
+            fence: None,
+            fence_done: None,
             forced_point: None,
             last_point: None,
             cursor_at: None,
             cmd_finish: false,
             cmd_pick: None,
             cmd_preview: None,
+            nav_until: 0.0,
+            nav_mesh: None,
             ucs: Ucs::default(),
             ucs_prev: vec![],
             view_rot: HashMap::new(),
             ucs_icon: true,
-            ucs_icon_origin: true,
+            ucs_icon_origin: false,
             pline_arcs: vec![],
             snap_once: None,
             snap_once_spent: false,
@@ -859,6 +895,17 @@ impl PlanState {
     }
 }
 
+/// A plan's drawing as last drawn, as triangles, moved and scaled while
+/// the view is zoomed or panned (see [`show`]).
+pub struct NavMesh {
+    key: (ElementId, u64, usize, u64),
+    rect: Rect,
+    center: DVec2,
+    scale: f32,
+    rot: f64,
+    meshes: Vec<egui::Mesh>,
+}
+
 pub struct Xf {
     pub rect: Rect,
     pub center: DVec2,
@@ -976,7 +1023,10 @@ pub fn show(
     let (mut center, mut scale) = match style.camera {
         Some(c) => c,
         None => {
-            let shared = *state.cameras.entry(view).or_insert_with(|| fit(plan, rect));
+            let shared = *state
+                .cameras
+                .entry(view)
+                .or_insert_with(|| fit_all(doc.model(), view, plan, rect));
             match state.area {
                 // its own, starting where the first area is
                 Some(a) => *state.area_cameras.entry((a, view)).or_insert(shared),
@@ -999,6 +1049,61 @@ pub fn show(
         (_, t) => t,
     };
     let mm = style.mm();
+    // a drawing tool takes its point as the button goes down, as AutoCAD
+    // does: a hand that moves a little while clicking loses no point
+    let pressed =
+        response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
+    // when the right button went down, for a quick click or a held one
+    if response.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+    {
+        state.right_down = ui.input(|i| i.time);
+        state.right_dragged = false;
+    }
+    // a right drag pans: no click then
+    if state.right_down > 0.0 && response.dragged_by(egui::PointerButton::Secondary) {
+        state.right_dragged = true;
+    }
+    // TRIM and EXTEND take a window too, as AutoCAD's: a click trims the
+    // stretch under it, a drag across lines trims each where it is crossed
+    let fencing = tool == Tool::Detail
+        && matches!(
+            state.details.edit,
+            Some(crate::detailtool::DraftEdit::Trim | crate::detailtool::DraftEdit::Extend)
+        );
+    let pick = if tool == Tool::Select
+        || fencing
+        || !matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. })
+    {
+        response.clicked()
+    } else {
+        pressed
+    };
+    if fencing {
+        if response.drag_started_by(egui::PointerButton::Primary) {
+            state.fence = response.interact_pointer_pos().map(|p| (p, p));
+        }
+        if let (Some((a, _)), Some(p)) = (state.fence, response.interact_pointer_pos()) {
+            if response.dragged_by(egui::PointerButton::Primary) {
+                state.fence = Some((a, p));
+            }
+        }
+        if response.drag_stopped() {
+            if let Some((a, b)) = state.fence.take() {
+                if a.distance(b) > 4.0 {
+                    state.fence_done = Some((view, a, b));
+                }
+            }
+        }
+        // a fence: the line dragged; what it crosses is trimmed there
+        if let Some((a, b)) = state.fence {
+            painter.extend(egui::Shape::dashed_line(
+                &[a, b],
+                Stroke::new(1.6, Color32::from_rgb(220, 70, 50)),
+                7.0,
+                4.0,
+            ));
+        }
+    }
 
     // orbit a 3D view by dragging it
     if kind == PaneKind::Axonometric && response.dragged_by(egui::PointerButton::Primary) {
@@ -1049,6 +1154,9 @@ pub fn show(
     if response.hovered() {
         // a touchpad's two fingers pan; a wheel and a pinch zoom (MU24)
         let (pan, scroll) = wheel(ui);
+        if pan != Vec2::ZERO || scroll != 0.0 {
+            state.nav_until = ui.input(|i| i.time) + 0.35;
+        }
         center -=
             DVec2::from_angle(rot).rotate(DVec2::new(pan.x as f64, -pan.y as f64)) / scale as f64;
         if scroll != 0.0 {
@@ -1060,7 +1168,8 @@ pub fn show(
                     rot,
                 };
                 let before = xf.to_world(hover);
-                scale = (scale * (1.0 + scroll * 0.002)).clamp(2.0, 2000.0);
+                // about 15% a notch of the wheel, the same in and out
+                scale = (scale * 1.0035f32.powf(scroll)).clamp(2.0, 2000.0);
                 let xf = Xf {
                     rect,
                     center,
@@ -1084,8 +1193,15 @@ pub fn show(
                 .collect(),
         };
         let fit_sel = (!picked.items.is_empty()).then(|| fit(&picked, rect));
-        if let Some((c, k)) = nav_column(ui, rect, view, || fit(plan, rect), fit_sel, center, scale)
-        {
+        if let Some((c, k)) = nav_column(
+            ui,
+            rect,
+            view,
+            || fit_all(doc.model(), view, plan, rect),
+            fit_sel,
+            center,
+            scale,
+        ) {
             center = c;
             scale = k;
         }
@@ -1106,6 +1222,19 @@ pub fn show(
         scale,
         rot,
     };
+    // panned or zoomed this frame, or a moment ago: the hatches wait
+    let now = ui.input(|i| i.time);
+    if response.dragged_by(egui::PointerButton::Middle)
+        || response.dragged_by(egui::PointerButton::Secondary)
+    {
+        state.nav_until = now + 0.35;
+    }
+    let moving = now < state.nav_until;
+    NAVIGATING.with(|n| n.set(moving));
+    if moving {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(380));
+    }
 
     if style.decorations && kind != PaneKind::Schedule {
         let (grid, axes) = plan_look();
@@ -1120,6 +1249,21 @@ pub fn show(
         }
         if is_plan && state.ucs_icon {
             draw_ucs_icon(&painter, &xf, state.ucs, state.ucs_icon_origin);
+            // the north beside it, to the project's true north
+            let north = doc
+                .model()
+                .project_info()
+                .map_or(0.0, |(_, p)| p.true_north);
+            draw_north_icon(&painter, &xf, north);
+            // a double-click on it sets the north (NORTHDIR)
+            let base = xf.rect.left_bottom() + Vec2::new(96.0, -108.0);
+            if response.double_clicked()
+                && response
+                    .interact_pointer_pos()
+                    .is_some_and(|p| p.distance(base) < 26.0)
+            {
+                state.north_request = true;
+            }
         }
     }
     // a point asked for: a cross follows the pointer, a click gives it
@@ -1250,7 +1394,9 @@ pub fn show(
     // pre-selection: what a click here would take, and what else is
     // under the pointer (Tab cycles them)
     let pane = Pane::View(view);
-    if !response.dragged() {
+    // nothing is looked up under the pointer while the view zooms or pans
+    let zooming = ui.input(|i| i.time) < state.nav_until;
+    if !response.dragged() && !zooming {
         // (the Align tool takes faces in a 3D view, so Tab reaches them)
         let reading = (matches!(tool, Tool::Select | Tool::Tag)
             || (tool == Tool::Align && kind == PaneKind::Axonometric))
@@ -1292,7 +1438,78 @@ pub fn show(
     faint.set_opacity(0.22);
     // the view's graphic overrides, as on its sheets (MU27)
     let overrides = view_overrides(doc.model(), view);
-    for item in &plan.items {
+    // what the pane shows of the world, a little wider: items wholly
+    // outside it aren't drawn, nor lines and text too small to see (a big
+    // exploded DXF is tens of thousands of them, AutoCAD skips them too)
+    let seen = {
+        let c = [
+            xf.to_world(rect.left_top()),
+            xf.to_world(rect.right_top()),
+            xf.to_world(rect.left_bottom()),
+            xf.to_world(rect.right_bottom()),
+        ];
+        let lo = c.iter().fold(c[0], |a, p| a.min(*p));
+        let hi = c.iter().fold(c[0], |a, p| a.max(*p));
+        let pad = DVec2::splat(8.0 / xf.scale as f64);
+        (lo - pad, hi + pad)
+    };
+    let px = 1.0 / xf.scale as f64;
+    // while the view is zoomed or panned, the drawing as last drawn is
+    // moved and scaled on screen rather than drawn again item by item (a
+    // big DXF took a fifth of a second a frame); it is drawn afresh when
+    // it has grown or shrunk twice over, and when the motion stops
+    // the same is done when nothing at all has changed (the pointer moved,
+    // the crosshair with it): the triangles are drawn as they were
+    let moving = ui.input(|i| i.time) < state.nav_until;
+    let nav_key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        selection.active.hash(&mut h);
+        selection.others.hash(&mut h);
+        state.spotlight.len().hash(&mut h);
+        (xray, ghost).hash(&mut h);
+        (view, doc.model().revision(), plan.items.len(), h.finish())
+    };
+    let reuse = state.nav_mesh.as_ref().is_some_and(|c| {
+        c.key == nav_key
+            && c.rect == rect
+            && c.rot == xf.rot
+            && if moving {
+                (0.5..2.0).contains(&(xf.scale / c.scale))
+            } else {
+                c.scale == xf.scale && c.center == xf.center
+            }
+    });
+    let layer = painter.layer_id();
+    let from = ui
+        .ctx()
+        .graphics(|g| g.get(layer).map(|l| l.next_idx().0))
+        .unwrap_or(0);
+    if reuse {
+        if let Some(c) = &state.nav_mesh {
+            // a point drawn at `p` then is at `a0 + p k` now
+            let old = Xf {
+                rect: c.rect,
+                center: c.center,
+                scale: c.scale,
+                rot: c.rot,
+            };
+            let a0 = xf.to_screen(old.to_world(Pos2::ZERO)).to_vec2();
+            let k = xf.scale / c.scale;
+            let clip = painter.clip_rect();
+            for m in &c.meshes {
+                let mut m = m.clone();
+                for v in &mut m.vertices {
+                    v.pos = (v.pos.to_vec2() * k + a0).to_pos2();
+                }
+                painter.with_clip_rect(clip).add(egui::Shape::mesh(m));
+            }
+        }
+    }
+    for item in plan.items.iter().filter(|_| !reuse) {
+        if !worth_drawing(item, seen, px, mm) {
+            continue;
+        }
         let lit = state.spotlight.contains(&item.id());
         let selected = selection.contains(item.id()) || lit;
         if ghost && !selected {
@@ -1308,6 +1525,45 @@ pub fn show(
         } else {
             draw_item(&painter, &xf, item, selected, mm);
         }
+    }
+    if reuse && !moving {
+        // drawn as it was
+    } else if !reuse {
+        // keep what was just drawn, as triangles, for the frames to come;
+        // the shapes give way to those same triangles, so the drawing is
+        // not made into triangles twice
+        let ctx = ui.ctx().clone();
+        let shapes: Vec<egui::epaint::ClippedShape> = ctx.graphics(|g| {
+            g.get(layer)
+                .map(|l| l.all_entries().skip(from).cloned().collect())
+                .unwrap_or_default()
+        });
+        let end = from + shapes.len();
+        let meshes: Vec<egui::Mesh> = ctx
+            .tessellate(shapes, ctx.pixels_per_point())
+            .into_iter()
+            .filter_map(|p| match p.primitive {
+                egui::epaint::Primitive::Mesh(m) => Some(m),
+                _ => None,
+            })
+            .collect();
+        ctx.graphics_mut(|g| {
+            let list = g.entry(layer);
+            for i in from..end {
+                list.reset_shape(egui::layers::ShapeIdx(i));
+            }
+        });
+        for m in &meshes {
+            painter.add(egui::Shape::mesh(m.clone()));
+        }
+        state.nav_mesh = Some(NavMesh {
+            key: nav_key,
+            rect,
+            center: xf.center,
+            scale: xf.scale,
+            rot: xf.rot,
+            meshes,
+        });
     }
     // the references drawn over the model, then the outline of each one
     // selected or hovered, which is where it is picked (MU19)
@@ -1473,7 +1729,7 @@ pub fn show(
         Some(k) => state.snap.only(k),
         None => state.snap,
     };
-    if state.snap_once.is_some() && response.clicked() {
+    if state.snap_once.is_some() && pick {
         state.snap_once_spent = true;
     }
     // holding Alt picks free of snaps
@@ -1503,7 +1759,10 @@ pub fn show(
         .and_then(|m| m.snap_exclude(doc));
     let exclude = match (moving, tool) {
         (Some(ids), _) => ids,
-        (None, Tool::Select) => selection
+        // what is selected snaps like the rest (an object just drawn, or
+        // one being stretched, picked or measured), except while one of
+        // its own grips is dragged or its corners edited
+        (None, Tool::Select) if state.grip.is_some() || state.edit.is_some() => selection
             .active
             .map(|id| joined_with(doc, id))
             .unwrap_or_default(),
@@ -1527,10 +1786,23 @@ pub fn show(
         .outline
         .as_ref()
         .and_then(|o| o.points.last().copied());
+    // the linework being drawn, and a command's own points, start lines
+    // too: ORTHO, POLAR and perpendicular work from their last point
+    let detail_last = (tool == Tool::Detail && state.details.view == Some(view))
+        .then(|| state.details.path.last().copied())
+        .flatten();
+    let pick_last = state
+        .cmd_pick
+        .as_ref()
+        .filter(|(v, _)| v.is_none_or(|v| v == view))
+        .filter(|_| !state.pick_window)
+        .and_then(|(_, p)| p.last().copied());
     let drawing_from = state
         .pending
         .or(sketch_last.map(from_pane))
         .or(last)
+        .or(detail_last)
+        .or(pick_last)
         .map(|a| a.extend(0.0));
     // temporary guide lines: from the points and edges rested on in the
     // drawing tools, and through where the line being drawn starts
@@ -1575,9 +1847,10 @@ pub fn show(
         }
     }
     let guides = if host.is_some() { vec![] } else { guides };
+    let zooming = ui.input(|i| i.time) < state.nav_until;
     let tracked = response
         .hover_pos()
-        .filter(|_| host.is_none())
+        .filter(|_| host.is_none() && !zooming)
         .and_then(|p| {
             let _p = crate::app::Perf::new("plan snaps: guided");
             let snapper = &state.snaps.get(&view)?.2;
@@ -1591,6 +1864,62 @@ pub fn show(
                 Some(xf.to_world(p).extend(0.0)),
             )
         });
+    // what is being drawn snaps too, before it is made: the corners and
+    // middles of the path so far (to close it on its first point), and a
+    // command's points
+    let tracked = {
+        let mut own: Vec<DVec2> = vec![];
+        if tool == Tool::Detail && state.details.view == Some(view) {
+            own.extend(state.details.path.iter().copied());
+        }
+        if let Some((v, pts)) = &state.cmd_pick {
+            if v.is_none_or(|v| v == view) {
+                own.extend(pts.iter().copied());
+            }
+        }
+        let p = response.hover_pos().filter(|_| host.is_none() && !zooming);
+        match (p, own.len()) {
+            (Some(p), n) if n >= 1 => {
+                let mut s = Snapper::new();
+                for w in own.windows(2) {
+                    s.add_segment(
+                        w[0].extend(0.0),
+                        w[1].extend(0.0),
+                        snaps::Source::Edge,
+                        None,
+                    );
+                }
+                if own.len() == 1 {
+                    s.add_segment(
+                        own[0].extend(0.0),
+                        own[0].extend(0.0) + DVec3::X * 1e-3,
+                        snaps::Source::Edge,
+                        None,
+                    );
+                }
+                let mine = s
+                    .snap(&snap_cfg, p, &pane_project, None, None)
+                    .filter(|m| matches!(m.kind, SnapKind::Endpoint | SnapKind::Midpoint));
+                let dist = |q: DVec3| pane_project(q).map_or(f32::MAX, |c| c.distance(p));
+                match (mine, &tracked) {
+                    (Some(m), Some(t))
+                        if !matches!(
+                            t.snap.kind,
+                            SnapKind::Endpoint
+                                | SnapKind::Midpoint
+                                | SnapKind::Intersection
+                                | SnapKind::Center
+                        ) || dist(m.p) < dist(t.snap.p) - 0.5 =>
+                    {
+                        Some(snaps::Guided::plain(m, None))
+                    }
+                    (Some(m), None) => Some(snaps::Guided::plain(m, None)),
+                    _ => tracked,
+                }
+            }
+            _ => tracked,
+        }
+    };
     let tool_snap = tracked.as_ref().map(|t| t.snap);
     let tool_align = tracked.as_ref().and_then(|t| t.align);
     let now = ui.input(|i| i.time);
@@ -1789,12 +2118,7 @@ pub fn show(
                     here && !typing && i.key_pressed(egui::Key::Backspace),
                 )
             });
-            let click = match (
-                forced,
-                response.clicked(),
-                hover_world,
-                response.hover_pos(),
-            ) {
+            let click = match (forced, pick, hover_world, response.hover_pos()) {
                 (Some(p), ..) => Some((p, o.near_first(xf.to_screen(p), &project))),
                 (None, true, Some(p), Some(h)) => Some((p, o.near_first(h, &project))),
                 _ => None,
@@ -2772,7 +3096,23 @@ pub fn show(
     if let (Some(space), Some(c)) = (space, state.cursor) {
         draw_cursor(&painter, xf.to_screen(model_to_pane(space, c)));
     }
-    let right = response.secondary_clicked() && !shift;
+    // the right button let go after going down here, without a pan: a
+    // click, however long it was held (egui's own click ends at 0.8 s, so
+    // a long press opened nothing)
+    let released = state.right_down > 0.0
+        && ui.input(|i| i.pointer.button_released(egui::PointerButton::Secondary));
+    let right = released && !state.right_dragged && !shift;
+    let pressed_for = ui.input(|i| i.time) - state.right_down;
+    if released {
+        state.right_down = 0.0;
+    }
+    // AutoCAD's time-sensitive right-click: held a moment, the menu; a
+    // quick click, Enter (or the last command again, with none running)
+    let held = right && pressed_for >= 0.25;
+    let drawing_path = tool == Tool::Detail && !state.details.path.is_empty();
+    if right && !held && !drawing_path {
+        state.right_quick = true;
+    }
     let esc =
         ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
     // a detail path that can be made is finished, never dropped
@@ -2790,7 +3130,11 @@ pub fn show(
     if esc {
         state.step_back();
     }
-    let menu = right && !state.step_back() && tool == Tool::Select;
+    let menu = held && !state.step_back() && state.modal.is_none() && !drawing_path;
+    // a menu asked for with another tool in hand: back to selecting first
+    if menu && tool != Tool::Select {
+        state.tool_request = Some(Tool::Select);
+    }
     if menu {
         // right-click on something not yet selected selects it first
         if let Some(p) = response.interact_pointer_pos() {
@@ -2812,7 +3156,7 @@ pub fn show(
             state.menu_at = space.map(|space| pane_to_model(space, w, level_z));
         }
     }
-    if tool == Tool::Select && state.modal.is_none() && state.web_menus {
+    if state.modal.is_none() && state.web_menus && (tool == Tool::Select || menu) {
         if menu {
             state.menu_request = response.interact_pointer_pos();
         }
@@ -2998,12 +3342,50 @@ pub fn show(
         }
         return None;
     }
-    if response.clicked() || forced.is_some() {
+    // STRETCH's window as its far corner is picked: dashed green, as
+    // AutoCAD's crossing window, from the first corner to the pointer
+    if state.pick_window {
+        let first = state
+            .cmd_pick
+            .as_ref()
+            .filter(|(v, _)| v.is_none_or(|v| v == view))
+            .and_then(|(_, p)| p.first().copied());
+        if let (Some(a), Some(b)) = (first, response.hover_pos()) {
+            let r = Rect::from_two_pos(xf.to_screen(a), b);
+            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(80, 200, 120, 40));
+            let c = [
+                r.left_top(),
+                r.right_top(),
+                r.right_bottom(),
+                r.left_bottom(),
+                r.left_top(),
+            ];
+            painter.extend(egui::Shape::dashed_line(
+                &c,
+                Stroke::new(1.2, Color32::from_rgb(40, 150, 80)),
+                6.0,
+                4.0,
+            ));
+        }
+    }
+    // a TRIM or EXTEND window let go: every line it crosses
+    if let Some((v, a, b)) = state.fence_done.take() {
+        if v == view {
+            let (wa, wb) = (xf.to_world(a), xf.to_world(b));
+            if let Err(e) = crate::detailtool::fence_edit(doc, view, wa, wb, state) {
+                state.status = Some(format!("Couldn't do that: {e}"));
+            }
+        }
+    }
+    if pick || forced.is_some() {
         state.tracker.clear();
         let p = hover_world?;
         let at = match forced {
             Some(f) => xf.to_screen(f),
-            None => response.interact_pointer_pos().unwrap_or_default(),
+            None => response
+                .interact_pointer_pos()
+                .or(response.hover_pos())
+                .unwrap_or_default(),
         };
         let raw = forced.unwrap_or_else(|| xf.to_world(at));
         state.last_point = Some((view, p));
@@ -3951,6 +4333,17 @@ fn under_pointer(
         if let Some(c) = r.outline() {
             if (0..4).any(|i| segment_distance(p, c[i], c[(i + 1) % 4]) < tol) {
                 under.push(id);
+                continue;
+            }
+        }
+        // and any of a DXF's lines, as a block in AutoCAD
+        if let crate::trace::Shown::Lines(lines) = state.ref_cache.get(doc.model(), id, r) {
+            let hit = lines.iter().any(|l| {
+                l.windows(2)
+                    .any(|w| segment_distance(p, r.place(w[0]), r.place(w[1])) < tol)
+            });
+            if hit {
+                under.push(id);
             }
         }
     }
@@ -3966,6 +4359,23 @@ fn under_pointer(
     }
     // underlays and guides drawn from elsewhere are not picked here
     under.retain(|id| doc.model().get(*id).is_some());
+    // drafting over drafting: the last made is picked first, as AutoCAD's
+    // draw order (the slots they hold among the rest are kept)
+    {
+        let model = doc.model();
+        let drafting = |id: &ElementId| {
+            matches!(
+                model.get(*id).map(|e| &e.kind),
+                Some(ElementKind::Detail(_) | ElementKind::Note(_))
+            )
+        };
+        let slots: Vec<usize> = (0..under.len()).filter(|i| drafting(&under[*i])).collect();
+        let mut ids: Vec<ElementId> = slots.iter().map(|i| under[*i]).collect();
+        ids.sort_by_key(|id| std::cmp::Reverse(model.order_of(*id).unwrap_or(0)));
+        for (slot, id) in slots.into_iter().zip(ids) {
+            under[slot] = id;
+        }
+    }
     if state.xray.contains(&view) {
         xray_order(doc.model(), &mut under);
     }
@@ -4503,7 +4913,8 @@ fn keyboard_edits(
     }
     selection.active?;
     let keys = start_keys(ui.ctx());
-    let flow = if keys.is_some() {
+    let follow = state.armed.is_some() && state.armed_follow;
+    let flow = if keys.is_some() || follow {
         Flow::Keys
     } else {
         Flow::Tool
@@ -4529,6 +4940,7 @@ fn keyboard_edits(
     }
     let grab = response.hover_pos()?;
     state.armed = None;
+    state.armed_follow = false;
     let extras = (state.armed_grip.take(), std::mem::take(&mut state.in_place));
     state.cancel();
     let ids = selection.all();
@@ -4842,6 +5254,45 @@ pub fn joined_with(doc: &Document, id: ElementId) -> Vec<ElementId> {
 
 /// Rebuild a view's snaps when the model changed, but not during a drag,
 /// which changes the model every frame.
+/// A cheap print of a drawing's geometry: it changes when a line is
+/// added, taken away or moved.
+fn drawing_print(items: &[PlanItem]) -> u64 {
+    let mut h: u64 = items.len() as u64;
+    let mut mix = |v: f64| {
+        h = h.rotate_left(5) ^ v.to_bits();
+        h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    };
+    for it in items {
+        match it {
+            PlanItem::Line { a, b, .. } => {
+                mix(a.x);
+                mix(a.y);
+                mix(b.x);
+                mix(b.y);
+            }
+            PlanItem::Arc { center, radius, .. } => {
+                mix(center.x);
+                mix(center.y);
+                mix(*radius);
+            }
+            PlanItem::Polygon { points, .. } => {
+                if let (Some(p), Some(q)) = (points.first(), points.last()) {
+                    mix(p.x);
+                    mix(p.y);
+                    mix(q.x);
+                    mix(q.y);
+                }
+            }
+            PlanItem::Text { at, .. } => {
+                mix(at.x);
+                mix(at.y);
+            }
+            _ => {}
+        }
+    }
+    h
+}
+
 fn refresh_snaps(
     state: &mut PlanState,
     model: &creabim_core::Model,
@@ -4849,7 +5300,11 @@ fn refresh_snaps(
     plan: &Drawing,
     exclude: &[ElementId],
 ) {
-    let revision = model.revision();
+    // the model's revision and what the drawing holds: a drawing built by
+    // a worker comes a few frames after the change, and the snaps must be
+    // built again from it (they were built from the drawing before, and an
+    // object just drawn never snapped)
+    let revision = model.revision() ^ drawing_print(&plan.items).rotate_left(17);
     let dragging = state.grip.is_some()
         || state
             .modal
@@ -4865,7 +5320,11 @@ fn refresh_snaps(
         let _p = crate::app::Perf::new("plan snaps: build");
         let mut s = Snapper::from_drawing(&plan.items, &[]);
         s.add_underlay_centres(model, view);
-        add_reference_snaps(&mut s, state, model, view);
+        // a DXF's lines cross each other and the model's: those crossings
+        // snap too (they were found before the references came in)
+        if add_reference_snaps(&mut s, state, model, view) > 0 {
+            s.add_intersections();
+        }
         state.snaps.insert(view, (revision, vec![], s));
     }
     if let Some((_, ex, s)) = state.snaps.get_mut(&view) {
@@ -4884,9 +5343,10 @@ fn add_reference_snaps(
     state: &mut PlanState,
     model: &creabim_core::Model,
     view: ElementId,
-) {
-    // a huge drawing is cut short rather than slowing every snap
-    const MOST: usize = 20_000;
+) -> usize {
+    // a huge drawing is cut short rather than slowing every snap (a big
+    // DXF was cut at 20 000 and its far part never snapped)
+    const MOST: usize = 250_000;
     let mut n = 0;
     for e in model.iter() {
         let ElementKind::Reference(r) = &e.kind else {
@@ -4899,20 +5359,82 @@ fn add_reference_snaps(
             continue;
         };
         for l in lines.iter() {
-            for w in l.windows(2) {
-                if n >= MOST {
-                    return;
-                }
-                s.add_segment(
-                    r.place(w[0]).extend(0.0),
-                    r.place(w[1]).extend(0.0),
-                    crate::snaps::Source::Underlay,
-                    Some(e.id),
-                );
+            if n >= MOST {
+                return n;
+            }
+            let pts: Vec<DVec3> = l.iter().map(|p| r.place(*p).extend(0.0)).collect();
+            // an arc or circle comes as many short pieces: it snaps as
+            // AutoCAD's does, at its ends, middle, centre and quadrants,
+            // not at every piece's end
+            if let Some((c, quads)) = arc_of(&pts) {
+                s.add_curve(&pts, Some(c), &quads, Some(e.id));
+                n += pts.len();
+                continue;
+            }
+            for w in pts.windows(2) {
+                s.add_segment(w[0], w[1], crate::snaps::Source::Edge, Some(e.id));
                 n += 1;
             }
         }
     }
+    n
+}
+
+/// Is `pts` an arc or a circle drawn as a polyline (8 or more pieces of
+/// one length, all as far from one centre)? Its centre and the quadrant
+/// points (0°, 90°, 180°, 270°) on it.
+fn arc_of(pts: &[DVec3]) -> Option<(DVec3, Vec<DVec3>)> {
+    if pts.len() < 9 {
+        return None;
+    }
+    let len = |i: usize| pts[i].distance(pts[i + 1]);
+    let first = len(0);
+    if first < 1e-9 || (1..pts.len() - 1).any(|i| (len(i) - first).abs() > first * 0.05) {
+        return None;
+    }
+    // the centre through three points spread along it
+    let (a, b, c) = (
+        pts[0].truncate(),
+        pts[pts.len() / 2].truncate(),
+        pts[pts.len() - 1].truncate(),
+    );
+    let c = if a.distance(c) < first * 0.5 {
+        // closed: the far point and a quarter of the way round
+        (a, b, pts[pts.len() / 4].truncate())
+    } else {
+        (a, b, c)
+    };
+    let (a, b, c) = c;
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let sq = |p: DVec2| p.length_squared();
+    let centre = DVec2::new(
+        (sq(a) * (b.y - c.y) + sq(b) * (c.y - a.y) + sq(c) * (a.y - b.y)) / d,
+        (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d,
+    );
+    let radius = centre.distance(a);
+    if pts
+        .iter()
+        .any(|p| (p.truncate().distance(centre) - radius).abs() > radius * 0.02)
+    {
+        return None;
+    }
+    // the quadrants on the curve as drawn
+    let quads = [0.0f64, 90.0, 180.0, 270.0]
+        .iter()
+        .map(|t| centre + DVec2::from_angle(t.to_radians()) * radius)
+        .filter(|q| {
+            pts.windows(2).any(|w| {
+                let (p, r) = (w[0].truncate(), w[1].truncate());
+                let t = ((*q - p).dot(r - p) / (r - p).length_squared()).clamp(0.0, 1.0);
+                (p + (r - p) * t).distance(*q) < first * 0.2
+            })
+        })
+        .map(|q| q.extend(pts[0].z))
+        .collect();
+    Some((centre.extend(pts[0].z), quads))
 }
 
 /// The floor plans' ranges in a section (MU34 A1, MU36): a band per plan
@@ -5358,14 +5880,15 @@ pub(crate) fn wheel(ui: &egui::Ui) -> (egui::Vec2, f32) {
                     // a pinch and Ctrl+wheel are in zoom_delta already
                     continue;
                 }
-                let whole = |v: f32| (v - v.round()).abs() < 1e-3;
+                // a wheel's lines zoom, as AutoCAD's, even the fractional
+                // steps of a fine wheel; a touchpad's points (or a sideways
+                // scroll) pan
                 let touchpad = match unit {
                     egui::MouseWheelUnit::Point => true,
-                    egui::MouseWheelUnit::Line => {
-                        delta.x.abs() > 1e-3 || !whole(delta.y) || now - last < 0.4
-                    }
+                    egui::MouseWheelUnit::Line => delta.x.abs() > 1e-3 && delta.y.abs() < 1e-3,
                     egui::MouseWheelUnit::Page => false,
                 };
+                let _ = last;
                 if touchpad {
                     seen = Some(now);
                     pan += match unit {
@@ -5597,8 +6120,32 @@ fn crop_rects(model: &creabim_core::Model, view: ElementId) -> Vec<(ElementId, D
         .collect()
 }
 
+/// [`fit`] taking in the references shown in the view too (a DXF beside
+/// the model), as AutoCAD's Zoom Extents takes in an xref.
+fn fit_all(model: &creabim_core::Model, view: ElementId, d: &Drawing, rect: Rect) -> (DVec2, f32) {
+    let mut b = d.bounds();
+    for (_, r) in creabim_core::reference::in_view(model, view) {
+        if r.hidden {
+            continue;
+        }
+        if let Some(c) = r.outline() {
+            for p in c {
+                b = Some(match b {
+                    Some((lo, hi)) => (lo.min(p), hi.max(p)),
+                    None => (p, p),
+                });
+            }
+        }
+    }
+    fit_bounds(b, rect)
+}
+
 fn fit(d: &Drawing, rect: Rect) -> (DVec2, f32) {
-    match d.bounds() {
+    fit_bounds(d.bounds(), rect)
+}
+
+fn fit_bounds(b: Option<(DVec2, DVec2)>, rect: Rect) -> (DVec2, f32) {
+    match b {
         Some((lo, hi)) => {
             let size = (hi - lo).max(DVec2::splat(1.0));
             let scale = (rect.width() as f64 / size.x).min(rect.height() as f64 / size.y) * 0.85;
@@ -5661,8 +6208,8 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
     } else {
         rect.width().max(rect.height()) * size.max(1.0) / 200.0
     };
-    // a gap round the pickbox, as AutoCAD leaves one
-    let gap = if pickbox { 5.0 } else { 0.0 };
+    // a gap round the pickbox, or the ring a command shows
+    let gap = 5.0;
     // along the UCS's X and Y as the screen shows them
     let ux = Vec2::new(angle.cos(), -angle.sin());
     let uy = Vec2::new(-ux.y, ux.x);
@@ -5677,7 +6224,19 @@ pub fn draw_crosshair(ui: &egui::Ui, rect: Rect, dark: bool, size: f32, pickbox:
             stroke,
             egui::StrokeKind::Middle,
         );
+    } else {
+        // a command is running: a small ring at the centre
+        top.circle_stroke(p, 4.0, stroke);
     }
+}
+
+thread_local! {
+    static NAVIGATING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Is the pane being drawn panned or zoomed right now?
+fn navigating() -> bool {
+    NAVIGATING.with(|n| n.get())
 }
 
 static PLAN_GRID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -5759,12 +6318,51 @@ fn draw_metric_grid(painter: &egui::Painter, xf: &Xf, ucs: Ucs) {
     }
 }
 
+/// A small north arrow in the lower left corner, beside the UCS icon,
+/// pointing to true north (degrees anticlockwise from the drawing's up),
+/// as the plan is turned.
+pub fn draw_north_icon(painter: &egui::Painter, xf: &Xf, true_north: f64) {
+    let base = xf.rect.left_bottom() + Vec2::new(96.0, -108.0);
+    let ink = Color32::from_rgb(60, 60, 60);
+    let north = DVec2::from_angle(true_north.to_radians()).rotate(DVec2::Y);
+    let v = xf.to_screen(north) - xf.to_screen(DVec2::ZERO);
+    let v = if v.length() > 1e-6 {
+        v.normalized()
+    } else {
+        -Vec2::Y
+    };
+    let side = Vec2::new(-v.y, v.x);
+    let r = 14.0;
+    painter.circle_stroke(base, r, Stroke::new(1.0, ink));
+    let tip = base + v * r;
+    let tail = base - v * r * 0.7;
+    // a half-filled arrowhead on a stem, and an N beyond its tip
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, base + side * 5.0, base],
+        ink,
+        Stroke::NONE,
+    ));
+    painter.add(egui::Shape::closed_line(
+        vec![tip, base + side * 5.0, base, base - side * 5.0],
+        Stroke::new(1.2, ink),
+    ));
+    painter.line_segment([base, tail], Stroke::new(1.2, ink));
+    painter.text(
+        tip + v * 9.0,
+        egui::Align2::CENTER_CENTER,
+        "N",
+        egui::FontId::proportional(11.0),
+        ink,
+    );
+}
+
 /// AutoCAD's UCS icon: two arrows, X and Y, along the UCS's axes, at its
 /// origin when that is in view (else in the lower left corner), with a
 /// square at the corner when it is the world's.
 pub fn draw_ucs_icon(painter: &egui::Painter, xf: &Xf, ucs: Ucs, at_origin: bool) {
     let r = xf.rect;
-    let corner = r.left_bottom() + Vec2::new(28.0, -28.0);
+    // above the command line, which lies over the foot of the views
+    let corner = r.left_bottom() + Vec2::new(28.0, -96.0);
     let o = xf.to_screen(ucs.origin);
     let inside = r.shrink(30.0).contains(o);
     let base = if at_origin && inside { o } else { corner };
@@ -5898,6 +6496,46 @@ pub fn view_overrides(model: &creabim_core::Model, view: ElementId) -> HashMap<E
     out
 }
 
+/// Is `item` in sight (`seen`, a world box) and big enough to show, one
+/// screen pixel being `px` world units? Only lines, arcs, outlines, fills
+/// and text are judged; the rest always draw.
+fn worth_drawing(item: &PlanItem, seen: (DVec2, DVec2), px: f64, mm: f64) -> bool {
+    let (lo, hi) = match item {
+        PlanItem::Line { a, b, .. } => (a.min(*b), a.max(*b)),
+        PlanItem::Arc { center, radius, .. } => (
+            *center - DVec2::splat(*radius),
+            *center + DVec2::splat(*radius),
+        ),
+        PlanItem::Polygon { points, .. }
+        | PlanItem::Fill { points, .. }
+        | PlanItem::Tint { points, .. } => {
+            let Some(first) = points.first() else {
+                return false;
+            };
+            points
+                .iter()
+                .fold((*first, *first), |(l, h), p| (l.min(*p), h.max(*p)))
+        }
+        PlanItem::Text { at, text, size, .. } => {
+            let h = size * mm;
+            // under a pixel and a half tall it reads as nothing
+            if h < 1.5 * px {
+                return false;
+            }
+            let r = DVec2::splat(h * (text.chars().count() as f64 + 2.0));
+            (*at - r, *at + r)
+        }
+        _ => return true,
+    };
+    if hi.x < seen.0.x || lo.x > seen.1.x || hi.y < seen.0.y || lo.y > seen.1.y {
+        return false;
+    }
+    // smaller than a third of a pixel either way: a speck
+    // (one with no size at all is a point's mark: drawn)
+    let span = (hi - lo).max_element();
+    span == 0.0 || span >= px * 0.35
+}
+
 pub fn draw_item(painter: &egui::Painter, xf: &Xf, item: &PlanItem, selected: bool, mm: f64) {
     draw_item_with(painter, xf, item, selected, mm, &Ovr::default());
 }
@@ -5940,7 +6578,9 @@ pub fn draw_item_with(
             fill_polygon(painter, xf, points, fill);
             // skip hatching once it would be too dense to read, or when
             // the view turns it off
-            if hatch * xf.scale as f64 > 3.0 && !o.hatch_off {
+            // while the view is panned or zoomed the hatches wait: the
+            // fills show, the lines come back as it stops
+            if hatch * xf.scale as f64 > 3.0 && !o.hatch_off && !navigating() {
                 let stroke = Stroke::new(0.6, grey(70));
                 for (a, b) in creabim_geom::plan::hatch_lines(*pattern, points, hatch) {
                     painter.line_segment([xf.to_screen(a), xf.to_screen(b)], stroke);
@@ -8783,5 +9423,48 @@ mod tests {
         }
         // a second run finds nothing left to tag
         assert_eq!(tag_fixtures(&mut doc, plan).unwrap(), 0);
+    }
+}
+
+#[cfg(test)]
+mod lod_tests {
+    use super::*;
+
+    #[test]
+    fn lines_out_of_sight_or_too_small_are_not_drawn() {
+        let id = ElementId::new();
+        let line = |a: DVec2, b: DVec2| PlanItem::Line {
+            id,
+            pen: Pen::Projection,
+            a,
+            b,
+        };
+        let seen = (DVec2::ZERO, DVec2::splat(10.0));
+        // one pixel is 0.01 units
+        assert!(worth_drawing(
+            &line(DVec2::ONE, DVec2::splat(2.0)),
+            seen,
+            0.01,
+            1.0
+        ));
+        assert!(!worth_drawing(
+            &line(DVec2::splat(20.0), DVec2::splat(30.0)),
+            seen,
+            0.01,
+            1.0
+        ));
+        assert!(!worth_drawing(
+            &line(DVec2::ONE, DVec2::ONE + DVec2::splat(0.001)),
+            seen,
+            0.01,
+            1.0
+        ));
+        // a line crossing the view with both ends outside it still draws
+        assert!(worth_drawing(
+            &line(DVec2::new(-5.0, 5.0), DVec2::new(15.0, 5.0)),
+            seen,
+            0.01,
+            1.0
+        ));
     }
 }

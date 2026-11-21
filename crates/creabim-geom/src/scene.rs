@@ -123,6 +123,36 @@ fn layer_items(
                     Some(crate::wall::WrappedCut { cut: f.cut, wrap })
                 })
                 .collect();
+            // a free end wraps as at a jamb: a cut standing just past the
+            // end, its full height, its wrap the assembly's for ends
+            let mut cuts = cuts;
+            let end_wrap = creabim_core::assembly::end_wrap(a, w);
+            if !end_wrap.is_empty() && !w.is_arc() {
+                let free = creabim_core::joins::free_ends(model, e.id);
+                let (len, h) = (w.length(), w.height);
+                if free[0] {
+                    cuts.push(crate::wall::WrappedCut {
+                        cut: crate::wall::Cut {
+                            u0: -1.0,
+                            u1: 0.0,
+                            v0: -1.0,
+                            v1: h + 1.0,
+                        },
+                        wrap: end_wrap.clone(),
+                    });
+                }
+                if free[1] {
+                    cuts.push(crate::wall::WrappedCut {
+                        cut: crate::wall::Cut {
+                            u0: len,
+                            u1: len + 1.0,
+                            v0: -1.0,
+                            v1: h + 1.0,
+                        },
+                        wrap: end_wrap,
+                    });
+                }
+            }
             linings = reveal_linings(
                 model,
                 e.id,
@@ -145,7 +175,16 @@ fn layer_items(
                         (b.s0, b.s1),
                         Some(b.index),
                         b.core,
-                        b.ext,
+                        // at a T a layer runs on through the other wall's
+                        // weaker layers, as in the plans
+                        if b.core {
+                            b.ext
+                        } else {
+                            [
+                                b.ext[0] + ends.reach_of(0, b.priority),
+                                b.ext[1] + ends.reach_of(1, b.priority),
+                            ]
+                        },
                         b.vext,
                     );
                     (b, m)
@@ -756,6 +795,14 @@ fn apply_joins(model: &Model, items: &mut [SceneItem]) {
     let is = |id: ElementId, wall: bool| match model.get(id).map(|e| &e.kind) {
         Some(ElementKind::Wall(w)) => wall && w.curtain.is_none(),
         Some(ElementKind::Slab(_)) => !wall,
+        // a flat roof meets the walls beside it as a slab does; a pitched
+        // one is left to its walls' attached tops (it was cut by them)
+        Some(ElementKind::Roof(r)) => !wall && r.effective_shape() == creabim_core::RoofShape::Flat,
+        _ => false,
+    };
+    // a wall whose top is attached to that roof already stops under it
+    let attached = |w: ElementId, roof: ElementId| match model.get(w).map(|e| &e.kind) {
+        Some(ElementKind::Wall(w)) => w.attach_top.contains(&roof),
         _ => false,
     };
     let strength = |i: &SceneItem| {
@@ -788,7 +835,7 @@ fn apply_joins(model: &Model, items: &mut [SceneItem]) {
             let (Some(bw), Some(bs)) = (boxes[w], boxes[sl]) else {
                 continue;
             };
-            if !overlap(bw, bs) {
+            if !overlap(bw, bs) || attached(items[w].id, items[sl].id) {
                 continue;
             }
             let (a, b) = (&items[w], &items[sl]);

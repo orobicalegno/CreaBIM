@@ -195,6 +195,14 @@ pub struct Settings {
     pub guides_hidden: bool,
     /// How the 3D view draws: shaded, with edges, hidden line or wireframe.
     pub render_3d: crate::render3d::RenderMode,
+    /// The sun casts shadows in the 3D view.
+    pub shadows_3d: bool,
+    /// Corners, recesses and the ground under overhangs shaded by the sky.
+    pub occlusion_3d: bool,
+    /// Where the sun stands: degrees clockwise from true north, and above
+    /// the horizon.
+    pub sun_azimuth: f64,
+    pub sun_altitude: f64,
     /// Width of the Help panel, in points.
     pub help_width: f32,
     /// Which sections of Properties are open, by key, where it differs
@@ -242,12 +250,24 @@ pub struct Settings {
     /// How long their lines are, per cent of the view (CURSORSIZE; 100
     /// runs right across it).
     pub cursor_size: f32,
+    /// Save a copy of the project every so many minutes (AutoCAD's
+    /// SAVETIME); 0 is off. The copy goes beside the project as
+    /// `<name>.autosave.creabim`, never over the project itself.
+    #[serde(default = "autosave_default")]
+    pub autosave_minutes: u32,
+    /// Perspective views keep vertical edges vertical (two-point).
+    #[serde(default)]
+    pub correct_verticals: bool,
     /// The colour of what is worked on (selection, grips, ghosts): "orange",
     /// the default, or "theme" for the theme's accent (MU39).
     pub interaction: String,
     /// Edit mode's wires and corner dots, in points.
     pub edit_edge_width: f32,
     pub edit_vertex_size: f32,
+}
+
+fn autosave_default() -> u32 {
+    10
 }
 
 impl Default for Settings {
@@ -272,6 +292,10 @@ impl Default for Settings {
             hidden_colour_3d: false,
             guides_hidden: false,
             render_3d: Default::default(),
+            shadows_3d: false,
+            occlusion_3d: false,
+            sun_azimuth: 150.0,
+            sun_altitude: 40.0,
             help_width: 400.0,
             props_open: Default::default(),
             tools_tab: 0,
@@ -292,6 +316,8 @@ impl Default for Settings {
             crosshair: true,
             command_line: true,
             cursor_size: 100.0,
+            autosave_minutes: 10,
+            correct_verticals: false,
             interaction: "orange".into(),
             edit_edge_width: 1.0,
             edit_vertex_size: 4.0,
@@ -337,10 +363,11 @@ pub fn pick_open() -> Option<String> {
             "Everything Volumen reads",
             &[
                 "creabim", "json", "ifc", "ifcx", "blend", "FCStd", "fcstd", "FCMat", "fcmat",
-                "gltf", "glb",
+                "gltf", "glb", "dxf", "DXF",
             ],
         )
         .add_filter("Volumen project", &["creabim"])
+        .add_filter("DXF drawing (under the plan)", &["dxf", "DXF"])
         .add_filter("IFC", &["ifc", "ifcx"])
         .add_filter("Blender and FreeCAD (linked)", &["blend", "FCStd", "fcstd"])
         .add_filter(

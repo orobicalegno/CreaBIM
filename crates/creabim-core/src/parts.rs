@@ -103,6 +103,24 @@ pub enum Path {
         #[serde(default)]
         extend: [f64; 2],
     },
+    /// Along eaves of a roof, just outside them: a gutter. It follows the
+    /// roof when its outline, overhang, pitch or height change.
+    Roof(RoofEdges),
+}
+
+/// A gutter's place on a roof (see [`Path::Roof`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoofEdges {
+    pub roof: ElementId,
+    /// The roof's edges (of its wall-plate outline, as [`crate::Roof`]
+    /// numbers them) the gutter runs along, at the eaves.
+    pub edges: Vec<usize>,
+    /// How far out from the eaves the path runs (the gutter's middle).
+    #[serde(default)]
+    pub out: f64,
+    /// How far below the underside's edge the gutter's bottom hangs.
+    #[serde(default)]
+    pub down: f64,
 }
 
 /// Which edge of a wall a sweep follows.
@@ -196,6 +214,10 @@ impl Part {
                 path: Path::Wall { wall, .. },
                 ..
             } => Some(*wall),
+            Form::Sweep {
+                path: Path::Roof(g),
+                ..
+            } => Some(g.roof),
             _ => None,
         }
     }
@@ -257,6 +279,11 @@ impl Part {
                             return Err("a sweep's wall offsets must be finite".into());
                         }
                     }
+                    Path::Roof(r) => {
+                        if r.edges.is_empty() || !r.out.is_finite() || !r.down.is_finite() {
+                            return Err("a gutter needs an edge of its roof".into());
+                        }
+                    }
                 }
             }
         }
@@ -294,6 +321,12 @@ impl Part {
                     WallEdge::Base => base,
                 } + offset;
                 Some((vec![a.extend(z), b.extend(z)], false))
+            }
+            Path::Roof(g) => {
+                let ElementKind::Roof(r) = &model.get(g.roof)?.kind else {
+                    return None;
+                };
+                roof_gutter_path(model, r, g)
             }
         }
     }
@@ -653,8 +686,8 @@ pub fn transform(part: &mut Part, t: &Xform, lift: f64) -> Option<()> {
                         *p = t.point2(p.truncate()).extend(p.z + dz);
                     }
                 }
-                // it goes where its wall goes
-                Path::Wall { .. } => return Some(()),
+                // it goes where its wall (or roof) goes
+                Path::Wall { .. } | Path::Roof(_) => return Some(()),
             }
             if flips {
                 // the profile's across axis is the path's left, which a
@@ -674,10 +707,145 @@ pub fn transform(part: &mut Part, t: &Xform, lift: f64) -> Option<()> {
     Some(())
 }
 
+/// A gutter's path along the chosen eaves of roof `r`: each edge of its
+/// eave outline, `out` beyond it, at the height of the underside there
+/// less `down`; edges next to each other join at their corners, into one
+/// run (closed when it goes all round).
+pub fn roof_gutter_path(
+    model: &Model,
+    r: &crate::Roof,
+    g: &RoofEdges,
+) -> Option<(Vec<DVec3>, bool)> {
+    let eaves = r.eave_outline();
+    let n = eaves.len();
+    if n < 3 {
+        return None;
+    }
+    let mut edges: Vec<usize> = g.edges.iter().copied().filter(|e| *e < n).collect();
+    edges.sort_unstable();
+    edges.dedup();
+    if edges.is_empty() {
+        return None;
+    }
+    let base = r.base(model);
+    // the outline, as drawn anticlockwise: outward is to the right
+    let ccw = crate::polygon::signed_area2(&eaves) > 0.0;
+    let outward = |i: usize| {
+        let d = (eaves[(i + 1) % n] - eaves[i]).normalize_or_zero();
+        if ccw {
+            -d.perp()
+        } else {
+            d.perp()
+        }
+    };
+    // the underside's height at an eave point (just inside it)
+    let z_at = |p: DVec2, i: usize| base + r.underside_at(p - outward(i) * 1e-3) - g.down;
+    // a run starting where no chosen edge comes before it
+    let start = (0..edges.len())
+        .find(|k| {
+            let e = edges[*k];
+            !edges.contains(&((e + n - 1) % n))
+        })
+        .unwrap_or(0);
+    let closed = edges.len() == n;
+    let mut pts: Vec<DVec3> = vec![];
+    let order: Vec<usize> = (0..edges.len())
+        .map(|k| edges[(start + k) % edges.len()])
+        .collect();
+    for (k, &e) in order.iter().enumerate() {
+        let a = eaves[e];
+        let b = eaves[(e + 1) % n];
+        let o = outward(e) * g.out;
+        let prev_chosen = k > 0 && order[k - 1] == (e + n - 1) % n;
+        if !prev_chosen || closed && k == 0 {
+            // the corner: where this edge's offset line meets the one before
+            let p = if closed {
+                let pe = (e + n - 1) % n;
+                corner(
+                    eaves[pe] + outward(pe) * g.out,
+                    eaves[e] + outward(pe) * g.out,
+                    a + o,
+                    b + o,
+                )
+            } else {
+                a + o
+            };
+            pts.push(p.extend(z_at(a, e)));
+        }
+        let next = (e + 1) % n;
+        let q = if order.get(k + 1) == Some(&next) || (closed && k + 1 == order.len()) {
+            let o2 = outward(next) * g.out;
+            corner(a + o, b + o, eaves[next] + o2, eaves[(next + 1) % n] + o2)
+        } else {
+            b + o
+        };
+        pts.push(q.extend(z_at(b, e)));
+    }
+    if closed {
+        pts.pop();
+    }
+    (pts.len() >= 2).then_some((pts, closed))
+}
+
+/// Where line `a`-`b` meets line `c`-`d` (`b` when they are parallel).
+fn corner(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> DVec2 {
+    let (r, s) = (b - a, d - c);
+    let den = r.perp_dot(s);
+    if den.abs() < 1e-12 {
+        return b;
+    }
+    a + r * ((c - a).perp_dot(s) / den)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Level, Slab, Wall};
+
+    #[test]
+    fn a_gutter_runs_along_the_eaves_just_below_and_outside_them() {
+        let lv = level();
+        let mut r = crate::Roof::new(
+            lv.id,
+            vec![
+                DVec2::new(0.0, 0.0),
+                DVec2::new(10.0, 0.0),
+                DVec2::new(10.0, 6.0),
+                DVec2::new(0.0, 6.0),
+            ],
+            crate::RoofShape::Gable,
+        );
+        r.overhang = 0.5;
+        let roof = Element::new("R", ElementKind::Roof(r.clone()));
+        let m = Model::from_elements([lv.clone(), roof.clone()]).unwrap();
+        let eaves = r.sloped_edges();
+        let g = RoofEdges {
+            roof: roof.id,
+            edges: vec![eaves[0]],
+            out: 0.1,
+            down: 0.05,
+        };
+        let (pts, closed) = roof_gutter_path(&m, &r, &g).unwrap();
+        assert!(!closed);
+        assert_eq!(pts.len(), 2);
+        // level along the eave, below the base (the eave hangs past it)
+        assert!((pts[0].z - pts[1].z).abs() < 1e-6);
+        assert!(pts[0].z < r.base(&m));
+        // outside the eave outline, by `out`
+        let e = r.eave_outline();
+        let inside = |p: DVec2| crate::polygon::contains(&e, p);
+        assert!(!inside(pts[0].truncate()) && !inside(pts[1].truncate()));
+        // two eaves next to each other: one run, turning the corner
+        let all: Vec<usize> = (0..4).collect();
+        let g = RoofEdges {
+            roof: roof.id,
+            edges: all,
+            out: 0.1,
+            down: 0.05,
+        };
+        let (pts, closed) = roof_gutter_path(&m, &r, &g).unwrap();
+        assert!(closed && pts.len() == 4, "{pts:?}");
+    }
 
     fn level() -> Element {
         Element::new(

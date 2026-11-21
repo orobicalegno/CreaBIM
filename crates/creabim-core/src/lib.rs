@@ -51,6 +51,7 @@ pub mod sketch;
 pub mod slab;
 pub mod split;
 pub mod starter;
+pub mod stretchbim;
 pub mod styles;
 pub mod takeoff;
 pub mod titleblock;

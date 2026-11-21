@@ -155,3 +155,47 @@ jobs:
           path: |
             Volumen-*.rpm
             Volumen-linux-x64.tar.gz
+
+  preview-release:
+    # the Volumen builds of a PR, as a pre-release anyone can download with
+    # no GitHub account: one rolling "volumen-anteprima", replaced each time
+    name: Public preview download
+    needs: [windows-build, linux-build]
+    if: >-
+      github.event_name == 'pull_request' &&
+      startsWith(github.head_ref, 'volumen-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Package
+        run: |
+          cd dist
+          (cd volumen-windows && zip -q ../Volumen-windows-x64.zip Volumen.exe volumen-cli.exe)
+          mv volumen-linux/* .
+          rm -rf volumen-windows volumen-linux sample-exports
+          sha256sum * > SHA256SUMS.txt
+          ls -l
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          cat > notes.md <<NOTES
+          Anteprima di Volumen dalla PR #${PR} (commit ${SHA:0:7}), compilata il $(date -u +%Y-%m-%d).
+
+          - **Windows:** scarica \`Volumen-windows-x64.zip\`, estrailo e avvia \`Volumen.exe\`. Se Windows avvisa di un editore sconosciuto: *Ulteriori informazioni* › *Esegui comunque*.
+          - **Fedora:** \`sudo dnf install ./Volumen-*.rpm\`, poi avvia Volumen dal menu delle applicazioni.
+          - **Altri Linux:** estrai \`Volumen-linux-x64.tar.gz\` e avvia \`./volumen\`.
+
+          Versione di prova, sostituita a ogni aggiornamento.
+          NOTES
+          gh release delete volumen-anteprima --yes --cleanup-tag || true
+          gh release create volumen-anteprima dist/* --prerelease --target "$SHA" \
+            --title "Volumen – anteprima (PR #${PR})" --notes-file notes.md

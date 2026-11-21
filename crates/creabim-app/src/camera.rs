@@ -11,6 +11,10 @@ pub struct OrbitCamera {
     /// Orthographic (parallel) projection instead of perspective. The
     /// visible height is the one perspective has at the target.
     pub ortho: bool,
+    /// Vertical lines kept vertical in perspective (two-point perspective,
+    /// keystone correction, a shift lens): the camera is held level and
+    /// its picture shifted up or down so it still looks where it aims.
+    pub verticals: bool,
 }
 
 /// The standard directions to look from.
@@ -77,6 +81,7 @@ impl Default for OrbitCamera {
             distance: 24.0,
             fov_y: 45f32.to_radians(),
             ortho: false,
+            verticals: false,
         }
     }
 }
@@ -144,8 +149,25 @@ impl OrbitCamera {
     }
 
     pub fn view_proj(&self, aspect: f32) -> Mat4 {
-        let view = Mat4::look_at_rh(self.eye(), self.target, self.up());
         let aspect = aspect.max(0.01);
+        // corrected verticals: looking level, the picture shifted so the
+        // target stays where it was on screen (not straight down or up,
+        // where there is no level way to look)
+        if self.verticals && !self.ortho {
+            let eye = self.eye();
+            let flat = Vec3::new(self.target.x - eye.x, self.target.y - eye.y, 0.0);
+            let h = flat.length();
+            if h > self.distance * 0.05 {
+                let level = Vec3::new(self.target.x, self.target.y, eye.z);
+                let view = Mat4::look_at_rh(eye, level, Vec3::Z);
+                let mut proj = Mat4::perspective_rh(self.fov_y, aspect, 0.05, 2000.0);
+                let shift = ((self.target.z - eye.z) / h) / (self.fov_y / 2.0).tan();
+                // clip y gains shift * w (w is minus the view depth)
+                proj.z_axis.y += shift;
+                return proj * view;
+            }
+        }
+        let view = Mat4::look_at_rh(self.eye(), self.target, self.up());
         let proj = if self.ortho {
             let h = self.half_height();
             // the near plane sits well behind the eye so nothing is clipped
@@ -260,9 +282,11 @@ impl OrbitCamera {
     /// `rise` up, in metres; the view keeps its direction.
     pub fn walk(&mut self, ahead: f32, side: f32, rise: f32) {
         let (yaw, _) = self.view_angles();
-        // the camera looks from the eye toward the target: opposite its yaw
-        let fwd = -Vec3::new(yaw.cos(), yaw.sin(), 0.0);
-        let right = fwd.cross(Vec3::Z).normalize_or_zero();
+        // forward is where the eye looks, up or down too: looking down,
+        // walking on goes down (a fly-through, as the user asked)
+        let flat = -Vec3::new(yaw.cos(), yaw.sin(), 0.0);
+        let fwd = (self.target - self.eye()).normalize_or(flat);
+        let right = flat.cross(Vec3::Z).normalize_or_zero();
         self.target += fwd * ahead + right * side + Vec3::Z * rise;
     }
 
@@ -305,6 +329,32 @@ impl OrbitCamera {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn corrected_verticals_stay_vertical_and_the_target_stays_centred() {
+        let mut c = OrbitCamera {
+            pitch: 0.5,
+            verticals: true,
+            ..OrbitCamera::default()
+        };
+        let m = c.view_proj(1.5);
+        let ndc = |p: Vec3| m.project_point3(p);
+        // a vertical edge off to the side: both ends at one screen x
+        let side = c.target + Vec3::new(3.0, -2.0, 0.0);
+        let (a, b) = (ndc(side), ndc(side + Vec3::Z * 6.0));
+        assert!((a.x - b.x).abs() < 1e-4, "{a} {b}");
+        let t = ndc(c.target);
+        assert!(t.x.abs() < 1e-4 && t.y.abs() < 1e-4, "{t}");
+        // uncorrected, the edge leans
+        c.verticals = false;
+        let m = c.view_proj(1.5);
+        let (a, b) = (
+            m.project_point3(side),
+            m.project_point3(side + Vec3::Z * 6.0),
+        );
+        assert!((a.x - b.x).abs() > 1e-3);
+    }
+
     use super::*;
 
     #[test]
@@ -356,15 +406,16 @@ mod tests {
         let eye = c.eye();
         c.look_round(Vec2::new(40.0, 10.0));
         assert!(c.eye().distance(eye) < 1e-4);
-        // forward along the ground, whatever the head's tilt
+        // forward where the eye looks: down too, when it looks down
         let before = c.eye();
+        let look = (c.target - c.eye()).normalize();
         c.walk(2.0, 0.0, 0.0);
         let step = c.eye() - before;
-        assert!((step.length() - 2.0).abs() < 1e-4 && step.z.abs() < 1e-5);
-        let fwd = c.target - c.eye();
-        assert!(Vec2::new(step.x, step.y).dot(Vec2::new(fwd.x, fwd.y)) > 0.0);
+        assert!((step.length() - 2.0).abs() < 1e-4);
+        assert!(step.normalize().dot(look) > 0.999, "{step} {look}");
+        let z = c.eye().z;
         c.walk(0.0, 0.0, 0.5);
-        assert!((c.eye().z - before.z - 0.5).abs() < 1e-4);
+        assert!((c.eye().z - z - 0.5).abs() < 1e-4);
     }
 
     #[test]
@@ -451,6 +502,7 @@ mod tests {
     fn orthographic_rays_are_parallel() {
         let c = OrbitCamera {
             ortho: true,
+            verticals: false,
             ..Default::default()
         };
         let (_, a) = c.ray(Vec2::new(-0.8, 0.3), 1.5);

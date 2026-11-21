@@ -20,7 +20,7 @@ fn main() {
     println!("cargo:rustc-env=CREABIM_BUILD_DAY={day}");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/refs/heads");
-    println!("cargo:rerun-if-changed=assets/logo/creabim.ico");
+    println!("cargo:rerun-if-changed=assets/logo/volumen.ico");
     exe_icon();
 }
 
@@ -28,7 +28,7 @@ fn main() {
 fn exe_icon() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winresource::WindowsResource::new();
-        res.set_icon("assets/logo/creabim.ico");
+        res.set_icon("assets/logo/volumen.ico");
         // who made it, in the .exe's Properties › Details
         res.set("ProductName", "Volumen");
         res.set("FileDescription", "Volumen, open-source BIM modeller");

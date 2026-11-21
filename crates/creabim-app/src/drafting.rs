@@ -285,9 +285,17 @@ impl CreaBimApp {
     // ---- the Annotation styles window ----------------------------------
 
     pub(super) fn styles_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("annstyles") {
+            self.dialog_end("annstyles", keep);
+            self.drafting.styles_open = false;
+        }
         if !self.drafting.styles_open {
+            self.dialog_end("annstyles", true);
             return;
         }
+        self.dialog_begin("annstyles");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         crate::app::shell::window("Annotation styles")
@@ -296,7 +304,13 @@ impl CreaBimApp {
             .constrain_to(area)
             .min_width(620.0)
             .collapsible(false)
-            .show(ctx, |ui| self.styles_contents(ui));
+            .show(ctx, |ui| {
+                self.styles_contents(ui);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("annstyles", keep));
+        }
         self.drafting.styles_open = open;
     }
 
@@ -527,9 +541,17 @@ impl CreaBimApp {
     // ---- the Sheet templates window ------------------------------------
 
     pub(super) fn templates_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("templates") {
+            self.dialog_end("templates", keep);
+            self.drafting.templates_open = false;
+        }
         if !self.drafting.templates_open {
+            self.dialog_end("templates", true);
             return;
         }
+        self.dialog_begin("templates");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         crate::app::shell::window("Sheet templates")
@@ -538,7 +560,13 @@ impl CreaBimApp {
             .constrain_to(area)
             .min_width(640.0)
             .collapsible(false)
-            .show(ctx, |ui| self.templates_contents(ui));
+            .show(ctx, |ui| {
+                self.templates_contents(ui);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("templates", keep));
+        }
         self.drafting.templates_open = open;
     }
 

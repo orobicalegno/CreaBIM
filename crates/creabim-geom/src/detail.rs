@@ -167,12 +167,7 @@ pub fn detail_items(
                     rgb: [1.0, 1.0, 1.0],
                 });
                 if hatch != Hatch::Empty {
-                    out.push(PlanItem::Fill {
-                        id,
-                        points: pts.clone(),
-                        hatch,
-                        rgb: None,
-                    });
+                    push_hatch(&mut out, id, &pts, hatch, d, mm);
                 }
                 for i in 0..pts.len() {
                     line(&mut out, Pen::Fine, pts[i], pts[(i + 1) % pts.len()]);
@@ -186,12 +181,7 @@ pub fn detail_items(
             };
             if let (Some(hatch), true) = (d.fill, closed) {
                 if hatch != Hatch::Empty && path.len() >= 3 {
-                    out.push(PlanItem::Fill {
-                        id,
-                        points: path.clone(),
-                        hatch,
-                        rgb: None,
-                    });
+                    push_hatch(&mut out, id, &path, hatch, d, mm);
                 }
             }
             if closed {
@@ -204,6 +194,13 @@ pub fn detail_items(
             // a broken line is drawn dash by dash, so its pattern runs on
             // round corners and curves and is the same on screen, on
             // paper and in a CAD file
+            // a zigzag and batting are drawn as their shape along the line
+            if matches!(
+                l.linetype,
+                creabim_core::LineType::Zigzag | creabim_core::LineType::Batting
+            ) {
+                path = shaped_path(&path, l.linetype == creabim_core::LineType::Batting, mm);
+            }
             let runs = match l.linetype.pattern() {
                 Some(dashes) => {
                     let dashes: Vec<f64> = dashes.iter().map(|x| x * mm).collect();
@@ -305,6 +302,101 @@ pub fn callout_items(id: ElementId, name: &str, lo: DVec2, hi: DVec2, mm: f64) -
         text: tag_of(name),
     });
     out
+}
+
+/// A path drawn as a zigzag, or as batting's loops (insulation), along
+/// it: `mm` is drawing units per paper millimetre.
+pub fn shaped_path(path: &[DVec2], loops: bool, mm: f64) -> Vec<DVec2> {
+    if path.len() < 2 {
+        return path.to_vec();
+    }
+    let mut cum = vec![0.0];
+    for w in path.windows(2) {
+        cum.push(cum.last().unwrap() + w[0].distance(w[1]));
+    }
+    let total = *cum.last().unwrap();
+    if total < 1e-9 {
+        return path.to_vec();
+    }
+    // a point and the way the path runs, `s` along it
+    let at = |s: f64| -> (DVec2, DVec2) {
+        let s = s.clamp(0.0, total);
+        let i = cum.partition_point(|c| *c < s).clamp(1, path.len() - 1);
+        let (a, b) = (path[i - 1], path[i]);
+        let len = (cum[i] - cum[i - 1]).max(1e-12);
+        let t = ((s - cum[i - 1]) / len).clamp(0.0, 1.0);
+        (a + (b - a) * t, (b - a).normalize_or_zero())
+    };
+    let (wave, amp) = if loops {
+        (2.6 * mm, 1.3 * mm)
+    } else {
+        (2.0 * mm, 0.8 * mm)
+    };
+    let steps = ((total / wave) * if loops { 24.0 } else { 2.0 })
+        .ceil()
+        .clamp(2.0, 40_000.0) as usize;
+    let mut out = Vec::with_capacity(steps + 1);
+    for k in 0..=steps {
+        let s = total * k as f64 / steps as f64;
+        let phi = std::f64::consts::TAU * s / wave;
+        let (q, d) = if loops {
+            // a prolate cycloid: running back a little at each turn makes
+            // the loops
+            let back = -amp * 0.9 * phi.sin();
+            let (p, d) = at(s + back);
+            (p + d.perp() * amp * phi.cos(), d)
+        } else {
+            let (p, d) = at(s);
+            let tri = if k % 2 == 0 { -amp } else { amp };
+            (p + d.perp() * tri, d)
+        };
+        let _ = d;
+        out.push(q);
+    }
+    out
+}
+
+/// A hatch over `pts`: as the drawing style draws hatches, or, scaled or
+/// turned (the piece's hatch scale and angle, as AutoCAD's), its lines
+/// drawn here at that size and angle over the hatch's fill.
+fn push_hatch(
+    out: &mut Vec<PlanItem>,
+    id: ElementId,
+    pts: &[DVec2],
+    hatch: Hatch,
+    d: &DetailItem,
+    mm: f64,
+) {
+    let (k, a) = (d.hatch_scale, d.hatch_angle);
+    if (k - 1.0).abs() < 1e-9 && a.abs() < 1e-9 || hatch == Hatch::Solid {
+        out.push(PlanItem::Fill {
+            id,
+            points: pts.to_vec(),
+            hatch,
+            rgb: None,
+        });
+        return;
+    }
+    // the fill behind, then the pattern's lines turned about the outline's
+    // first corner
+    out.push(PlanItem::Shade {
+        id,
+        points: pts.to_vec(),
+        rgb: [crate::paper::hatch_fill(hatch) as f32; 3],
+    });
+    let o = pts[0];
+    let turn = DVec2::from_angle(a.to_radians());
+    let back = DVec2::from_angle(-a.to_radians());
+    let local: Vec<DVec2> = pts.iter().map(|p| o + back.rotate(*p - o)).collect();
+    let spacing = crate::paper::HATCH_SPACING * mm * k.max(0.01);
+    for (p, q) in crate::plan::hatch_lines(hatch, &local, spacing) {
+        out.push(PlanItem::Line {
+            id,
+            pen: Pen::Fine,
+            a: o + turn.rotate(p - o),
+            b: o + turn.rotate(q - o),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -483,6 +575,8 @@ mod tests {
                     linetype: LineType::DashDot,
                     hidden: false,
                     parent: None,
+                    locked: false,
+                    pen: None,
                 },
                 DraftLayer {
                     name: "Notes".into(),
@@ -490,6 +584,8 @@ mod tests {
                     linetype: LineType::Continuous,
                     hidden: true,
                     parent: None,
+                    locked: false,
+                    pen: None,
                 },
             ],
         };

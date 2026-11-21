@@ -176,11 +176,11 @@ fn shade(m: &Material, n: [f32; 3]) -> [f32; 3] {
 }
 
 /// The fields of a material. Returns the undo label of what changed, or "".
-/// `patterns` are the style pack's own hatch patterns, by name.
+/// `patterns` are the style pack's own hatch patterns.
 pub(super) fn material_fields(
     ui: &mut egui::Ui,
     m: &mut Material,
-    patterns: &[String],
+    patterns: &[creabim_core::styles::HatchPattern],
 ) -> &'static str {
     let mut label = "";
     egui::Grid::new(ui.id().with("material_fields"))
@@ -235,43 +235,91 @@ pub(super) fn material_fields(
             ui.end_row();
 
             ui.label("Cut hatch");
-            egui::ComboBox::from_id_salt("mat_hatch")
-                .icon(crate::props::combo_icon)
-                .selected_text(m.hatch.label())
-                .width(ui.available_width().min(170.0))
-                .truncate()
-                .show_ui(ui, |ui| {
-                    for h in Hatch::ALL {
-                        if ui.selectable_value(&mut m.hatch, h, h.label()).changed() {
-                            label = "Material hatch";
+            ui.horizontal(|ui| {
+                hatch_swatch(ui, m.hatch, 22.0);
+                egui::ComboBox::from_id_salt("mat_hatch")
+                    .icon(crate::props::combo_icon)
+                    .selected_text(m.hatch.label())
+                    .width(ui.available_width().min(150.0))
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        // each with its picture: a hatch is chosen by eye
+                        for h in Hatch::ALL {
+                            ui.horizontal(|ui| {
+                                hatch_swatch(ui, h, 18.0);
+                                if ui.selectable_value(&mut m.hatch, h, h.label()).changed() {
+                                    label = "Material hatch";
+                                }
+                            });
                         }
-                    }
-                });
+                    });
+            });
             ui.end_row();
 
             // a pattern of the style pack's own, over the built-in one
             ui.label("Pattern");
-            egui::ComboBox::from_id_salt("mat_pattern")
-                .icon(crate::props::combo_icon)
-                .selected_text(m.pattern.clone().unwrap_or_else(|| "As the cut hatch".into()))
-                .width(ui.available_width().min(170.0))
-                .truncate()
-                .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut m.pattern, None, "As the cut hatch").changed() {
-                        label = "Material pattern";
+            ui.horizontal(|ui| {
+                match m.pattern.as_ref().and_then(|n| patterns.iter().find(|p| &p.name == n)) {
+                    Some(p) => pattern_swatch(ui, p, 22.0),
+                    None => {
+                        hatch_swatch(ui, m.hatch, 22.0);
                     }
-                    for p in patterns {
-                        if ui.selectable_value(&mut m.pattern, Some(p.clone()), p).changed() {
-                            label = "Material pattern";
+                }
+                egui::ComboBox::from_id_salt("mat_pattern")
+                    .icon(crate::props::combo_icon)
+                    .selected_text(m.pattern.clone().unwrap_or_else(|| "As the cut hatch".into()))
+                    .width(ui.available_width().min(150.0))
+                    .truncate()
+                    .show_ui(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            hatch_swatch(ui, m.hatch, 18.0);
+                            if ui.selectable_value(&mut m.pattern, None, "As the cut hatch").changed() {
+                                label = "Material pattern";
+                            }
+                        });
+                        for p in patterns {
+                            ui.horizontal(|ui| {
+                                pattern_swatch(ui, p, 18.0);
+                                if ui
+                                    .selectable_value(&mut m.pattern, Some(p.name.clone()), &p.name)
+                                    .changed()
+                                {
+                                    label = "Material pattern";
+                                }
+                            });
                         }
-                    }
-                })
-                .response
-                .on_hover_text(if patterns.is_empty() {
-                    "Add patterns in File › Graphic styles › Patterns (from the library, or a .pat file) to choose them here"
-                } else {
-                    "One of the style pack's patterns for its cut faces; As the cut hatch uses the built-in one"
-                });
+                        // the whole library too: one picked joins the
+                        // project's patterns by itself
+                        let library: Vec<_> = creabim_core::styles::library_patterns()
+                            .into_iter()
+                            .filter(|l| !patterns.iter().any(|p| p.name == l.name))
+                            .collect();
+                        if !library.is_empty() {
+                            ui.separator();
+                            ui.label(egui::RichText::new("From the library").weak().small());
+                            for l in library {
+                                ui.horizontal(|ui| {
+                                    pattern_swatch(ui, &l, 18.0);
+                                    if ui
+                                        .selectable_label(false, &l.name)
+                                        .on_hover_text("Added to the project's patterns when picked")
+                                        .clicked()
+                                    {
+                                        m.pattern = Some(l.name.clone());
+                                        label = "Material pattern";
+                                        PENDING_PATTERN.with(|c| *c.borrow_mut() = Some(l.clone()));
+                                    }
+                                });
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(if patterns.is_empty() {
+                        "Add patterns in Materials › Hatch patterns (from the library, or a .pat file) to choose them here"
+                    } else {
+                        "One of the style pack's patterns for its cut faces; As the cut hatch uses the built-in one"
+                    });
+            });
             ui.end_row();
 
             ui.label("Roughness");
@@ -416,6 +464,9 @@ impl CreaBimApp {
             Item::new("mat.browser", "Material browser…")
                 .icon("palette")
                 .hint("Add, edit, delete and assign the project's materials"),
+            Item::new("hatches", "Hatch patterns…")
+                .icon("hash")
+                .hint("Every hatch, with its picture: the built-in ones, AutoCAD's library, and patterns from .pat files"),
             Item::sub("Add from the library", lib).icon("plus"),
             Item::new("mat.import", "Import materials…").icon("download").hint(
                 "Materials from an IFC file, FreeCAD material cards (.FCMat), glTF (.glb, .gltf, e.g. exported from Blender) or a .blend file",
@@ -588,9 +639,17 @@ impl CreaBimApp {
 
     /// The material browser window, when open.
     pub(super) fn materials_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("materials") {
+            self.dialog_end("materials", keep);
+            self.mat.open = false;
+        }
         if !self.mat.open {
+            self.dialog_end("materials", true);
             return;
         }
+        self.dialog_begin("materials");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut asks = vec![];
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
@@ -627,7 +686,11 @@ impl CreaBimApp {
                     MatTab::Project => self.project_tab(ui, &mut asks),
                     MatTab::Library => self.library_tab(ui, &mut asks),
                 }
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
             });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("materials", keep));
+        }
         self.mat.open = open;
         for ask in asks {
             self.run_ask(ask);
@@ -788,11 +851,8 @@ impl CreaBimApp {
                 });
                 ui.add_space(8.0);
                 let mut edited = m.clone();
-                let pats: Vec<String> = creabim_core::styles::active_pack(self.doc.model())
-                    .patterns
-                    .iter()
-                    .map(|p| p.name.clone())
-                    .collect();
+                let pats: Vec<creabim_core::styles::HatchPattern> =
+                    creabim_core::styles::active_pack(self.doc.model()).patterns.clone();
                 let label = material_fields(ui, &mut edited, &pats);
                 if !label.is_empty() {
                     asks.push(Ask::Edit(id, label, edited));
@@ -1011,5 +1071,107 @@ fn plural_s(n: usize) -> &'static str {
         ""
     } else {
         "s"
+    }
+}
+
+/// A small square of a built-in hatch, as it fills a cut.
+pub(crate) fn hatch_swatch(ui: &mut egui::Ui, h: Hatch, size: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    let g = (creabim_geom::paper::hatch_fill(h) * 255.0) as u8;
+    p.rect_filled(rect, 2.0, egui::Color32::from_gray(g));
+    let side = 1.0;
+    let poly = [
+        glam::DVec2::ZERO,
+        glam::DVec2::new(side, 0.0),
+        glam::DVec2::new(side, side),
+        glam::DVec2::new(0.0, side),
+    ];
+    let to = |q: glam::DVec2| {
+        egui::pos2(
+            rect.min.x + q.x as f32 * size,
+            rect.max.y - q.y as f32 * size,
+        )
+    };
+    let stroke = egui::Stroke::new(0.8, egui::Color32::from_gray(60));
+    for (a, b) in creabim_geom::plan::hatch_lines(h, &poly, 0.18) {
+        p.line_segment([to(a), to(b)], stroke);
+    }
+    p.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(140)),
+        egui::StrokeKind::Inside,
+    );
+    resp
+}
+
+/// A small square of a style pack's pattern.
+pub(crate) fn pattern_swatch(
+    ui: &mut egui::Ui,
+    pat: &creabim_core::styles::HatchPattern,
+    size: f32,
+) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    let fill = pat.fill.map_or([1.0; 3], |c| c.0);
+    p.rect_filled(
+        rect,
+        2.0,
+        egui::Color32::from_rgb(
+            (fill[0] * 255.0) as u8,
+            (fill[1] * 255.0) as u8,
+            (fill[2] * 255.0) as u8,
+        ),
+    );
+    // the square stands for 10 mm of paper
+    let side = 0.5;
+    let k = 20.0;
+    let poly = [
+        glam::DVec2::ZERO,
+        glam::DVec2::new(side, 0.0),
+        glam::DVec2::new(side, side),
+        glam::DVec2::new(0.0, side),
+    ];
+    let to = |q: glam::DVec2| {
+        egui::pos2(
+            rect.min.x + (q.x / side) as f32 * size,
+            rect.max.y - (q.y / side) as f32 * size,
+        )
+    };
+    let stroke = egui::Stroke::new(0.8, egui::Color32::from_gray(60));
+    for (a, b) in creabim_geom::looks::pattern_lines(pat, &poly, k) {
+        let (a, b) = (to(a), to(b));
+        if a.distance(b) < 0.8 {
+            p.circle_filled(a, 0.6, stroke.color);
+        } else {
+            p.line_segment([a, b], stroke);
+        }
+    }
+    p.rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(140)),
+        egui::StrokeKind::Inside,
+    );
+}
+
+thread_local! {
+    /// A library pattern picked for a material, still to join the project.
+    static PENDING_PATTERN: std::cell::RefCell<Option<creabim_core::styles::HatchPattern>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+impl CreaBimApp {
+    /// A library pattern a material was just given joins the style pack.
+    pub(super) fn add_pending_pattern(&mut self) {
+        let Some(p) = PENDING_PATTERN.with(|c| c.borrow_mut().take()) else {
+            return;
+        };
+        let (id, mut pack) = self.edited_pack();
+        if !pack.patterns.iter().any(|x| x.name == p.name) {
+            pack.patterns.push(p);
+            self.commit_pack(id, pack, "Add hatch pattern");
+        }
     }
 }

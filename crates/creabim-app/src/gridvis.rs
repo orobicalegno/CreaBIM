@@ -1800,9 +1800,9 @@ mod tests {
                 );
             }
         }
-        // the Create menu's schedules too
-        let create = app.menu_items("menu:Create");
-        let schedule = create
+        // the View menu's schedules too (moved from Create)
+        let view = app.menu_items("menu:View");
+        let schedule = view
             .iter()
             .find_map(|i| match i {
                 Item::Sub { label, items, .. } if label == "Schedule" => Some(items.clone()),

@@ -60,9 +60,11 @@ mod marksui;
 #[path = "mastersui.rs"]
 mod mastersui;
 #[path = "materials.rs"]
-mod materials;
+pub(crate) mod materials;
 #[path = "objectsui.rs"]
 mod objectsui;
+#[path = "openprojects.rs"]
+mod openprojects;
 #[path = "osnapui.rs"]
 mod osnapui;
 #[path = "profilesui.rs"]
@@ -137,13 +139,13 @@ pub struct CreaBimApp {
     /// The area being drawn now.
     pub(super) area_now: usize,
     /// Generated drawings by view, with the model revision they were made at.
-    drawings: HashMap<ElementId, (u64, Drawing)>,
+    drawings: HashMap<ElementId, (u64, std::sync::Arc<Drawing>)>,
     /// Drawings and the 3D scene being built off the UI thread.
     builds: crate::builds::Builds,
     /// Each view's looks on sheets, with the model revision they are for.
     looks: HashMap<ElementId, (u64, std::sync::Arc<creabim_geom::looks::Looks>)>,
     /// The same for views seen in X-ray, which their sheets don't follow.
-    xray_drawings: HashMap<ElementId, (u64, Drawing)>,
+    xray_drawings: HashMap<ElementId, (u64, std::sync::Arc<Drawing>)>,
     /// The theme the 3D view's wires were last drawn for (MU31).
     dark_3d: bool,
     /// The Divide window (MU34 B2).
@@ -154,6 +156,10 @@ pub struct CreaBimApp {
     log_ui: reportui::LogUi,
     /// AutoCAD's command line.
     cmd: cmdline::CmdLine,
+    /// What each open window found when it opened, for its Cancel.
+    dialogs: std::collections::HashMap<&'static str, osnapui::DialogSnap>,
+    /// Save (true) or Cancel pressed in a window, to act on next frame.
+    dialog_close: Vec<(&'static str, bool)>,
     /// Report a problem asked for: the themed window is open; whether to
     /// put the project in.
     report_ask: Option<bool>,
@@ -176,6 +182,11 @@ pub struct CreaBimApp {
     /// Aspect ratio of the 3D view as last drawn, for framing.
     aspect: f32,
     viewport: Option<Viewport3d>,
+    /// An image of the 3D view asked for, this many pixels wide: made on the
+    /// next frame, where the renderer is at hand.
+    pub(crate) export_3d: Option<u32>,
+    /// The Sun position window is open.
+    pub(crate) sun_dialog: bool,
     geometry_key: Option<GeometryKey>,
     /// How far Inset draws a face inside its edges.
     inset_by: f64,
@@ -325,6 +336,13 @@ pub struct CreaBimApp {
     last_export_dir: Option<std::path::PathBuf>,
     /// The crop box whose elements clicks in the 3D view are picking.
     crop_pick: Option<ElementId>,
+    /// The other open projects, for the Window menu.
+    others: Vec<openprojects::OpenProject>,
+    /// When the last automatic copy was saved, and of which revision.
+    autosaved: (std::time::Instant, Option<u64>),
+    /// Opening a project keeps the shown one open (off until the app has
+    /// started, and in tests).
+    multi: bool,
     /// The element outside a crop box the status bar last spoke of.
     outside_said: Option<ElementId>,
     /// The 3D extents the crop ghosts were measured from: the model's
@@ -408,10 +426,12 @@ impl CreaBimApp {
         if let Some(root) = settings.areas.clone() {
             app.areas.root = root;
         }
+        app.camera.verticals = settings.correct_verticals;
         app.shell.settings = settings;
         app.load_model(creabim_core::starter::starter_house());
         app.status = STARTER_LOADED.into();
         // `creabim-app house.creabim` opens that file instead
+        app.multi = true;
         if let Some(path) = launch_file(std::env::args().skip(1)) {
             app.open_path(&path);
         }
@@ -439,6 +459,8 @@ impl CreaBimApp {
             masters: Default::default(),
             log_ui: Default::default(),
             cmd: Default::default(),
+            dialogs: Default::default(),
+            dialog_close: vec![],
             report_ask: None,
             close_ask: false,
             close_state: Default::default(),
@@ -450,6 +472,8 @@ impl CreaBimApp {
             cube: Default::default(),
             aspect: 0.65,
             viewport,
+            export_3d: None,
+            sun_dialog: false,
             geometry_key: None,
             geometry_gen: 0,
             pick_selection: None,
@@ -531,6 +555,9 @@ impl CreaBimApp {
             boxed: None,
             last_export_dir: None,
             crop_pick: None,
+            others: Vec::new(),
+            autosaved: (std::time::Instant::now(), None),
+            multi: false,
             outside_said: None,
             outside_bounds: None,
             status: "Loaded the sample house. Orbit with the middle button (or Alt + left drag), pan with right drag, zoom with the wheel; a left drag selects with a box.".into(),
@@ -538,6 +565,7 @@ impl CreaBimApp {
     }
 
     fn load_model(&mut self, model: Model) {
+        self.keep_open();
         self.doc = Document::from_model(with_plan_views(model));
         self.selection.clear();
         self.hidden.clear();
@@ -610,8 +638,18 @@ impl CreaBimApp {
             }
             return;
         }
+        // a CAD drawing goes under the plan shown, as a reference
+        if lower.ends_with(".dxf") {
+            self.import_dxf(path);
+            return;
+        }
         if !crate::files::is_project(path) {
             self.link_file(path);
+            return;
+        }
+        // already open: show it rather than opening it twice
+        if let Some(i) = self.open_index(path) {
+            self.switch_project(i);
             return;
         }
         match creabim_store::load(path) {
@@ -709,6 +747,45 @@ impl CreaBimApp {
     }
 
     /// Bring a file's objects in as linked elements.
+    /// File › Import DXF, or a DXF opened: under the plan or section
+    /// shown, else the first floor plan.
+    fn import_dxf(&mut self, path: &str) {
+        let v = self.active_view.filter(|v| {
+            matches!(
+                self.view(*v).map(|v| &v.kind),
+                Some(ViewKind::Plan { .. } | ViewKind::Section { .. })
+            )
+        });
+        let v = v.or_else(|| {
+            self.doc.model().iter().find_map(|e| match &e.kind {
+                ElementKind::View(view) if matches!(view.kind, ViewKind::Plan { .. }) => Some(e.id),
+                _ => None,
+            })
+        });
+        let Some(v) = v else {
+            self.status =
+                "A DXF goes under a plan: make a floor plan first (View › New view).".into();
+            return;
+        };
+        self.active_view = Some(v);
+        self.add_reference(
+            v,
+            creabim_core::RefSource::Dxf {
+                path: path.to_string(),
+            },
+        );
+    }
+
+    pub(super) fn import_dxf_dialog(&mut self) {
+        if let Some(p) = rfd::FileDialog::new()
+            .set_title("Import a DXF drawing under the plan")
+            .add_filter("DXF", &["dxf"])
+            .pick_file()
+        {
+            self.import_dxf(&p.display().to_string());
+        }
+    }
+
     fn link_file(&mut self, path: &str) {
         let full = std::fs::canonicalize(path)
             .map(|p| p.display().to_string())
@@ -860,7 +937,7 @@ impl CreaBimApp {
         sheets::placed_views_with(
             model,
             sheet,
-            &mut |v| cache.get(&v).map(|(_, d)| d.clone()),
+            &mut |v| cache.get(&v).map(|(_, d)| (**d).clone()),
             &mut |id, v| match looks.get(&id) {
                 Some((r, l)) if *r == rev => l.clone(),
                 _ => {
@@ -905,12 +982,12 @@ impl CreaBimApp {
         };
         if let Some((r, d)) = cache.get(&id) {
             if *r == revision {
-                return Some(d.clone());
+                return Some((**d).clone());
             }
         }
         let t = std::time::Instant::now();
         let d = creabim_geom::section::view_drawing_with(self.doc.model(), id, xray)?;
-        cache.insert(id, (revision, d.clone()));
+        cache.insert(id, (revision, std::sync::Arc::new(d.clone())));
         self.builds
             .record((id, xray), t.elapsed().as_secs_f64() * 1000.0);
         Some(d)
@@ -920,7 +997,7 @@ impl CreaBimApp {
     /// up to date or cheap to build, else the last one finished while a
     /// worker builds the new one (see [`crate::builds`]). Exports and
     /// anything measured from a drawing use [`Self::drawing`].
-    fn drawing_live(&mut self, id: ElementId) -> Option<Drawing> {
+    fn drawing_live(&mut self, id: ElementId) -> Option<std::sync::Arc<Drawing>> {
         let _pf = Perf::new("drawing_live: take finished");
         let finished = self.builds.finished();
         drop(_pf);
@@ -933,7 +1010,7 @@ impl CreaBimApp {
             match b.drawing {
                 // a drawing older than the one held (built on the spot meanwhile) is dropped
                 Some(d) if cache.get(&b.key.0).is_none_or(|(r, _)| *r < b.revision) => {
-                    cache.insert(b.key.0, (b.revision, d));
+                    cache.insert(b.key.0, (b.revision, std::sync::Arc::new(d)));
                 }
                 _ => {}
             }
@@ -970,7 +1047,13 @@ impl CreaBimApp {
             }
             _ => {
                 let _pb = Perf::new("drawing_live: build here");
-                self.drawing(id)
+                self.drawing(id)?;
+                let cache = if xray {
+                    &self.xray_drawings
+                } else {
+                    &self.drawings
+                };
+                cache.get(&id).map(|(_, d)| d.clone())
             }
         }
     }
@@ -1823,6 +1906,27 @@ impl CreaBimApp {
                 self.selection.clear();
                 self.face = None;
             }
+            // inside a command (LINE, PLINE, a shape being drawn, points
+            // being picked) Undo takes back the last point, as AutoCAD's U
+            Command::Undo
+                if !self.plan.details.path.is_empty()
+                    || self
+                        .plan
+                        .cmd_pick
+                        .as_ref()
+                        .is_some_and(|(_, p)| !p.is_empty()) =>
+            {
+                if self.plan.details.path.pop().is_some() {
+                    if self.plan.pline_arcs.len() > self.plan.details.path.len().saturating_sub(1) {
+                        self.plan.pline_arcs.pop();
+                    }
+                } else if let Some((_, p)) = &mut self.plan.cmd_pick {
+                    p.pop();
+                }
+                self.say(
+                    "Undo: the last point is taken back. Ctrl+Z again takes back the one before.",
+                );
+            }
             Command::Undo => {
                 let label = self.doc.undo_label().map(str::to_owned);
                 if self.doc.undo() {
@@ -1883,6 +1987,8 @@ impl CreaBimApp {
         self.plan.cancel();
         self.plan.tool = Tool::Select;
         self.plan.armed = Some(m);
+        // a copy hangs on the cursor at once, as AutoCAD's
+        self.plan.armed_follow = c == Command::Duplicate;
         self.status = match (m.0, self.selection.is_some()) {
             (Mode::Move, false) => {
                 "Move: click what to move (Shift+click adds more), then click the base point. Esc cancels.".into()
@@ -1991,6 +2097,14 @@ impl CreaBimApp {
             if stop {
                 self.toggle_walk();
             }
+        }
+        // Ctrl+Tab: the next open project (Window menu)
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Tab)) {
+            self.next_project();
+        }
+        // F2: the command history, as AutoCAD's text window
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+            self.cmd.history = !self.cmd.history;
         }
         // F1: the guide's page about what you are doing
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
@@ -2528,7 +2642,9 @@ impl CreaBimApp {
             tx = tx.insert(c);
         }
         let r = self.doc.commit(tx);
-        if r.is_ok() {
+        let ok = r.is_ok();
+        if ok {
+            self.selection.clear();
             self.selection.extend(ids, false);
             self.face = None;
         }
@@ -2538,8 +2654,15 @@ impl CreaBimApp {
         };
         self.report(
             r,
-            format!("Pasted {n} elements in place. Press G to move them.{left}"),
+            format!("Pasted {n} elements: they follow the pointer, click where they go (Esc leaves them in place).{left}"),
         );
+        // what is pasted hangs on the cursor until a click places it
+        if ok {
+            self.plan.cancel();
+            self.plan.tool = Tool::Select;
+            self.plan.armed = Command::Move.modal();
+            self.plan.armed_follow = true;
+        }
     }
 
     /// Paste from text another window (or this one) put on the clipboard.
@@ -2646,6 +2769,100 @@ impl CreaBimApp {
 
     // ---- 3D -------------------------------------------------------------
 
+    /// Where the sun stands, typed or dragged: the 3D view follows as the
+    /// numbers change.
+    fn sun_window(&mut self, ctx: &egui::Context) {
+        if !self.sun_dialog {
+            return;
+        }
+        let mut open = true;
+        let mut close = false;
+        let before = self.shell.settings.clone();
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        shell::window("Sun position")
+            .open(&mut open)
+            .default_pos(area.min + Vec2::new(60.0, 90.0))
+            .constrain_to(area)
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                let s = &mut self.shell.settings;
+                egui::Grid::new("sun_grid").num_columns(2).show(ui, |ui| {
+                    ui.label("Azimuth")
+                        .on_hover_text("Degrees clockwise from the project's true north: 90 east, 180 south, 270 west");
+                    ui.add(
+                        egui::DragValue::new(&mut s.sun_azimuth)
+                            .range(0.0..=360.0)
+                            .speed(1.0)
+                            .suffix("°"),
+                    );
+                    ui.end_row();
+                    ui.label("Height").on_hover_text("Degrees above the horizon");
+                    ui.add(
+                        egui::DragValue::new(&mut s.sun_altitude)
+                            .range(2.0..=90.0)
+                            .speed(0.5)
+                            .suffix("°"),
+                    );
+                    ui.end_row();
+                });
+                ui.add(egui::Slider::new(&mut s.sun_azimuth, 0.0..=360.0).show_value(false));
+                ui.checkbox(&mut s.shadows_3d, "Sun shadows");
+                ui.checkbox(&mut s.occlusion_3d, "Ambient occlusion");
+                ui.separator();
+                close = ui.button("Close").clicked();
+            });
+        if self.shell.settings != before {
+            self.shell.settings.store();
+        }
+        if !open || close {
+            self.sun_dialog = false;
+        }
+    }
+
+    /// The 3D view's background, for the paper's darkness and the shading.
+    pub(crate) fn background_3d(&self) -> [f64; 3] {
+        if self.shell.settings.render_3d == crate::render3d::RenderMode::WhiteModel
+            && !self.paper_is_dark
+        {
+            return [0.94, 0.94, 0.93];
+        }
+        if self.paper_is_dark {
+            BACKGROUND_3D_DARK
+        } else {
+            BACKGROUND_3D
+        }
+        .map(f64::from)
+    }
+
+    /// How the 3D view is lit: the sun from the settings, turned by the
+    /// project's true north; the white model always in sun and sky.
+    pub(crate) fn lighting_3d(&self) -> crate::render3d::Lighting {
+        let s = &self.shell.settings;
+        let white = s.render_3d == crate::render3d::RenderMode::WhiteModel;
+        let wire = matches!(
+            s.render_3d,
+            crate::render3d::RenderMode::Wireframe | crate::render3d::RenderMode::HiddenLine
+        );
+        let north = self
+            .doc
+            .model()
+            .project_info()
+            .map_or(0.0, |(_, p)| p.true_north);
+        crate::render3d::Lighting {
+            shadows: !wire && (s.shadows_3d || white),
+            ambient_occlusion: if wire {
+                0.0
+            } else if s.occlusion_3d || white {
+                0.85
+            } else {
+                0.0
+            },
+            white,
+            sun: sun_direction(s.sun_azimuth, s.sun_altitude, north),
+        }
+    }
+
     fn rebuild_geometry(&mut self, rs: &egui_wgpu::RenderState) {
         // the scene of this revision: shared if built, else the newest a
         // worker has finished while it builds this one, so an edit or a
@@ -2715,6 +2932,9 @@ impl CreaBimApp {
         // wires on the dark ground all but vanished)
         let edge_colour = if mode == crate::render3d::RenderMode::Wireframe && self.dark_3d {
             [0.72, 0.74, 0.78]
+        } else if mode == crate::render3d::RenderMode::WhiteModel {
+            // the white model's edges: faint, as a pencil line on card
+            [0.62, 0.62, 0.63]
         } else {
             [0.10, 0.10, 0.11]
         };
@@ -2781,10 +3001,14 @@ impl CreaBimApp {
                 }
                 _ => None,
             };
-            let plain = if mode == crate::render3d::RenderMode::HiddenLine {
-                [0.97, 0.97, 0.96]
-            } else {
-                item.color
+            let plain = match mode {
+                crate::render3d::RenderMode::HiddenLine => [0.97, 0.97, 0.96],
+                // white card, the glass a darker grey-blue
+                crate::render3d::RenderMode::WhiteModel if item.surface[2] < 0.999 => {
+                    [0.42, 0.47, 0.52]
+                }
+                crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                _ => item.color,
             };
             let mut colors =
                 vec![if selected { tint(plain) } else { plain }; item.mesh.positions.len()];
@@ -2864,7 +3088,7 @@ impl CreaBimApp {
         // one plane at a time (MU18): while a face is the workplane, the
         // ground grid dims to a hint
         let face_plane = self.workplane.is_some();
-        if self.shell.settings.ground_grid {
+        if self.shell.settings.ground_grid && mode != crate::render3d::RenderMode::WhiteModel {
             // as far out as 50 lines each way, at least the old 50 m
             let reach = (spacing * 25.0).max(25.0);
             // quiet: a little off the paper, so edges and vertex dots
@@ -2945,7 +3169,7 @@ impl CreaBimApp {
                     kind,
                     ViewKind::Axonometric { .. } | ViewKind::Schedule { .. }
                 ) {
-                    Drawing::default()
+                    std::sync::Arc::new(Drawing::default())
                 } else {
                     plan
                 };
@@ -3080,10 +3304,14 @@ impl CreaBimApp {
                     }
                     _ => Default::default(),
                 };
-            let plain = if mode == crate::render3d::RenderMode::HiddenLine {
-                [0.97, 0.97, 0.96]
-            } else {
-                item.color
+            let plain = match mode {
+                crate::render3d::RenderMode::HiddenLine => [0.97, 0.97, 0.96],
+                // white card, the glass a darker grey-blue
+                crate::render3d::RenderMode::WhiteModel if item.surface[2] < 0.999 => {
+                    [0.42, 0.47, 0.52]
+                }
+                crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                _ => item.color,
             };
             for (t, c) in item.mesh.indices.as_chunks::<3>().0.iter().enumerate() {
                 let color = if face.contains(&t) {
@@ -3243,7 +3471,14 @@ impl CreaBimApp {
         if mid && ctrl_now {
             self.camera.zoom(-response.drag_delta().y / 60.0);
         } else {
-            let pan = response.dragged_by(egui::PointerButton::Secondary)
+            // Shift + right drag aims the camera: it turns where it stands,
+            // its target moving (a camera's eye stays put)
+            let aim = response.dragged_by(egui::PointerButton::Secondary) && shift_now;
+            if aim {
+                self.camera
+                    .look_round(GVec2::new(response.drag_delta().x, response.drag_delta().y));
+            }
+            let pan = (response.dragged_by(egui::PointerButton::Secondary) && !aim)
                 || (mid
                     && if archicad {
                         !shift_now
@@ -3256,11 +3491,12 @@ impl CreaBimApp {
                 } else {
                     !classic && !shift_now
                 };
-            // on foot a middle or right drag turns the head
+            // on foot a right drag moves the camera, as it does anywhere
+            // (Shift + right aims it, above); the middle button turns the head
             let (pan, orbit) = if self.walking {
                 (
-                    false,
-                    mid || response.dragged_by(egui::PointerButton::Secondary),
+                    response.dragged_by(egui::PointerButton::Secondary) && !aim,
+                    mid,
                 )
             } else {
                 (pan, orbit)
@@ -3376,18 +3612,45 @@ impl CreaBimApp {
         self.rebuild_selection(rs);
         let ppp = ui.ctx().pixels_per_point();
         let size = [(rect.width() * ppp) as u32, (rect.height() * ppp) as u32];
+        let lighting = self.lighting_3d();
+        let background = self.background_3d();
         if let Some(vp) = &mut self.viewport {
+            if let Some(width) = self.export_3d.take() {
+                let height = ((width as f32) / aspect.max(0.1)).round() as u32;
+                let picked = rfd::FileDialog::new()
+                    .set_title("Save the 3D view as an image")
+                    .add_filter("PNG image", &["png"])
+                    .set_file_name("3D view.png")
+                    .save_file();
+                if let Some(path) = picked {
+                    self.status = match vp.render_image(
+                        rs,
+                        [width, height],
+                        self.camera.view_proj(aspect),
+                        self.camera.eye().to_array(),
+                        background,
+                        lighting,
+                    ) {
+                        Some(img) => match img.save(&path) {
+                            Ok(()) => format!(
+                                "3D view saved, {}×{} pixels: {}",
+                                img.width(),
+                                img.height(),
+                                path.display()
+                            ),
+                            Err(e) => format!("Couldn't save the image: {e}"),
+                        },
+                        None => "Couldn't make the image: the graphics card refused it".into(),
+                    };
+                }
+            }
             let tex = vp.render(
                 rs,
                 size,
                 self.camera.view_proj(aspect),
                 self.camera.eye().to_array(),
-                if self.paper_is_dark {
-                    BACKGROUND_3D_DARK
-                } else {
-                    BACKGROUND_3D
-                }
-                .map(f64::from),
+                background,
+                lighting,
             );
             ui.painter().image(
                 tex,
@@ -6986,14 +7249,19 @@ impl CreaBimApp {
             let Some(mut drawing) = self.drawing_live(view) else {
                 return;
             };
+            // shared, not copied: a big drawing (an exploded DXF) cost a
+            // copy each frame; only one with something left out is copied
+            let drawing_ref = &mut drawing;
             drop(_pp);
             let _pr = Perf::new("show_plan: hidden and guides");
             if !self.hidden.is_empty() {
-                drawing.items.retain(|it| !self.hidden.contains(&it.id()));
+                std::sync::Arc::make_mut(drawing_ref)
+                    .items
+                    .retain(|it| !self.hidden.contains(&it.id()));
             }
             if self.shell.settings.guides_hidden {
                 // kept in the model, left out of every view (and so not snapped to)
-                drawing.items.retain(|it| {
+                std::sync::Arc::make_mut(drawing_ref).items.retain(|it| {
                     !matches!(
                         it,
                         PlanItem::Line {
@@ -7040,7 +7308,12 @@ impl CreaBimApp {
                 )
             {
                 // the pickbox while selecting; a point is asked for otherwise
-                let pickbox = self.plan.tool == planview::Tool::Select && !self.plan.point_pick;
+                // the square while selecting; the ring while a command runs
+                let pickbox = self.plan.tool == planview::Tool::Select
+                    && !self.plan.point_pick
+                    && self.plan.modal.is_none()
+                    && self.plan.cmd_pick.is_none()
+                    && self.cmd.running.is_none();
                 // along the UCS, as the view is turned
                 let angle = if matches!(kind, planview::PaneKind::Plan { .. }) {
                     self.plan.ucs.angle - self.plan.view_rot.get(&view).copied().unwrap_or(0.0)
@@ -8189,13 +8462,28 @@ impl CreaBimApp {
         }
         let r_source_dxf = matches!(source, creabim_core::RefSource::Dxf { .. });
         let mut r = creabim_core::Reference::new(source, vec![v]);
+        let mut moved = false;
         if let Some(b) = crate::trace::bounds_of(&r.source, &shown) {
             r.in_place(b);
+            // a CAD drawing far from the model (survey or map coordinates,
+            // or an origin a long way off) would sit out of sight: it comes
+            // over the model, to be moved into place
+            if r_source_dxf {
+                if let Some(at) = far_drawing(model, b) {
+                    r.at = at;
+                    moved = true;
+                }
+            }
         }
         // a picture keeps its own colours; lines take the first colour
         if matches!(shown, crate::trace::Shown::Picture(_)) {
             r.colour = None;
             r.opacity = 0.6;
+        }
+        // a DXF in its own colours, as in AutoCAD
+        if r_source_dxf {
+            r.colour = None;
+            r.opacity = r.opacity.max(0.85);
         }
         // named for what it shows, without a prefix eating the field (MU24)
         let name = crate::trace::label(model, &r.source);
@@ -8209,6 +8497,16 @@ impl CreaBimApp {
             self.selection.only(id);
             self.prop_tab = PropTab::Element;
             self.status = "Reference added. Drag its middle to move it, a corner to scale it, the round grip to turn it; Calibrate sets an exact size. Alt+F2 hides it.".into();
+            if r_source_dxf {
+                // show it: the view fits its drawing again
+                self.plan.cameras.remove(&v);
+                self.plan.area_cameras.retain(|(_, view), _| *view != v);
+                self.status = if moved {
+                    "DXF added under this plan. It was drawn far from the model, so it was brought over it: drag its middle (or MOVE) to put it in place; Calibrate sets an exact size.".into()
+                } else {
+                    "DXF added under this plan, at its own coordinates. Drag its middle to move it; Properties › Element sets its colour and strength; EXPLODE turns it into drafting lines.".into()
+                };
+            }
             if r_source_dxf && crate::trace::DXF_CAPPED.load(std::sync::atomic::Ordering::Relaxed) {
                 self.status = format!(
                     "Reference added, but only in part: the file makes more than {} items (blocks in arrays inside arrays), so reading stopped there.",
@@ -9952,11 +10250,10 @@ impl CreaBimApp {
                 }
                 ElementKind::Material(m) => {
                     materials::preview(ui, m, 72.0);
-                    let pats: Vec<String> = creabim_core::styles::active_pack(self.doc.model())
-                        .patterns
-                        .iter()
-                        .map(|p| p.name.clone())
-                        .collect();
+                    let pats: Vec<creabim_core::styles::HatchPattern> =
+                        creabim_core::styles::active_pack(self.doc.model())
+                            .patterns
+                            .clone();
                     label = materials::material_fields(ui, m, &pats);
                     let users = creabim_core::library::users(self.doc.model(), id).len();
                     ui.label(egui::RichText::new(format!("Used by {users} elements.")).weak());
@@ -10452,6 +10749,12 @@ impl CreaBimApp {
                                 &new,
                             ))
                         }
+                        Some(crate::detailtool::LayerEdit::Delete(name)) => {
+                            Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
+                        }
+                        Some(crate::detailtool::LayerEdit::Merge { from, into }) => Some(
+                            creabim_core::detail::merge_layers(self.doc.model(), &from, &into),
+                        ),
                         Some(crate::detailtool::LayerEdit::MakeSymbol) => {
                             self.make_symbol();
                             None
@@ -10737,16 +11040,16 @@ impl CreaBimApp {
             return;
         };
         let mut multi: Option<String> = None;
+        let mut kinds: Vec<(String, usize)> = Vec::new();
         if self.selection.len() > 1 {
             // how many of each kind, then the active element below
-            let mut kinds: Vec<(&str, usize)> = Vec::new();
             for e in self
                 .selection
                 .all()
                 .iter()
                 .filter_map(|i| self.doc.model().get(*i))
             {
-                let k = kind_word(&e.kind);
+                let k = pick_word(&e.kind);
                 match kinds.iter_mut().find(|(l, _)| *l == k) {
                     Some((_, n)) => *n += 1,
                     None => kinds.push((k, 1)),
@@ -10808,8 +11111,40 @@ impl CreaBimApp {
             })
         });
         if let Some(m) = multi.take() {
-            ui.add(egui::Label::new(egui::RichText::new(m).weak().small()).truncate())
-                .on_hover_text("G, R, S, Shift+D, Delete, Ctrl+C and H act on all of them. Below is the last one picked; Shift+click picks another.");
+            // AutoCAD's Properties list: All, or one kind of what is
+            // selected, to keep only those
+            let mut keep: Option<String> = None;
+            crate::props::head_row(ui, "Selected", |ui| {
+                egui::ComboBox::from_id_salt("props.kinds")
+                    .width(ui.available_width())
+                    .selected_text(format!("All ({})", self.selection.len()))
+                    .show_ui(ui, |ui| {
+                        let _ = ui.selectable_label(true, format!("All ({})", self.selection.len()));
+                        for (k, n) in &kinds {
+                            if ui
+                                .selectable_label(false, format!("{} ({n})", capitalised(k)))
+                                .on_hover_text("Keep only these selected")
+                                .clicked()
+                            {
+                                keep = Some(k.clone());
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text(format!("{m}. Pick a kind to keep only those selected. G, R, S, Shift+D, Delete, Ctrl+C and H act on all of them."));
+                false
+            });
+            if let Some(k) = keep {
+                let model = self.doc.model();
+                let ids: std::collections::HashSet<ElementId> = self
+                    .selection
+                    .all()
+                    .into_iter()
+                    .filter(|i| model.get(*i).is_some_and(|e| pick_word(&e.kind) == k))
+                    .collect();
+                self.selection.retain(|i| ids.contains(&i));
+                self.status = format!("{} {} kept selected.", ids.len(), plural(&k, ids.len()));
+            }
         }
         if marksui::markable(&e.kind) {
             crate::props::head_row(ui, "Mark", |ui| {
@@ -11532,6 +11867,18 @@ impl Drop for Perf {
 }
 
 impl eframe::App for CreaBimApp {
+    /// Closed without the Save the changes window having had its say (the
+    /// system ending it, a close the window never heard): unsaved work is
+    /// kept in a recovery copy beside the project, never lost.
+    fn on_exit(&mut self) {
+        self.recovery_copy();
+        // everything worth keeping is written: leave at once, rather than
+        // taking apart a big model, its undo history, drawings and the
+        // GPU's buffers piece by piece (a close that seemed to hang)
+        self.shell.settings.store();
+        crate::actlog::line("exit");
+        std::process::exit(0);
+    }
     /// Keys typed while a web pane had the keyboard reach the views.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         if self.shell.feed_keys(raw_input) {
@@ -11570,7 +11917,7 @@ impl eframe::App for CreaBimApp {
         // when there is no room below
         let bands = if self.shell.web.is_some() {
             egui::epaint::MarginF32 {
-                top: shell::TOP_H,
+                top: self.top_h(ctx),
                 bottom: shell::STATUS_H,
                 ..Default::default()
             }
@@ -11581,480 +11928,25 @@ impl eframe::App for CreaBimApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let _perf = Perf::new("frame");
-        // never lose work to a close: unsaved changes ask first
-        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && self.unsaved() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.close_ask = true;
-        }
-        let ctx = ui.ctx().clone();
-        // on the drawing area a bar's tooltip goes: the bar never hears the
-        // pointer leave it. Back from a bar (or after a pause in the moves
-        // here, in case leaving went unreported) the bars forget the
-        // button they last showed, so it shows again on the next hover
-        let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
-        for e in events {
-            match e {
-                egui::Event::PointerGone => self.pointer_away = true,
-                egui::Event::PointerMoved(_) => {
-                    self.shell.drop_web_tip();
-                    if self.pointer_away || now - self.pointer_seen > TIP_PAUSE {
-                        if let Some(web) = &self.shell.web {
-                            web.run_all("window.CB && CB.away && CB.away()");
-                        }
-                    }
-                    self.pointer_away = false;
-                    self.pointer_seen = now;
-                }
-                _ => {}
-            }
-        }
-        crate::trace::hold(ctx.input(|i| i.pointer.any_down()));
-        let m = ctx.input(|i| i.modifiers);
-        shell::MODS.store(
-            m.shift as u8 | (m.command as u8) << 1 | (m.alt as u8) << 2,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        // the colour of what is worked on: orange, or the theme's accent;
-        // the 3D view's highlight is built again when it changes (MU39)
-        let ink = if self.shell.settings.interaction == "theme" {
-            self.shell.theme.selection()
-        } else {
-            crate::theme::ORANGE
-        };
-        crate::planview::set_plan_look(
-            self.shell.settings.plan_grid,
-            self.shell.settings.axis_lines,
-        );
-        crate::snaps::begin_marks();
-        crate::snaps::set_autosnap(
-            self.shell.settings.marker_size,
-            self.shell.settings.snap_tooltip,
-            self.shell.settings.aperture,
-        );
-        // the object snaps and tracking as set, kept for the next session
-        let kept = crate::snaps::SnapSettings {
-            increment: false,
-            ..self.plan.snap
-        };
-        if self.shell.settings.osnap != Some(kept)
-            || self.shell.settings.polar_angle != self.plan.guide_step
-        {
-            self.shell.settings.osnap = Some(kept);
-            self.shell.settings.polar_angle = self.plan.guide_step;
-            self.shell.settings.store();
-        }
-        if ink != crate::theme::interaction() {
-            crate::theme::set_interaction(ink);
-            self.geometry_key = None;
-            self.selection_key = None;
-        }
-        // the ghost the pointer's view drew last frame, for the others
-        let at = |g: &Option<(Option<usize>, crate::ghost::Ghost)>| {
-            g.as_ref()
-                .and_then(|(_, g)| g.parts.first()?.points.first().copied())
-        };
-        let moved = at(&self.plan.ghost_now) != at(&self.plan.ghost_shared);
-        self.plan.ghost_shared = self.plan.ghost_now.take();
-        // the other views catch up once the pointer stops
-        if moved {
-            ctx.request_repaint();
-        }
-        // Divide's marks, for every view to draw this frame (MU38)
-        let _pd = Perf::new("pre-frame");
-        (self.plan.divide_marks, self.plan.divide_labels) = self.divide_marks();
-        self.plan.divide_guides = self.divide.s.make == creabim_core::divide::Make::Guides;
-        // while a point is asked for, the selection stays as it was
-        if self.plan.point_pick {
-            match &self.pick_selection {
-                Some(s) if *s != self.selection => self.selection = s.clone(),
-                Some(_) => {}
-                None => self.pick_selection = Some(self.selection.clone()),
-            }
-        } else {
-            self.pick_selection = None;
-        }
-        // Split's clicks, else what the modifier being set shows, and a
-        // centre picked for it
-        if self.split.is_some() {
-            self.split_steps(&ctx);
-        } else {
-            self.take_picked_centre();
-            self.plan.mod_guides = self.modifier_guides();
-        }
-        drop(_pd);
-        // R draws a rectangle while sketching, not a rotate (MU38)
-        crate::sketch::set_sketching(&ctx, self.plan.tool == Tool::Sketch);
-        // the activity log: what the status bar said (it names every edit
-        // and undo) and the tool, when they change
-        if self.status != self.logged.0 {
-            crate::actlog::line(format!("status: {}", self.status));
-            self.logged.0 = self.status.clone();
-        }
-        if Some(self.plan.tool) != self.logged.1 {
-            crate::actlog::line(format!("tool: {:?}", self.plan.tool));
-            self.logged.1 = Some(self.plan.tool);
-        }
-        let title = window_title(&self.path, self.unsaved());
-        if title != self.title {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-            self.title = title;
-        }
-        crate::units::set(self.doc.model().units());
-        // the step drags round to: none while Alt is held (2.10)
-        let live = self.plan.snap.live(ctx.input(|i| i.modifiers.alt));
-        crate::snaps::set_current_step(if live.allows(crate::snaps::SnapKind::Grid) {
-            live.step_len()
-        } else {
-            0.0
-        });
-        crate::snaps::set_current_marks(live.marks_len());
-        {
-            let _p = Perf::new("frame: prompts and keys");
-            self.cmd_keys(&ctx);
-            self.step_prompt(&ctx);
-            self.workspace_prompt(&ctx);
-            self.area_keys(&ctx);
-            self.shortcuts(&ctx);
-        }
-        {
-            let _p = Perf::new("frame: edit mode and spotlight");
-            self.keep_edit_mode();
-            self.refresh_spotlight();
-        }
-        let dropped: Vec<String> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().display().to_string())
-                .filter(|p| !p.is_empty())
-                .collect()
-        });
-        for path in dropped {
-            // a dropped material file joins this project, which keeps its path
-            if !materials::is_material_file(&path) {
-                self.path = path.clone();
-            }
-            self.open_path(&path);
-        }
-        if self.live_reload {
-            let _p = Perf::new("frame: watch files");
-            for f in self.watch.changed(self.doc.model()) {
-                self.reload(&f);
-            }
-            if !crate::files::linked_files(self.doc.model()).is_empty() {
-                ctx.request_repaint_after(std::time::Duration::from_secs(1));
-            }
-        }
-
-        let _pw = Perf::new("web_panels");
-        let web = self.web_panels(ui, frame);
-        drop(_pw);
-        // the panes say again this frame what the one under the pointer does
-        self.plan.hint = None;
-        self.rect_3d = None;
-        self.rect_2d = None;
-        self.plan.web_menus = web;
-        crate::slabtool::set_options_in_top_bar(&ctx, web);
-        self.shell.menu_3d = false;
-        if !web {
-            egui::Panel::top("menu").show(ui, |ui| {
-                self.classic_menu(ui);
-                self.toolbar(ui);
-                crate::props::flow(ui, |ui| {
-                    let some = self.selection.is_some();
-                    if let Some(c) = crate::commands::modify_bar(ui, some) {
-                        self.run_command(&ctx, c, None);
-                    }
-                });
-            });
-            egui::Panel::bottom("status").show(ui, |ui| {
-                crate::props::flow(ui, |ui| {
-                    ui.label(&self.status);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(format!("{} elements", self.element_count()));
-                    });
-                });
-            });
-            egui::Panel::left("outliner")
-                .default_size(220.0)
-                .show(ui, |ui| self.outliner(ui));
-        }
-        // to the end of the frame from here: Properties, the areas and on
-        let _pr = Perf::new("frame: properties on");
-        let right_folded = self.shell.settings.right_folded;
-        let right = egui::Panel::right(if right_folded {
-            "properties_rail"
-        } else {
-            "properties"
-        })
-        .default_size(if right_folded {
-            40.0
-        } else {
-            self.shell.settings.right_width
-        })
-        .size_range(if right_folded {
-            40.0..=40.0
-        } else {
-            220.0..=640.0
-        })
-        .frame(
-            // flush at the left, where the tab column is (MU22)
-            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
-                left: 0,
-                right: 4,
-                top: 0,
-                bottom: 4,
-            }),
-        )
-        .show(ui, |ui| {
-            // the panel keeps the width it was given: what is wider
-            // wraps, folds into one column or is clipped, and never
-            // pushes the panel wider as the selection changes
-            let rect = ui.available_rect_before_wrap();
-            let clip = rect.expand2(egui::vec2(6.0, 0.0)).intersect(ui.clip_rect());
-            let folded = self.shell.settings.right_folded;
-            let edge = ui.max_rect();
-            if fold_handle(
-                ui.ctx(),
-                "props",
-                egui::pos2(edge.left() - 11.0, edge.center().y - 23.0),
-                folded,
-                true,
-                if folded {
-                    "Open Properties (Ctrl+])"
-                } else {
-                    "Fold Properties to its tabs (Ctrl+])"
-                },
-            ) {
-                self.shell.settings.right_folded = !folded;
-                self.shell.settings.store();
-            }
-            let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-            inner.set_clip_rect(clip);
-            inner.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-            // one grid for every row (A4-1): controls as tight as
-            // Blender's (MU22), the scroll bar in a gutter of its own
-            inner.spacing_mut().interact_size.y = 24.0;
-            // text a size down, as Blender's panels (MU22): rows fit
-            // on one line at the panel's usual width
-            for (style, font) in inner.style_mut().text_styles.iter_mut() {
-                font.size = match style {
-                    egui::TextStyle::Small => 10.5,
-                    egui::TextStyle::Heading => 14.0,
-                    _ => (font.size - 1.5).clamp(11.0, 12.5),
-                };
-            }
-            inner.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
-            inner.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
-            // editable fields (dropdowns, numbers, text) in the field
-            // colour, a tone apart from the panel, as Blender does, so
-            // they read at a glance as things you can change (MU20)
-            {
-                let p = crate::theme::Palette::of(ui.ctx());
-                let w = &mut inner.visuals_mut().widgets;
-                w.inactive.weak_bg_fill = p.field;
-                w.inactive.bg_stroke = egui::Stroke::new(1.0, p.edge);
-            }
-            let mut bar = egui::style::ScrollStyle::solid();
-            bar.bar_width = 6.0;
-            bar.bar_inner_margin = 4.0;
-            inner.spacing_mut().scroll = bar;
-            // as Blender's editor (MU22): the tab column down the left
-            // edge, a tone darker, then the pinned header and the
-            // tab's sections, which scroll
-            inner.set_max_width(rect.width());
-            let tabs = self.prop_tabs();
-            // a placing tool just picked opens its Next tab; a first
-            // selection opens Element; otherwise the tab stays
-            let now = (self.plan.tool, self.selection.active.is_some());
-            if now != self.prop_seen {
-                if now.0 != self.prop_seen.0 && now.0 != Tool::Select && !now.1 {
-                    self.prop_tab = PropTab::Next;
-                } else if now.1 && !self.prop_seen.1 {
-                    self.prop_tab = PropTab::Element;
-                }
-                self.prop_seen = now;
-            }
-            // the view in front leads, as Blender's editors do (MU40: a
-            // sheet's settings showed over the Masters view)
-            let front = self.areas.root.areas().get(self.areas.focus).copied();
-            if front != self.prop_front {
-                match front {
-                    Some(crate::areas::Shows::Masters) => self.prop_tab = PropTab::Master,
-                    Some(crate::areas::Shows::Profiles) => self.prop_tab = PropTab::Profile,
-                    Some(crate::areas::Shows::Log) => self.prop_tab = PropTab::Log,
-                    _ => {}
-                }
-                self.prop_front = front;
-            }
-            if !tabs.contains(&self.prop_tab) {
-                self.prop_tab = tabs[0];
-            }
-            // a tool just picked opens its Next tab; a new selection
-            // with no tab of its own opens Element
-            inner.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                self.prop_strip(ui, &tabs, rect.height());
-                if self.shell.settings.right_folded {
-                    return;
-                }
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
-                    let w = ui.available_width();
-                    // the header as wide as the boxes under it, which
-                    // leave the scroll bar its gutter: wider, its
-                    // fields and Delete ran off the panel (MU24)
-                    ui.set_max_width(w - 16.0);
-                    ui.add_space(4.0);
-                    self.properties_header(ui);
-                    egui::ScrollArea::vertical()
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.set_max_width(w - 16.0);
-                            crate::props::boxes(ui, true);
-                            self.properties(ui);
-                            crate::props::close_box(ui);
-                            crate::props::boxes(ui, false);
-                        });
-                });
-            });
-            ui.allocate_rect(rect, egui::Sense::hover());
-        })
-        .response
-        .rect;
-        // remember a new width once the drag is over
-        let width = right.width().round();
-        if (width - self.shell.settings.right_width).abs() >= 1.0
-            && !ui.input(|i| i.pointer.any_down())
-        {
-            self.shell.settings.right_width = width;
-            self.shell.settings.store();
-        }
-
-        // to the end of the frame from here: the areas, then what follows
-        let _pa = Perf::new("frame: areas on");
-        egui::CentralPanel::default().show(ui, |ui| {
-            let full = ui.available_rect_before_wrap();
-            self.mat.area = Some(full);
-            let plan_bg = Color32::from_rgb(252, 252, 250);
-            match self.placement {
-                PlanPlacement::Docked => self.show_areas(ui, full, frame, plan_bg),
-                PlanPlacement::Overlay => {
-                    self.show_3d(ui, full, frame);
-                    let inset = Rect::from_min_size(
-                        full.right_top() + Vec2::new(-full.width() * 0.42 - 12.0, 12.0),
-                        Vec2::new(full.width() * 0.42, full.height() * 0.45),
-                    );
-                    self.show_plan(
-                        ui,
-                        inset,
-                        Color32::from_rgba_unmultiplied(252, 252, 250, 225),
-                    );
-                    ui.painter().rect_stroke(
-                        inset,
-                        4.0,
-                        egui::Stroke::new(1.0, Color32::from_gray(160)),
-                        egui::StrokeKind::Outside,
-                    );
-                }
-                PlanPlacement::Window | PlanPlacement::Hidden => self.show_3d(ui, full, frame),
-            }
-            ui.allocate_rect(full, Sense::hover());
-        });
-
-        if let Some(s) = self.plan.status.take() {
-            self.status = s;
-        }
-        for (c, at) in std::mem::take(&mut self.plan.commands) {
-            self.run_command(&ctx, c, at);
-        }
-        if std::mem::take(&mut self.plan.want_levels) {
-            self.open_levels();
-        }
-        // a view mark double-clicked: its view opens
-        if let Some(v) = self.plan.want_view.take() {
-            self.active_view = Some(v);
-        }
-        if std::mem::take(&mut self.plan.want_catalogue) {
-            self.catalogue.open = true;
-        }
-        // a box selection that took more than one kind: Keep only… is offered
-        if std::mem::take(&mut self.plan.boxed) {
-            self.after_box_selection();
-        }
-        // a box dragged with the Footing tool: footings under all it took
-        let hosts = std::mem::take(&mut self.plan.want_footings);
-        if !hosts.is_empty() {
-            self.selection.clear();
-            self.selection.extend(hosts, false);
-            self.footings_under_selection();
-        }
-        self.open_view_menu();
-        self.materials_window(&ctx);
-        self.assemblies_window(&ctx);
-        self.types_window(&ctx);
-        self.type_preview_window(&ctx);
-        self.catalogue_window(&ctx);
-        self.levels_window(&ctx);
-        self.level_copy_window(&ctx);
-        self.styles_window(&ctx);
-        self.templates_window(&ctx);
-        self.units_window(&ctx);
-        self.divide_window(&ctx);
-        self.profiles_window(&ctx);
-        self.settings_window(&ctx);
-        // the paper follows the setting and the theme; a change redraws
-        // the 3D view's grid and background
-        let dark = self.dark_paper(&ctx);
-        if dark != self.paper_is_dark {
-            self.paper_is_dark = dark;
-            self.geometry_key = None;
-        }
-        self.project_window(&ctx);
-        self.note_editor_window(&ctx);
-        self.ifc_export_window(&ctx);
-        self.reference_steps();
-        self.calibrate_window(&ctx);
-        self.sheets_export_window(&ctx);
-        self.new_project_window(&ctx);
-        self.marks_window(&ctx);
-        self.graphic_styles_window(&ctx);
-        self.ground_spacing_window(&ctx);
-        self.import_report_window(&ctx);
-        self.help_window(&ctx);
-        self.report_window(&ctx);
-        self.drafting_settings_window(&ctx);
-        self.layer_manager_window(&ctx);
-        self.ucs_manager_window(&ctx);
-        self.cmdline_window(&ctx);
-        self.close_window(&ctx);
-        // a plan in its own window keeps egui's menus
-        self.plan.web_menus = false;
-
-        if self.placement == PlanPlacement::Window {
-            let mut close = false;
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("creabim_plan"),
-                egui::ViewportBuilder::default()
-                    .with_title("Volumen · Plan")
-                    .with_inner_size([760.0, 560.0]),
-                |ui, _class| {
-                    egui::CentralPanel::default().show(ui, |ui| {
-                        let rect = ui.available_rect_before_wrap();
-                        self.show_plan(ui, rect, plan_bg_color());
-                        ui.allocate_rect(rect, Sense::hover());
-                    });
-                    if ui.input(|i| i.viewport().close_requested()) {
-                        close = true;
-                    }
-                },
+        // a bug in one command must not close Volumen and lose the work:
+        // the frame is given up, the error said and logged (the panic
+        // hook already wrote where it happened)
+        let r =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.frame_body(ui, frame)));
+        if let Err(e) = r {
+            let why = e
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| e.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            crate::actlog::line(format!("recovered from an internal error: {why}"));
+            self.plan.modal = None;
+            self.plan.cmd_pick = None;
+            self.cmd.running = None;
+            self.status = format!(
+                "Internal error, recovered: {why}. Your work is safe; please send the activity log (Help) so it can be fixed."
             );
-            if close {
-                self.placement = PlanPlacement::Docked;
-            }
+            ui.ctx().request_repaint();
         }
     }
 }
@@ -12537,6 +12429,22 @@ fn camera_fields(
 }
 
 /// What to call an element in a count.
+/// What an element is, for the Properties list of a selection: linework
+/// by its shape (line, circle, hatch), the rest by [`kind_word`].
+fn pick_word(k: &ElementKind) -> String {
+    match k {
+        ElementKind::Detail(d) => d.kind.label().to_lowercase(),
+        _ => kind_word(k).to_string(),
+    }
+}
+
+fn capitalised(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
+}
+
 pub(crate) fn kind_word(k: &ElementKind) -> &'static str {
     match k {
         ElementKind::Level(_) => "level",
@@ -13368,4 +13276,614 @@ pub(crate) fn fold_handle(
             clicked = resp.on_hover_text(tip).clicked();
         });
     clicked
+}
+
+/// Where a DXF spanning `b` should go when it lies far from the model
+/// (more than 100 m from what the model fills, or from the origin in an
+/// empty one): the model's middle. None: it is near enough to stay.
+fn far_drawing(model: &Model, b: [glam::DVec2; 2]) -> Option<glam::DVec2> {
+    let mut lo = glam::DVec2::splat(f64::MAX);
+    let mut hi = glam::DVec2::splat(f64::MIN);
+    for e in model.iter() {
+        if matches!(e.kind, ElementKind::View(_) | ElementKind::Reference(_)) {
+            continue;
+        }
+        if let Some((a, c)) = creabim_core::parts::element_bounds(model, e) {
+            if a.is_finite() && c.is_finite() {
+                lo = lo.min(a.truncate());
+                hi = hi.max(c.truncate());
+            }
+        }
+    }
+    if lo.x > hi.x {
+        lo = glam::DVec2::ZERO;
+        hi = glam::DVec2::ZERO;
+    }
+    let margin = 100.0;
+    let apart = b[0].x > hi.x + margin
+        || b[1].x < lo.x - margin
+        || b[0].y > hi.y + margin
+        || b[1].y < lo.y - margin;
+    apart.then_some((lo + hi) / 2.0)
+}
+
+impl CreaBimApp {
+    /// AutoCAD's SAVETIME: every so many minutes an unsaved project is
+    /// copied to `<name>.autosave.creabim` (never over its own file).
+    fn autosave(&mut self, ctx: &egui::Context) {
+        let minutes = self.shell.settings.autosave_minutes;
+        if minutes == 0 || !self.unsaved() || self.dragging() {
+            return;
+        }
+        let rev = self.doc.model().revision();
+        if self.autosaved.1 == Some(rev)
+            || self.autosaved.0.elapsed().as_secs() < minutes as u64 * 60
+        {
+            ctx.request_repaint_after(std::time::Duration::from_secs(30));
+            return;
+        }
+        let path = if self.path.is_empty() || !self.path.to_ascii_lowercase().ends_with(".creabim")
+        {
+            let name = openprojects::project_name(&self.path);
+            std::env::temp_dir()
+                .join(format!("{name}.autosave.creabim"))
+                .display()
+                .to_string()
+        } else {
+            with_extension(&self.path, "autosave.creabim")
+        };
+        let r = creabim_store::save(&path, &self.doc);
+        crate::actlog::line(format!("autosave {path}: {r:?}"));
+        self.autosaved = (std::time::Instant::now(), Some(rev));
+        if r.is_ok() {
+            self.status = format!("Saved a copy automatically: {path}");
+        }
+    }
+
+    fn frame_body(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.autosave(&ui.ctx().clone());
+        self.add_pending_pattern();
+        let _perf = Perf::new("frame");
+        // never lose work to a close: unsaved changes ask first, those of
+        // a project waiting in the Window menu too (shown to ask)
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && !self.unsaved() {
+            if let Some(i) = self.open_projects().iter().position(|(_, u)| *u) {
+                self.switch_project(i);
+            }
+        }
+        if ui.ctx().input(|i| i.viewport().close_requested()) && !self.close_ok && self.unsaved() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_ask = true;
+        }
+        let ctx = ui.ctx().clone();
+        // on the drawing area a bar's tooltip goes: the bar never hears the
+        // pointer leave it. Back from a bar (or after a pause in the moves
+        // here, in case leaving went unreported) the bars forget the
+        // button they last showed, so it shows again on the next hover
+        let (events, now) = ctx.input(|i| (i.events.clone(), i.time));
+        // while a plan is zoomed or panned its lines go out without their
+        // soft edges: half the triangles for a big drawing, and they come
+        // back the moment it stops
+        let moving = now < self.plan.nav_until;
+        if ctx.tessellation_options(|o| o.feathering) == moving {
+            ctx.tessellation_options_mut(|o| o.feathering = !moving);
+        }
+        if std::env::var_os("CREABIM_PERF").is_some() {
+            // the whole time from frame to frame, painting included
+            let dt = ctx.input(|i| i.unstable_dt) * 1000.0;
+            if dt > 2.0 {
+                eprintln!("frame to frame: {dt:.1} ms");
+            }
+        }
+        for e in events {
+            match e {
+                egui::Event::PointerGone => self.pointer_away = true,
+                egui::Event::PointerMoved(_) => {
+                    self.shell.drop_web_tip();
+                    if self.pointer_away || now - self.pointer_seen > TIP_PAUSE {
+                        if let Some(web) = &self.shell.web {
+                            web.run_all("window.CB && CB.away && CB.away()");
+                        }
+                    }
+                    self.pointer_away = false;
+                    self.pointer_seen = now;
+                }
+                _ => {}
+            }
+        }
+        crate::trace::hold(ctx.input(|i| i.pointer.any_down()));
+        let m = ctx.input(|i| i.modifiers);
+        shell::MODS.store(
+            m.shift as u8 | (m.command as u8) << 1 | (m.alt as u8) << 2,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        // the colour of what is worked on: orange, or the theme's accent;
+        // the 3D view's highlight is built again when it changes (MU39)
+        let ink = if self.shell.settings.interaction == "theme" {
+            self.shell.theme.selection()
+        } else {
+            crate::theme::ORANGE
+        };
+        crate::planview::set_plan_look(
+            self.shell.settings.plan_grid,
+            self.shell.settings.axis_lines,
+        );
+        crate::snaps::begin_marks();
+        self.drop_locked_from_selection();
+        crate::snaps::set_autosnap(
+            self.shell.settings.marker_size,
+            self.shell.settings.snap_tooltip,
+            self.shell.settings.aperture,
+        );
+        // the object snaps and tracking as set, kept for the next session
+        let kept = crate::snaps::SnapSettings {
+            increment: false,
+            ..self.plan.snap
+        };
+        if self.shell.settings.osnap != Some(kept)
+            || self.shell.settings.polar_angle != self.plan.guide_step
+        {
+            self.shell.settings.osnap = Some(kept);
+            self.shell.settings.polar_angle = self.plan.guide_step;
+            self.shell.settings.store();
+        }
+        if ink != crate::theme::interaction() {
+            crate::theme::set_interaction(ink);
+            self.geometry_key = None;
+            self.selection_key = None;
+        }
+        // the ghost the pointer's view drew last frame, for the others
+        let at = |g: &Option<(Option<usize>, crate::ghost::Ghost)>| {
+            g.as_ref()
+                .and_then(|(_, g)| g.parts.first()?.points.first().copied())
+        };
+        let moved = at(&self.plan.ghost_now) != at(&self.plan.ghost_shared);
+        self.plan.ghost_shared = self.plan.ghost_now.take();
+        // the other views catch up once the pointer stops
+        if moved {
+            ctx.request_repaint();
+        }
+        // Divide's marks, for every view to draw this frame (MU38)
+        let _pd = Perf::new("pre-frame");
+        (self.plan.divide_marks, self.plan.divide_labels) = self.divide_marks();
+        self.plan.divide_guides = self.divide.s.make == creabim_core::divide::Make::Guides;
+        // while a point is asked for, the selection stays as it was
+        if self.plan.point_pick {
+            match &self.pick_selection {
+                Some(s) if *s != self.selection => self.selection = s.clone(),
+                Some(_) => {}
+                None => self.pick_selection = Some(self.selection.clone()),
+            }
+        } else {
+            self.pick_selection = None;
+        }
+        // Split's clicks, else what the modifier being set shows, and a
+        // centre picked for it
+        if self.split.is_some() {
+            self.split_steps(&ctx);
+        } else {
+            self.take_picked_centre();
+            self.plan.mod_guides = self.modifier_guides();
+        }
+        drop(_pd);
+        // R draws a rectangle while sketching, not a rotate (MU38)
+        crate::sketch::set_sketching(&ctx, self.plan.tool == Tool::Sketch);
+        // the activity log: what the status bar said (it names every edit
+        // and undo) and the tool, when they change
+        if self.status != self.logged.0 {
+            crate::actlog::line(format!("status: {}", self.status));
+            self.logged.0 = self.status.clone();
+        }
+        if Some(self.plan.tool) != self.logged.1 {
+            crate::actlog::line(format!("tool: {:?}", self.plan.tool));
+            self.logged.1 = Some(self.plan.tool);
+        }
+        let title = window_title(&self.path, self.unsaved());
+        if title != self.title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = title;
+        }
+        crate::units::set(self.doc.model().units());
+        // the step drags round to: none while Alt is held (2.10)
+        let live = self.plan.snap.live(ctx.input(|i| i.modifiers.alt));
+        crate::snaps::set_current_step(if live.allows(crate::snaps::SnapKind::Grid) {
+            live.step_len()
+        } else {
+            0.0
+        });
+        crate::snaps::set_current_marks(live.marks_len());
+        {
+            let _p = Perf::new("frame: prompts and keys");
+            self.cmd_keys(&ctx);
+            self.step_prompt(&ctx);
+            self.workspace_prompt(&ctx);
+            self.area_keys(&ctx);
+            self.shortcuts(&ctx);
+        }
+        {
+            let _p = Perf::new("frame: edit mode and spotlight");
+            self.keep_edit_mode();
+            self.refresh_spotlight();
+        }
+        let dropped: Vec<String> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().display().to_string())
+                .filter(|p| !p.is_empty())
+                .collect()
+        });
+        for path in dropped {
+            // a dropped material file joins this project, which keeps its path
+            if !materials::is_material_file(&path) {
+                self.path = path.clone();
+            }
+            self.open_path(&path);
+        }
+        if self.live_reload {
+            let _p = Perf::new("frame: watch files");
+            for f in self.watch.changed(self.doc.model()) {
+                self.reload(&f);
+            }
+            if !crate::files::linked_files(self.doc.model()).is_empty() {
+                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
+        }
+
+        let _pw = Perf::new("web_panels");
+        let web = self.web_panels(ui, frame);
+        drop(_pw);
+        // the panes say again this frame what the one under the pointer does
+        self.plan.hint = None;
+        self.rect_3d = None;
+        self.rect_2d = None;
+        self.plan.web_menus = web;
+        crate::slabtool::set_options_in_top_bar(&ctx, web);
+        self.shell.menu_3d = false;
+        if !web {
+            egui::Panel::top("menu").show(ui, |ui| {
+                self.classic_menu(ui);
+                self.toolbar(ui);
+                crate::props::flow(ui, |ui| {
+                    let some = self.selection.is_some();
+                    if let Some(c) = crate::commands::modify_bar(ui, some) {
+                        self.run_command(&ctx, c, None);
+                    }
+                });
+            });
+            egui::Panel::bottom("status").show(ui, |ui| {
+                crate::props::flow(ui, |ui| {
+                    ui.label(&self.status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{} elements", self.element_count()));
+                    });
+                });
+            });
+            egui::Panel::left("outliner")
+                .default_size(220.0)
+                .show(ui, |ui| self.outliner(ui));
+        }
+        // to the end of the frame from here: Properties, the areas and on
+        let _pr = Perf::new("frame: properties on");
+        let right_folded = self.shell.settings.right_folded;
+        let right = egui::Panel::right(if right_folded {
+            "properties_rail"
+        } else {
+            "properties"
+        })
+        .default_size(if right_folded {
+            40.0
+        } else {
+            self.shell.settings.right_width
+        })
+        .size_range(if right_folded {
+            40.0..=40.0
+        } else {
+            220.0..=640.0
+        })
+        .frame(
+            // flush at the left, where the tab column is (MU22)
+            egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin {
+                left: 0,
+                right: 4,
+                top: 0,
+                bottom: 4,
+            }),
+        )
+        .show(ui, |ui| {
+            // the panel keeps the width it was given: what is wider
+            // wraps, folds into one column or is clipped, and never
+            // pushes the panel wider as the selection changes
+            let rect = ui.available_rect_before_wrap();
+            let clip = rect.expand2(egui::vec2(6.0, 0.0)).intersect(ui.clip_rect());
+            let folded = self.shell.settings.right_folded;
+            let edge = ui.max_rect();
+            if fold_handle(
+                ui.ctx(),
+                "props",
+                egui::pos2(edge.left() - 11.0, edge.center().y - 23.0),
+                folded,
+                true,
+                if folded {
+                    "Open Properties (Ctrl+])"
+                } else {
+                    "Fold Properties to its tabs (Ctrl+])"
+                },
+            ) {
+                self.shell.settings.right_folded = !folded;
+                self.shell.settings.store();
+            }
+            let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            inner.set_clip_rect(clip);
+            inner.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            // one grid for every row (A4-1): controls as tight as
+            // Blender's (MU22), the scroll bar in a gutter of its own
+            inner.spacing_mut().interact_size.y = 24.0;
+            // text a size down, as Blender's panels (MU22): rows fit
+            // on one line at the panel's usual width
+            for (style, font) in inner.style_mut().text_styles.iter_mut() {
+                font.size = match style {
+                    egui::TextStyle::Small => 10.5,
+                    egui::TextStyle::Heading => 14.0,
+                    _ => (font.size - 1.5).clamp(11.0, 12.5),
+                };
+            }
+            inner.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+            inner.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+            // editable fields (dropdowns, numbers, text) in the field
+            // colour, a tone apart from the panel, as Blender does, so
+            // they read at a glance as things you can change (MU20)
+            {
+                let p = crate::theme::Palette::of(ui.ctx());
+                let w = &mut inner.visuals_mut().widgets;
+                w.inactive.weak_bg_fill = p.field;
+                w.inactive.bg_stroke = egui::Stroke::new(1.0, p.edge);
+            }
+            let mut bar = egui::style::ScrollStyle::solid();
+            bar.bar_width = 6.0;
+            bar.bar_inner_margin = 4.0;
+            inner.spacing_mut().scroll = bar;
+            // as Blender's editor (MU22): the tab column down the left
+            // edge, a tone darker, then the pinned header and the
+            // tab's sections, which scroll
+            inner.set_max_width(rect.width());
+            let tabs = self.prop_tabs();
+            // a placing tool just picked opens its Next tab; a first
+            // selection opens Element; otherwise the tab stays
+            let now = (self.plan.tool, self.selection.active.is_some());
+            if now != self.prop_seen {
+                if now.0 != self.prop_seen.0 && now.0 != Tool::Select && !now.1 {
+                    self.prop_tab = PropTab::Next;
+                } else if now.1 && !self.prop_seen.1 {
+                    self.prop_tab = PropTab::Element;
+                }
+                self.prop_seen = now;
+            }
+            // the view in front leads, as Blender's editors do (MU40: a
+            // sheet's settings showed over the Masters view)
+            let front = self.areas.root.areas().get(self.areas.focus).copied();
+            if front != self.prop_front {
+                match front {
+                    Some(crate::areas::Shows::Masters) => self.prop_tab = PropTab::Master,
+                    Some(crate::areas::Shows::Profiles) => self.prop_tab = PropTab::Profile,
+                    Some(crate::areas::Shows::Log) => self.prop_tab = PropTab::Log,
+                    _ => {}
+                }
+                self.prop_front = front;
+            }
+            if !tabs.contains(&self.prop_tab) {
+                self.prop_tab = tabs[0];
+            }
+            // a tool just picked opens its Next tab; a new selection
+            // with no tab of its own opens Element
+            inner.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                self.prop_strip(ui, &tabs, rect.height());
+                if self.shell.settings.right_folded {
+                    return;
+                }
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+                    let w = ui.available_width();
+                    // the header as wide as the boxes under it, which
+                    // leave the scroll bar its gutter: wider, its
+                    // fields and Delete ran off the panel (MU24)
+                    ui.set_max_width(w - 16.0);
+                    ui.add_space(4.0);
+                    self.properties_header(ui);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            ui.set_max_width(w - 16.0);
+                            crate::props::boxes(ui, true);
+                            self.properties(ui);
+                            crate::props::close_box(ui);
+                            crate::props::boxes(ui, false);
+                        });
+                });
+            });
+            ui.allocate_rect(rect, egui::Sense::hover());
+        })
+        .response
+        .rect;
+        // remember a new width once the drag is over
+        let width = right.width().round();
+        if (width - self.shell.settings.right_width).abs() >= 1.0
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            self.shell.settings.right_width = width;
+            self.shell.settings.store();
+        }
+
+        // to the end of the frame from here: the areas, then what follows
+        let _pa = Perf::new("frame: areas on");
+        egui::CentralPanel::default().show(ui, |ui| {
+            let full = ui.available_rect_before_wrap();
+            self.mat.area = Some(full);
+            let plan_bg = Color32::from_rgb(252, 252, 250);
+            match self.placement {
+                PlanPlacement::Docked => self.show_areas(ui, full, frame, plan_bg),
+                PlanPlacement::Overlay => {
+                    self.show_3d(ui, full, frame);
+                    let inset = Rect::from_min_size(
+                        full.right_top() + Vec2::new(-full.width() * 0.42 - 12.0, 12.0),
+                        Vec2::new(full.width() * 0.42, full.height() * 0.45),
+                    );
+                    self.show_plan(
+                        ui,
+                        inset,
+                        Color32::from_rgba_unmultiplied(252, 252, 250, 225),
+                    );
+                    ui.painter().rect_stroke(
+                        inset,
+                        4.0,
+                        egui::Stroke::new(1.0, Color32::from_gray(160)),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                PlanPlacement::Window | PlanPlacement::Hidden => self.show_3d(ui, full, frame),
+            }
+            ui.allocate_rect(full, Sense::hover());
+        });
+
+        if let Some(s) = self.plan.status.take() {
+            self.status = s;
+        }
+        for (c, at) in std::mem::take(&mut self.plan.commands) {
+            self.run_command(&ctx, c, at);
+        }
+        if std::mem::take(&mut self.plan.want_levels) {
+            self.open_levels();
+        }
+        // a view mark double-clicked: its view opens
+        if let Some(v) = self.plan.want_view.take() {
+            self.active_view = Some(v);
+        }
+        if std::mem::take(&mut self.plan.want_catalogue) {
+            self.catalogue.open = true;
+        }
+        // a box selection that took more than one kind: Keep only… is offered
+        if std::mem::take(&mut self.plan.boxed) {
+            self.after_box_selection();
+        }
+        // a box dragged with the Footing tool: footings under all it took
+        let hosts = std::mem::take(&mut self.plan.want_footings);
+        if !hosts.is_empty() {
+            self.selection.clear();
+            self.selection.extend(hosts, false);
+            self.footings_under_selection();
+        }
+        self.open_view_menu();
+        self.materials_window(&ctx);
+        self.assemblies_window(&ctx);
+        self.types_window(&ctx);
+        self.type_preview_window(&ctx);
+        self.catalogue_window(&ctx);
+        self.levels_window(&ctx);
+        self.level_copy_window(&ctx);
+        self.styles_window(&ctx);
+        self.sun_window(&ctx);
+        self.templates_window(&ctx);
+        self.units_window(&ctx);
+        self.divide_window(&ctx);
+        self.profiles_window(&ctx);
+        self.settings_window(&ctx);
+        // the paper follows the setting and the theme; a change redraws
+        // the 3D view's grid and background
+        let dark = self.dark_paper(&ctx);
+        if dark != self.paper_is_dark {
+            self.paper_is_dark = dark;
+            self.geometry_key = None;
+        }
+        self.project_window(&ctx);
+        self.note_editor_window(&ctx);
+        self.ifc_export_window(&ctx);
+        self.reference_steps();
+        self.calibrate_window(&ctx);
+        self.sheets_export_window(&ctx);
+        self.new_project_window(&ctx);
+        self.marks_window(&ctx);
+        self.graphic_styles_window(&ctx);
+        self.ground_spacing_window(&ctx);
+        self.import_report_window(&ctx);
+        self.help_window(&ctx);
+        self.report_window(&ctx);
+        self.drafting_settings_window(&ctx);
+        self.layer_manager_window(&ctx);
+        self.ucs_manager_window(&ctx);
+        self.cmdline_window(&ctx);
+        self.cmd_history_window(&ctx);
+        self.close_window(&ctx);
+        // a plan in its own window keeps egui's menus
+        self.plan.web_menus = false;
+
+        if self.placement == PlanPlacement::Window {
+            let mut close = false;
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("creabim_plan"),
+                egui::ViewportBuilder::default()
+                    .with_title("Volumen · Plan")
+                    .with_inner_size([760.0, 560.0]),
+                |ui, _class| {
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        let rect = ui.available_rect_before_wrap();
+                        self.show_plan(ui, rect, plan_bg_color());
+                        ui.allocate_rect(rect, Sense::hover());
+                    });
+                    if ui.input(|i| i.viewport().close_requested()) {
+                        close = true;
+                    }
+                },
+            );
+            if close {
+                self.placement = PlanPlacement::Docked;
+            }
+        }
+    }
+}
+
+impl CreaBimApp {
+    fn recovery_copy(&mut self) {
+        if self.close_ok || !self.unsaved() {
+            return;
+        }
+        let base = if self.path.is_empty() {
+            std::env::temp_dir()
+                .join("Volumen recovered.creabim")
+                .display()
+                .to_string()
+        } else {
+            with_extension(&self.path, "recovered.creabim")
+        };
+        let r = creabim_store::save(&base, &self.doc);
+        crate::actlog::line(format!("exit unsaved: recovery copy {base}: {r:?}"));
+    }
+}
+
+/// Toward the sun: `azimuth` degrees clockwise from true north, `altitude`
+/// above the horizon, true north `true_north` degrees anticlockwise from
+/// the drawings' up.
+pub(crate) fn sun_direction(azimuth: f64, altitude: f64, true_north: f64) -> [f32; 3] {
+    let heading = (90.0 + true_north - azimuth).to_radians();
+    let alt = altitude.clamp(1.0, 90.0).to_radians();
+    [
+        (alt.cos() * heading.cos()) as f32,
+        (alt.cos() * heading.sin()) as f32,
+        alt.sin() as f32,
+    ]
+}
+
+#[cfg(test)]
+mod sun_tests {
+    #[test]
+    fn the_sun_from_the_south_shines_toward_the_drawings_up() {
+        // a sun due south sits on the drawing's down side
+        let d = super::sun_direction(180.0, 45.0, 0.0);
+        assert!(d[0].abs() < 1e-6 && d[1] < -0.7 && d[2] > 0.7);
+        // true north turned 90° anticlockwise: south lies to the right
+        let d = super::sun_direction(180.0, 45.0, 90.0);
+        assert!(d[0] > 0.7 && d[1].abs() < 1e-6);
+    }
 }

@@ -41,6 +41,11 @@ pub struct CmdLine {
     pub picks: Vec<DVec2>,
     /// The command a FROM or M2P interrupted, to go back to.
     pub resume: Option<Running>,
+    /// Esc was pressed with nothing typed: the tool in use ends once the
+    /// views have had it (AutoCAD's Esc ends any command).
+    pub esc: bool,
+    /// The text window (F2): everything the command line said.
+    pub history: bool,
     /// Each view's camera before the last ZOOM, for ZOOM Previous.
     pub zoomed: Vec<(ElementId, (DVec2, f32))>,
 }
@@ -87,6 +92,10 @@ pub enum WordFor {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Finish {
     Distance,
+    /// OFFSET's distance, from two points clicked.
+    OffsetDist,
+    /// GUTTER: points near the roof eaves it runs along.
+    Gutter,
     Id,
     Area,
     Circle2P,
@@ -107,6 +116,7 @@ pub enum Finish {
     FromBase,
     Mid2,
     ZoomWindow,
+    NorthPoints,
     Lengthen,
     Ucs,
     UcsObject,
@@ -142,10 +152,35 @@ pub enum NumberFor {
     MeasureLength,
     TtrRadius,
     UcsZ,
+    NorthAngle,
 }
 
 /// A command, by its name or one of its aliases: English and Italian
 /// AutoCAD, with a leading `_` or `-` taken off.
+/// AutoCAD's AutoComplete: the commands a word being typed could be,
+/// as (command, the alias it matches), best first: the command's own name,
+/// then its aliases, shortest first.
+pub fn suggestions(word: &str) -> Vec<(&'static str, &'static str)> {
+    let w = word.trim().trim_start_matches('_').to_uppercase();
+    if w.is_empty() || !w.chars().all(|c| c.is_ascii_alphabetic()) {
+        return vec![];
+    }
+    let mut out: Vec<(usize, &'static str, &'static str)> = vec![];
+    for (name, aliases) in ALIASES {
+        let hit = aliases
+            .split_whitespace()
+            .filter(|a| a.starts_with(&w))
+            .min_by_key(|a| a.len());
+        if let Some(a) = hit {
+            let rank = if name.starts_with(&w) { 0 } else { 1 + a.len() };
+            out.push((rank, name, a));
+        }
+    }
+    out.sort_by_key(|(r, n, _)| (*r, n.len()));
+    out.dedup_by_key(|x| x.1);
+    out.into_iter().take(8).map(|(_, n, a)| (n, a)).collect()
+}
+
 pub fn find(word: &str) -> Option<&'static str> {
     let w = word
         .trim()
@@ -192,6 +227,7 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("ARRAY", "ARRAY AR ARRAYRECT SERIE SERIERETT"),
     ("ARRAYPOLAR", "ARRAYPOLAR SERIEPOLARE"),
     ("BREAK", "BREAK BR SPEZZA"),
+    ("GUTTER", "GUTTER GRONDA GRO"),
     ("BREAKATPOINT", "BREAKATPOINT BRP SPEZZAINPUNTO"),
     ("JOIN", "JOIN J UNISCI"),
     ("LENGTHEN", "LENGTHEN LEN ALLUNGA"),
@@ -224,6 +260,7 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("SECTION", "SECTION SEZIONE"),
     ("GRID", "GRID GRIGLIA ASSI"),
     ("NORTH", "NORTH NORD"),
+    ("NORTHDIR", "NORTHDIR DIRNORD NORDVERO TRUENORTH"),
     ("UCS", "UCS SCU"),
     ("UCSMAN", "UCSMAN UC GESTSCU"),
     ("PLAN", "PLAN PIANTA"),
@@ -359,6 +396,15 @@ impl CreaBimApp {
     /// Typing in a drawing goes to the command line: the keys are taken
     /// before the views and the shortcuts see them.
     pub(super) fn cmd_keys(&mut self, ctx: &egui::Context) {
+        // Esc always ends the command: a field that had the keyboard
+        // (Properties, a box of the strip) lets it go too, rather than
+        // swallowing the Esc
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if ctx.egui_wants_keyboard_input() {
+                ctx.memory_mut(|m| m.stop_text_input());
+            }
+            self.cmd.esc = true;
+        }
         // a move, rotate or scale running takes its typed length itself
         if !self.shell.settings.command_line
             || ctx.egui_wants_keyboard_input()
@@ -367,7 +413,7 @@ impl CreaBimApp {
             return;
         }
         let typing = !self.cmd.text.is_empty();
-        let busy = self.cmd.running.is_some();
+        let busy = self.cmd.running.is_some() || self.plan.details.choosing_cutters;
         let idle = self.plan.tool == Tool::Select;
         let mut text = String::new();
         let (mut enter, mut esc, mut back, mut up, mut down) = (false, false, false, false, false);
@@ -485,6 +531,24 @@ impl CreaBimApp {
 
     /// The command line's answer to a line typed (empty: Enter alone).
     pub(super) fn cmd_enter(&mut self, ctx: &egui::Context, t: &str) {
+        // TRIM and EXTEND: Enter ends picking the cutting edges
+        if t.is_empty() && self.plan.tool == Tool::Detail && self.plan.details.choosing_cutters {
+            self.plan.details.choosing_cutters = false;
+            let n = self.plan.details.cutters.len();
+            let what = match self.plan.details.edit {
+                Some(crate::detailtool::DraftEdit::Extend) => "extend",
+                _ => "trim",
+            };
+            self.say(format!(
+                "{}. Select the objects to {what}: click each, or drag a fence line across them. Enter or Esc ends.",
+                if n == 0 {
+                    "Every line cuts".to_string()
+                } else {
+                    format!("{n} cutting edges")
+                }
+            ));
+            return;
+        }
         if !t.is_empty() && self.cmd.recent.last().map(|s| s.as_str()) != Some(t) {
             self.cmd.recent.push(t.to_string());
         }
@@ -667,6 +731,19 @@ impl CreaBimApp {
                     app.cmd.running = None;
                     app.cmd_finish_points(then, &pts);
                 };
+                // OFFSET: a distance typed, or Enter for the one shown
+                if r.name == "OFFSET" {
+                    let typed = if t.is_empty() {
+                        Some(None)
+                    } else {
+                        crate::units::parse(t).map(Some)
+                    };
+                    if let Some(v) = typed {
+                        self.plan.cmd_pick = None;
+                        self.cmd_number_done(ctx, r.name, NumberFor::OffsetDistance, v);
+                        return true;
+                    }
+                }
                 if t.is_empty() {
                     if n == 0 {
                         done(self);
@@ -816,6 +893,20 @@ impl CreaBimApp {
     pub(super) fn cmd_finish_points(&mut self, then: Finish, pts: &[DVec2]) {
         let len = crate::units::len;
         match (then, pts) {
+            (Finish::OffsetDist, [a, b, ..]) => {
+                let d = a.distance(*b);
+                self.plan.details.offset = d.max(0.0);
+                self.plan.cmd_pick = None;
+                self.plan
+                    .details
+                    .pick_edit(crate::detailtool::DraftEdit::Offset);
+                self.cmd.running = None;
+                self.say(format!(
+                    "OFFSET: {}. {}",
+                    len(d),
+                    crate::detailtool::DraftEdit::Offset.hint()
+                ));
+            }
             (Finish::Distance, [a, b, ..]) => {
                 // in the UCS, as AutoCAD reports it
                 let d = DVec2::from_angle(-self.plan.ucs.angle).rotate(*b - *a);
@@ -1042,8 +1133,18 @@ impl CreaBimApp {
             "ROTATE" => selection_cmd(self, ctx, Command::Rotate),
             "MIRROR" => selection_cmd(self, ctx, Command::Mirror),
             "SCALE" => selection_cmd(self, ctx, Command::Scale),
-            "TRIM" => edit(self, ctx, D::Trim),
-            "EXTEND" => edit(self, ctx, D::Extend),
+            "TRIM" | "EXTEND" => {
+                edit(self, ctx, if name == "TRIM" { D::Trim } else { D::Extend });
+                self.selection.clear();
+                self.say(format!(
+                    "{name}: select the {} edges, then Enter (Enter alone: every line).",
+                    if name == "TRIM" {
+                        "cutting"
+                    } else {
+                        "boundary"
+                    }
+                ));
+            }
             "FILLET" => {
                 self.pick_tool(ctx, Tool::Detail);
                 let r = crate::units::len(self.plan.details.radius);
@@ -1065,15 +1166,17 @@ impl CreaBimApp {
             "OFFSET" => {
                 self.pick_tool(ctx, Tool::Detail);
                 let r = crate::units::len(self.plan.details.offset);
-                self.ask(
+                // typed, or measured by two clicks on the drawing
+                self.cmd_pick_start(
                     name,
-                    format!("Specify offset distance <{r}>:"),
-                    Wants::Number(NumberFor::OffsetDistance),
+                    &format!("Specify offset distance, or two points <{r}>:"),
+                    2,
+                    Finish::OffsetDist,
                 );
             }
             "ARRAY" => edit(self, ctx, D::Array),
             "ARRAYPOLAR" => edit(self, ctx, D::Polar),
-            "EXPLODE" => self.cmd_explode(),
+            "EXPLODE" => self.cmd_explode(ctx),
             "BLOCK" => self.make_symbol(),
             "UNDO" => self.run_command(ctx, Command::Undo, None),
             "REDO" => self.run_command(ctx, Command::Redo, None),
@@ -1124,21 +1227,18 @@ impl CreaBimApp {
     }
 
     /// EXPLODE: the symbols selected back into linework.
-    fn cmd_explode(&mut self) {
-        let ids: Vec<ElementId> = self.selection.all();
-        let mut done = 0;
-        for id in ids {
-            if let Some(tx) = creabim_core::detail::explode(self.doc.model(), id) {
-                if self.doc.commit(tx).is_ok() {
-                    done += 1;
-                }
-            }
+    /// EXPLODE: what is selected broken into its parts, as AutoCAD's.
+    fn cmd_explode(&mut self, ctx: &egui::Context) {
+        if self.selection.is_empty() {
+            self.pick_tool(ctx, Tool::Select);
+            self.ask(
+                "EXPLODE",
+                "Select objects, then Enter:",
+                Wants::SelectThen("EXPLODE"),
+            );
+            return;
         }
-        self.say(if done == 0 {
-            "EXPLODE: select placed symbols first.".to_string()
-        } else {
-            format!("EXPLODE: {done} symbols turned back into linework.")
-        });
+        self.explode_selection();
     }
 
     /// A command gathering points has them all (typed or clicked): it
@@ -1170,10 +1270,102 @@ impl CreaBimApp {
         }
     }
 
+    /// AutoCAD's text window (F2): every command and answer so far.
+    pub(super) fn cmd_history_window(&mut self, ctx: &egui::Context) {
+        if !self.cmd.history {
+            return;
+        }
+        let mut open = true;
+        let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
+        egui::Window::new("Command history")
+            .open(&mut open)
+            .collapsible(false)
+            .constrain_to(area)
+            .default_pos(area.left_top() + egui::vec2(40.0, 40.0))
+            .default_size(egui::vec2(620.0, 360.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for l in &self.cmd.log {
+                            ui.label(egui::RichText::new(l).monospace());
+                        }
+                    });
+            });
+        if !open {
+            self.cmd.history = false;
+        }
+    }
+
     /// The command line, over the foot of the drawings: the last lines it
     /// said and the prompt with what is being typed.
     pub(super) fn cmdline_window(&mut self, ctx: &egui::Context) {
         self.cmd_tick();
+        // STRETCH's second point is its window's other corner
+        self.plan.pick_window = matches!(
+            self.cmd.running.as_ref().map(|r| &r.wants),
+            Some(Wants::Points {
+                then: Finish::Stretch,
+                ..
+            })
+        ) && self
+            .plan
+            .cmd_pick
+            .as_ref()
+            .is_some_and(|(_, p)| p.len() == 1);
+        if let Some(t) = self.plan.tool_request.take() {
+            self.cmd.running = None;
+            self.plan.cmd_pick = None;
+            self.pick_tool(ctx, t);
+        }
+        // a quick right-click: Enter for what runs, else the last command
+        if std::mem::take(&mut self.plan.right_quick) && self.plan.modal.is_none() {
+            let idle_tool = self.plan.tool != Tool::Select
+                && self.plan.details.path.is_empty()
+                && self.plan.details.edit.is_none()
+                && self.plan.pending.is_none();
+            if self.plan.tool == Tool::Detail && self.plan.details.edit.is_some() {
+                // in TRIM, EXTEND and the other edits: Enter
+                if self.plan.details.choosing_cutters {
+                    self.cmd_enter(ctx, "");
+                } else {
+                    self.cmd.esc = true;
+                }
+            } else if (self.cmd.running.is_some() && !idle_tool) || self.plan.outline.is_some() {
+                self.cmd_enter(ctx, "");
+            } else if let Some(c) = self.cmd.last.clone() {
+                // nothing being drawn: the last command again, as AutoCAD
+                self.cmd.running = None;
+                self.cmd_start(ctx, &c);
+            } else if self.plan.tool != Tool::Select {
+                self.cmd.esc = true;
+            }
+        }
+        if std::mem::take(&mut self.plan.north_request) {
+            self.selection.clear();
+            self.cmd_start(ctx, "NORTHDIR");
+        }
+        // Esc ends the command: back to selecting, what is drawn kept, and
+        // nothing left selected (the piece just drawn neither), as AutoCAD
+        if std::mem::take(&mut self.cmd.esc) && self.plan.modal.is_none() {
+            if self.plan.tool != Tool::Select || self.cmd.running.is_some() {
+                crate::detailtool::keep(&mut self.doc, &mut self.plan, &mut self.selection);
+                self.plan.cmd_pick = None;
+                self.plan.cmd_preview = None;
+                self.cmd.running = None;
+                self.pick_tool(ctx, Tool::Select);
+                self.say("*Cancel*");
+            }
+            self.selection.clear();
+            self.plan.boxsel = None;
+            // nothing left looking picked: edit mode, the hover, a face
+            self.plan.edit = None;
+            self.plan.hover = None;
+            self.face = None;
+            self.plan.nav_mesh = None;
+            ctx.request_repaint();
+        }
         if !self.shell.settings.command_line {
             return;
         }
@@ -1229,13 +1421,73 @@ impl CreaBimApp {
                         });
                     });
             });
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        // AutoComplete: what is being typed could be these; a click runs
+        // one, Tab takes the first
+        if self.cmd.running.is_none() {
+            let list = suggestions(&self.cmd.text);
+            if !list.is_empty() {
+                let h = 22.0 * list.len() as f32 + 10.0;
+                let mut pick = None;
+                egui::Area::new(egui::Id::new("cmdline.suggest"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(egui::pos2(at.x + 22.0, at.y - h - 4.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::new()
+                            .fill(bg)
+                            .corner_radius(4.0)
+                            .inner_margin(egui::Margin::symmetric(6, 4))
+                            .stroke(egui::Stroke::new(1.0, faint.gamma_multiply(0.5)))
+                            .show(ui, |ui| {
+                                ui.set_min_width(220.0);
+                                let font = egui::FontId::monospace(12.0);
+                                for (i, (name, alias)) in list.iter().enumerate() {
+                                    let text = if alias == name {
+                                        name.to_string()
+                                    } else {
+                                        format!("{name}  ({alias})")
+                                    };
+                                    let r = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(text)
+                                                .font(font.clone())
+                                                .color(if i == 0 { ink } else { faint }),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    if r.clicked() {
+                                        pick = Some(*name);
+                                    }
+                                }
+                            });
+                    });
+                if let Some(name) = pick {
+                    self.cmd.text.clear();
+                    self.cmd_start(ctx, name);
+                }
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+                    self.cmd.text = list[0].0.to_string();
+                }
+            }
+        }
+        // the caret blinks only while something is typed or asked for
+        if !self.cmd.text.is_empty() || self.cmd.running.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_suggests_the_commands_it_could_be() {
+        let s = suggestions("li");
+        assert_eq!(s[0].0, "LINE");
+        assert!(suggestions("str").iter().any(|x| x.0 == "STRETCH"));
+        assert!(suggestions("ta").iter().any(|x| x.0 == "TRIM"));
+        assert!(suggestions("1,2").is_empty());
+    }
 
     #[test]
     fn aliases_find_their_commands_in_english_and_italian() {

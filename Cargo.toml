@@ -28,12 +28,13 @@ indexmap = { version = "2", features = ["serde"] }
 thiserror = "2"
 
 # Shipping builds: small and fast. Measured on 2026-11-05: 38.5 MB -> 26.0 MB.
-# Nothing catches panics (no catch_unwind), so they can abort.
+# Panics unwind: the app catches one in a frame and carries on rather
+# than closing with the user's work (a crash on Cut of a hatch).
 [profile.release]
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+panic = "unwind"
 
 # Day-to-day testing at near release speed, without the long link:
 # cargo build --profile fast -p creabim-app
