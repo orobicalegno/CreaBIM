@@ -131,6 +131,21 @@ impl Default for Lighting {
 const SKY: usize = 8;
 const SUN_MAP: u32 = 2048;
 const SKY_MAP: u32 = 1024;
+/// The sky's maps: depth packed in four bytes, a format every graphics
+/// backend can draw into and read back.
+const SKY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// A future that is ready at once (as wgpu's are on the desktop), waited for.
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+        std::thread::yield_now();
+    }
+}
 
 /// What a depth map of the model sees from far along `dir`, the model's
 /// box (`centre`, `radius`) filling it.
@@ -161,6 +176,13 @@ struct L { m: mat4x4<f32> };
 @vertex fn vs_shadow(@location(0) pos: vec3<f32>) -> @builtin(position) vec4<f32> {
     return l.m * vec4<f32>(pos, 1.0);
 }
+// the sky's maps keep their depth as a colour, which every graphics
+// backend can read back
+@fragment fn fs_sky(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
+    var e = fract(clamp(p.z, 0.0, 0.999999) * vec4<f32>(1.0, 255.0, 65025.0, 16581375.0));
+    e -= e.yzww * vec4<f32>(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+    return e;
+}
 "#;
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -180,7 +202,7 @@ struct U {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var sun_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
-@group(0) @binding(3) var sky_map: texture_depth_2d_array;
+@group(0) @binding(3) var sky_map: texture_2d_array<f32>;
 
 fn map_uv(m: mat4x4<f32>, p: vec3<f32>) -> vec3<f32> {
     let c = m * vec4<f32>(p, 1.0);
@@ -194,8 +216,9 @@ fn inside(q: vec3<f32>) -> bool {
 
 // How much sun reaches a point: 1 lit, 0 in shadow, soft at the edges.
 fn sun_light(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    //LIT{
     if (u.flags.x < 0.5) { return 1.0; }
-    let q = map_uv(u.sun_vp, p + n * 0.03);
+    let q = map_uv(u.sun_vp, p + n * 0.05);
     if (!inside(q)) { return 1.0; }
     let texel = 1.5 / 2048.0;
     var s = 0.0;
@@ -205,17 +228,20 @@ fn sun_light(p: vec3<f32>, n: vec3<f32>) -> f32 {
         }
     }
     return s / 9.0;
+    //}LIT
+    return 1.0;
 }
 
 // How much of the sky a point sees: corners, the ground under an overhang
 // and the inside of a recess see less of it. What covers a point shades it
 // the less the farther above it is, so the shade gathers where things meet.
 fn sky_light(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    //LIT{
     if (u.flags.y <= 0.0) { return 1.0; }
     var s = 0.0;
     var w = 0.0;
     for (var k = 0; k < 8; k++) {
-        let q = map_uv(u.sky_vp[k], p + n * 0.04);
+        let q = map_uv(u.sky_vp[k], p + n * 0.08);
         if (!inside(q)) { continue; }
         // the sky from this side, as much as the face looks toward it
         let m = u.sky_vp[k];
@@ -225,15 +251,17 @@ fn sky_light(p: vec3<f32>, n: vec3<f32>) -> f32 {
         for (var t = 0; t < 4; t++) {
             let o = vec2<f32>(f32(t % 2) - 0.5, f32(t / 2) - 0.5) * 3.0;
             let c = clamp(vec2<i32>(q.xy * 1024.0 + o), vec2<i32>(0), vec2<i32>(1023));
-            let d = textureLoad(sky_map, c, k, 0);
+            let d = dot(textureLoad(sky_map, c, k, 0), vec4<f32>(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
             let gap = (q.z - d) * u.flags.w;
-            if (gap > 0.05) { occ += exp(-gap / 2.5); }
+            if (gap > 0.18) { occ += exp(-gap / 2.5); }
         }
         s += facing * (1.0 - occ / 4.0);
         w += facing;
     }
     if (w <= 0.0) { return 1.0; }
     return mix(1.0, s / w, u.flags.y);
+    //}LIT
+    return 1.0;
 }
 
 struct VIn {
@@ -347,6 +375,11 @@ pub struct Viewport3d {
     /// The sun's depth map, and the sky's (a layer per direction).
     sun_view: wgpu::TextureView,
     sky_views: Vec<wgpu::TextureView>,
+    sky_depth: wgpu::TextureView,
+    sky: wgpu::RenderPipeline,
+    /// The graphics card took the shadow shaders; without them the view
+    /// draws as before, unshadowed.
+    lit: bool,
     /// A light matrix buffer and bind group per map: sun first, then sky.
     light_bgs: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
     /// The model's box (centre, radius), from its vertices.
@@ -368,10 +401,61 @@ pub struct Viewport3d {
 }
 
 impl Viewport3d {
+    /// The renderer, with sun shadows and the sky's shading when the
+    /// graphics card takes them, and without them otherwise. Graphics
+    /// errors later on go to the activity log rather than stopping a frame.
     pub fn new(device: &wgpu::Device) -> Self {
+        device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| {
+            static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            if SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 20 {
+                eprintln!("graphics error: {e}");
+                crate::actlog::line(format!("graphics error: {e}"));
+            }
+        }));
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let lit = Self::build(device, true);
+        match block_on(scope.pop()) {
+            None => lit,
+            Some(e) => {
+                let why = e.to_string();
+                eprintln!("3D shadows off, the graphics card refused them: {why}");
+                crate::actlog::line(format!(
+                    "3D shadows off, the graphics card refused them: {}",
+                    why.lines().take(4).collect::<Vec<_>>().join(" ")
+                ));
+                drop(lit);
+                Self::build(device, false)
+            }
+        }
+    }
+
+    /// Whether sun shadows and the sky's shading work on this card.
+    pub fn lit(&self) -> bool {
+        self.lit
+    }
+
+    fn build(device: &wgpu::Device, lit: bool) -> Self {
+        let source = if lit {
+            SHADER.to_string()
+        } else {
+            // the light maps' reading left out
+            let mut out = String::new();
+            let mut skip = false;
+            for line in SHADER.lines() {
+                if line.contains("//LIT{") {
+                    skip = true;
+                } else if line.contains("//}LIT") {
+                    skip = false;
+                } else if !skip {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            out
+        };
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("creabim_shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("creabim_uniforms"),
@@ -397,7 +481,36 @@ impl Viewport3d {
             })
         };
         let sun_tex = depth_map(SUN_MAP, 1);
-        let sky_tex = depth_map(SKY_MAP, SKY as u32);
+        let sky_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("creabim_sky_maps"),
+            size: wgpu::Extent3d {
+                width: SKY_MAP,
+                height: SKY_MAP,
+                depth_or_array_layers: SKY as u32,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SKY_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let sky_depth = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("creabim_sky_depth"),
+                size: wgpu::Extent3d {
+                    width: SKY_MAP,
+                    height: SKY_MAP,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
         let sun_view = sun_tex.create_view(&Default::default());
         let sky_array = sky_tex.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -452,7 +565,16 @@ impl Viewport3d {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
-                tex_entry(3, wgpu::TextureViewDimension::D2Array),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -546,6 +668,41 @@ impl Viewport3d {
             }),
             multisample: Default::default(),
             fragment: None,
+            multiview_mask: None,
+            cache: None,
+        });
+        let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("creabim_sky"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_module,
+                entry_point: Some("vs_shadow"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                })],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_module,
+                entry_point: Some("fs_sky"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: SKY_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
             multiview_mask: None,
             cache: None,
         });
@@ -655,6 +812,9 @@ impl Viewport3d {
             bind_group,
             sun_view,
             sky_views,
+            sky_depth,
+            sky,
+            lit,
             light_bgs,
             bounds: None,
             ground_mesh: None,
@@ -988,6 +1148,9 @@ impl Viewport3d {
         rs.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&u));
         let Some(tris) = &self.triangles else { return };
+        if !self.lit {
+            return;
+        }
         let mut maps: Vec<(usize, Mat4)> = vec![];
         if lighting.shadows && self.sun_made != Some(lighting.sun) {
             maps.push((0, sun_vp));
@@ -1005,27 +1168,48 @@ impl Viewport3d {
                 0,
                 bytemuck::bytes_of(&m.to_cols_array_2d()),
             );
-            let view = if k == 0 {
-                &self.sun_view
-            } else {
-                &self.sky_views[k - 1]
-            };
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("creabim_shadow_pass"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
+            let mut pass = if k == 0 {
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("creabim_sun_pass"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.sun_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
                     }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.shadow);
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+            } else {
+                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("creabim_sky_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.sky_views[k - 1],
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.sky_depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+            };
+            pass.set_pipeline(if k == 0 { &self.shadow } else { &self.sky });
             pass.set_bind_group(0, &self.light_bgs[k].1, &[]);
             pass.set_vertex_buffer(0, tris.vertices.slice(..));
             if let Some(ib) = &tris.indices {
@@ -1072,7 +1256,7 @@ impl Viewport3d {
         });
         pass.set_bind_group(0, &self.bind_group, &[]);
         // the ground catches shadows only when there are any to catch
-        let ground = if lighting.shadows || lighting.ambient_occlusion > 0.0 {
+        let ground = if self.lit && (lighting.shadows || lighting.ambient_occlusion > 0.0) {
             &self.ground_mesh
         } else {
             &None

@@ -2255,10 +2255,48 @@ impl CreaBimApp {
             }
             "xray" => self.set_xray(!self.shell.settings.xray),
             "shadows3d" => {
+                // a saved 3D view in the focused area draws on its own: its
+                // look's shadows are what the command turns
+                if let Some(before) = self.focused_3d_view().cloned() {
+                    let mut after = before.clone();
+                    let mut on = false;
+                    if let ElementKind::View(v) = &mut after.kind {
+                        v.look.cues.shadows = match v.look.cues.shadows {
+                            Some(_) => None,
+                            None => Some(creabim_core::styles::Shadows {
+                                direction: -50.0,
+                                length: 0.6,
+                                opacity: 0.35,
+                            }),
+                        };
+                        on = v.look.cues.shadows.is_some();
+                        if on && v.style != creabim_core::ViewStyle::Shaded {
+                            v.style = creabim_core::ViewStyle::Shaded;
+                        }
+                    }
+                    let name = before.name.clone();
+                    match self
+                        .doc
+                        .commit(Transaction::new("Sun shadows").replace(before, after))
+                    {
+                        Ok(_) => {
+                            self.status = if on {
+                                format!("Sun shadows on in {name}, shaded. Its Properties set where they fall.")
+                            } else {
+                                format!("Sun shadows off in {name}.")
+                            }
+                        }
+                        Err(e) => self.status = format!("Couldn't change the shadows: {e}"),
+                    }
+                    return;
+                }
                 let s = &mut self.shell.settings;
                 s.shadows_3d = !s.shadows_3d;
                 s.store();
-                self.status = if s.shadows_3d {
+                let lit = self.viewport.as_ref().is_none_or(|v| v.lit());
+                self.status = if !lit {
+                    "This graphics card can't draw the 3D view's shadows (Help > activity log says why). Saved 3D views and sheets still take them: their Properties, Shadows.".into()
+                } else if s.shadows_3d {
                     "Sun shadows on. Render > Sun position moves the sun.".into()
                 } else {
                     "Sun shadows off.".into()
@@ -3035,9 +3073,28 @@ impl CreaBimApp {
             .collect()
     }
 
+    /// The saved 3D view the focused area shows in 2D, drawn on its own
+    /// (not by the 3D view's renderer).
+    fn focused_3d_view(&self) -> Option<&creabim_core::Element> {
+        let id = match self.areas.root.areas().get(self.areas.focus)? {
+            crate::areas::Shows::View(v) => *v,
+            _ => return None,
+        };
+        self.doc.model().get(id).filter(|e| {
+            matches!(&e.kind, ElementKind::View(v) if matches!(
+                v.kind,
+                ViewKind::Axonometric { .. } | ViewKind::Perspective { .. }
+            ))
+        })
+    }
+
     /// The sun and sky of the 3D view, and its image at print size.
     fn light_items(&self) -> Vec<Item> {
         let s = &self.shell.settings;
+        let shadows_on = match self.focused_3d_view().map(|e| &e.kind) {
+            Some(ElementKind::View(v)) => v.look.cues.shadows.is_some(),
+            _ => s.shadows_3d,
+        };
         let sun = |key: &str, label: &str, az: f64, alt: f64| {
             Item::new(format!("sun:{key}"), label)
                 .checked((s.sun_azimuth - az).abs() < 0.5 && (s.sun_altitude - alt).abs() < 0.5)
@@ -3046,7 +3103,7 @@ impl CreaBimApp {
         vec![
             Item::Separator,
             Item::new("shadows3d", "Sun shadows")
-                .checked(s.shadows_3d)
+                .checked(shadows_on)
                 .icon("sun")
                 .hint("The sun casts shadows on the model and the ground, from the project's true north"),
             Item::new("occlusion3d", "Ambient occlusion")

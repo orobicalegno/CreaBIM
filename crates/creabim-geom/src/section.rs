@@ -626,24 +626,40 @@ pub fn axonometric_view_with(
 /// [`axonometric_view_with`] from a scene already built.
 pub fn axonometric_view_in(
     model: &Model,
-    mut scene: Vec<SceneItem>,
+    scene: Vec<SceneItem>,
     azimuth: f64,
     altitude: f64,
     style: ViewStyle,
     reveal: bool,
     crop: &[creabim_core::CropBox],
 ) -> Drawing {
+    axonometric_view_lit(model, scene, azimuth, altitude, style, reveal, crop, None)
+}
+
+/// [`axonometric_view_in`] with the sun's shadows, when shaded.
+#[allow(clippy::too_many_arguments)]
+pub fn axonometric_view_lit(
+    model: &Model,
+    mut scene: Vec<SceneItem>,
+    azimuth: f64,
+    altitude: f64,
+    style: ViewStyle,
+    reveal: bool,
+    crop: &[creabim_core::CropBox],
+    sun: Option<creabim_core::styles::Shadows>,
+) -> Drawing {
     let frame = AxoFrame::new(model, azimuth, altitude);
     crate::cropbox::crop_scene(model, &mut scene, crop);
     let project = |p: DVec3| frame.project(p);
     let revealed = reveal.then(|| revealable(model));
-    let (lines, image) = hidden_lines(
+    let (lines, image) = hidden_lines_lit(
         &scene,
         &project,
         frame.radius * 2.0,
         None,
         style,
         revealed.as_ref(),
+        sun,
     );
     let voids = if crop.is_empty() {
         void_lines(model, &project, frame.radius * 2.0, None)
@@ -762,13 +778,36 @@ pub(crate) fn hidden_lines(
     style: ViewStyle,
     reveal: Option<&HashSet<ElementId>>,
 ) -> (Vec<PlanItem>, Option<PlanItem>) {
+    hidden_lines_lit(scene, project, depth, crop, style, reveal, None)
+}
+
+/// [`hidden_lines`] with the sun's shadows (`sun`) on the shaded image:
+/// on the model and on the ground it stands on.
+pub(crate) fn hidden_lines_lit(
+    scene: &[SceneItem],
+    project: &(dyn Fn(DVec3) -> DVec3 + Sync),
+    depth: f64,
+    crop: Option<(f64, f64)>,
+    style: ViewStyle,
+    reveal: Option<&HashSet<ElementId>>,
+    sun: Option<creabim_core::styles::Shadows>,
+) -> (Vec<PlanItem>, Option<PlanItem>) {
     let shade = style == ViewStyle::Shaded;
     let wire = style == ViewStyle::Wireframe;
     let faces = project_faces(scene, project, depth);
-    let (lo, hi) = extents(&faces, crop);
+    let (mut lo, mut hi) = extents(&faces, crop);
+    // room round the model for its shadow on the ground
+    if let (true, Some(sh)) = (shade, sun) {
+        let reach = (hi - lo).max_element() * 0.5 * sh.length.clamp(0.2, 3.0);
+        lo -= DVec2::splat(reach);
+        hi += DVec2::splat(reach);
+    }
     let mut zbuf = DepthBuffer::render(&faces, lo, hi, shade);
     if reveal.is_some() {
         zbuf.render_backs(&faces);
+    }
+    if let (true, Some(sh)) = (shade, sun) {
+        zbuf.cast_sun(scene, project, sh);
     }
     let image = zbuf.image();
     let zbuf = &zbuf;
@@ -951,7 +990,16 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
         }
         creabim_core::ViewKind::Axonometric { azimuth, altitude } => {
             let crop = crate::cropbox::active(model, Some(view));
-            axonometric_view_in(model, scene(), *azimuth, *altitude, style, reveal, &crop)
+            axonometric_view_lit(
+                model,
+                scene(),
+                *azimuth,
+                *altitude,
+                style,
+                reveal,
+                &crop,
+                v.look.cues.shadows,
+            )
         }
         creabim_core::ViewKind::Perspective {
             eye,
@@ -1652,6 +1700,15 @@ struct DepthBuffer {
 /// No element in the cell.
 const EMPTY: u32 = u32::MAX;
 
+/// Toward the sun, in model terms, from a look's shadows: they fall
+/// along `direction`, `length` per metre of height.
+pub fn sun_toward(sh: creabim_core::styles::Shadows) -> Option<DVec3> {
+    let fall = DVec2::from_angle(sh.direction.to_radians());
+    let alt = (1.0 / sh.length.max(0.05)).atan();
+    let d = DVec3::new(-fall.x * alt.cos(), -fall.y * alt.cos(), alt.sin());
+    d.is_finite().then_some(d)
+}
+
 /// Direction light comes from, in view coordinates (x right, y up, depth away).
 const LIGHT: DVec3 = DVec3::new(-0.45, 0.65, -0.62);
 
@@ -1721,6 +1778,106 @@ impl DepthBuffer {
             }
         });
         buf
+    }
+
+    /// The sun's shadows on the shaded image, for a parallel view: each
+    /// cell's point found back in the model and looked for from the sun;
+    /// where nothing is drawn, the ground under the model takes the shadow,
+    /// see-through. A perspective has no shadows (its projection is not
+    /// undone this simply).
+    fn cast_sun(
+        &mut self,
+        scene: &[SceneItem],
+        project: &(dyn Fn(DVec3) -> DVec3 + Sync),
+        sh: creabim_core::styles::Shadows,
+    ) {
+        let opacity = sh.opacity.clamp(0.0, 1.0) as f64;
+        let o = project(DVec3::ZERO);
+        let a = glam::DMat3::from_cols(
+            project(DVec3::X) - o,
+            project(DVec3::Y) - o,
+            project(DVec3::Z) - o,
+        );
+        if (project(DVec3::new(1.0, 2.0, 3.0)) - (o + a * DVec3::new(1.0, 2.0, 3.0))).length()
+            > 1e-6
+            || a.determinant().abs() < 1e-12
+        {
+            return;
+        }
+        let inv = a.inverse();
+        let Some(sun) = sun_toward(sh) else { return };
+        let side = if sun.z.abs() > 0.95 {
+            DVec3::X
+        } else {
+            DVec3::Z
+        };
+        let u = sun.cross(side).normalize();
+        let v = sun.cross(u);
+        let (mut top, mut ground) = (f64::MIN, f64::MAX);
+        for s in scene {
+            for p in &s.mesh.positions {
+                let p = Vec3::from(*p).as_dvec3();
+                top = top.max(p.dot(sun));
+                ground = ground.min(p.z);
+            }
+        }
+        if top == f64::MIN {
+            return;
+        }
+        let from_sun = move |p: DVec3| DVec3::new(p.dot(u), p.dot(v), top + 1.0 - p.dot(sun));
+        let faces = project_faces(scene, &from_sun, 1e7);
+        let (lo, hi) = extents(&faces, None);
+        let map = DepthBuffer::render(&faces, lo, hi, false);
+        let bias = 0.03 + map.px * 2.5;
+        // how much sun reaches a point: 1 lit, 0 in shadow, soft at edges
+        let light = |p: DVec3| -> f64 {
+            let q = from_sun(p);
+            let (cx, cy) = (
+                ((q.x - map.lo.x) / map.px).floor() as isize,
+                ((q.y - map.lo.y) / map.px).floor() as isize,
+            );
+            let mut dark = 0;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x < 0 || y < 0 || x >= map.w as isize || y >= map.h as isize {
+                        continue;
+                    }
+                    if (map.depth[y as usize * map.w + x as usize] as f64) < q.z - bias {
+                        dark += 1;
+                    }
+                }
+            }
+            1.0 - dark as f64 / 9.0
+        };
+        let ground = ground - 0.002;
+        let Some(rgba) = self.rgba.as_mut() else {
+            return;
+        };
+        let along = inv * DVec3::Z;
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let i = y * self.w + x;
+                let q = self.lo + DVec2::new(x as f64 + 0.5, y as f64 + 0.5) * self.px;
+                let d = self.depth[i];
+                if d.is_finite() {
+                    let p = inv * (DVec3::new(q.x, q.y, d as f64) - o);
+                    let k = 1.0 - opacity * 0.75 * (1.0 - light(p));
+                    for c in &mut rgba[i * 4..i * 4 + 3] {
+                        *c = (*c as f64 * k).round() as u8;
+                    }
+                } else if along.z.abs() > 1e-9 {
+                    // the ground, where the line of sight meets it
+                    let start = inv * (DVec3::new(q.x, q.y, 0.0) - o);
+                    let t = (ground - start.z) / along.z;
+                    let dark = 1.0 - light(start + along * t);
+                    if dark > 0.0 {
+                        let alpha = (opacity * 0.8 * dark * 255.0).round() as u8;
+                        rgba[i * 4..i * 4 + 4].copy_from_slice(&[24, 26, 32, alpha]);
+                    }
+                }
+            }
+        }
     }
 
     /// Find how deep the nearest element goes in each cell: the furthest
@@ -2275,6 +2432,48 @@ mod tests {
             .items
             .iter()
             .any(|i| matches!(i, PlanItem::Image { .. })));
+    }
+
+    #[test]
+    fn a_shaded_3d_view_takes_the_suns_shadows_on_the_model_and_the_ground() {
+        let m = sample();
+        let image = |sun| {
+            let d = axonometric_view_lit(
+                &m,
+                crate::scene::drawn_scene(&m),
+                35.0,
+                30.0,
+                ViewStyle::Shaded,
+                false,
+                &[],
+                sun,
+            );
+            match d.items.first() {
+                Some(PlanItem::Image { raster, .. }) => raster.clone(),
+                _ => panic!("an image"),
+            }
+        };
+        let plain = image(None);
+        let lit = image(Some(creabim_core::styles::Shadows {
+            direction: -50.0,
+            length: 1.0,
+            opacity: 0.6,
+        }));
+        // the ground's shadow: see-through dark where nothing stood before
+        assert!(lit
+            .rgba
+            .chunks(4)
+            .any(|p| p[3] > 20 && p[3] < 255 && p[0] < 60));
+        assert!(!plain.rgba.chunks(4).any(|p| p[3] > 0 && p[3] < 255));
+        // and some of the model is darker: faces in shadow
+        let solid = |r: &crate::raster::Raster| {
+            r.rgba
+                .chunks(4)
+                .filter(|p| p[3] == 255)
+                .map(|p| p[0] as u64)
+                .sum::<u64>()
+        };
+        assert!(solid(&lit) < solid(&plain));
     }
 
     #[test]
