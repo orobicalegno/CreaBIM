@@ -7505,7 +7505,8 @@ impl CreaBimApp {
                 if let Some(mut v) = self.view(id).cloned() {
                     let shadable = matches!(
                         v.kind,
-                        ViewKind::Section { .. }
+                        ViewKind::Plan { .. }
+                            | ViewKind::Section { .. }
                             | ViewKind::Axonometric { .. }
                             | ViewKind::Perspective { .. }
                     );
@@ -9916,7 +9917,8 @@ impl CreaBimApp {
                     }
                     if matches!(
                         v.kind,
-                        ViewKind::Section { .. }
+                        ViewKind::Plan { .. }
+                            | ViewKind::Section { .. }
                             | ViewKind::Axonometric { .. }
                             | ViewKind::Perspective { .. }
                     ) && view_style_combo(ui, "view_style", &mut v.style)
@@ -12742,7 +12744,8 @@ fn plan_graphics_ui(
     label
 }
 
-/// A drop-down of the ways a section, elevation or 3D view draws.
+/// A drop-down of the ways a view draws (a plan only knows the white
+/// model; it draws as ever in the others).
 fn view_style_combo(ui: &mut egui::Ui, salt: &str, style: &mut ViewStyle) -> bool {
     let mut changed = false;
     crate::props::row(ui, "Style", |ui| {

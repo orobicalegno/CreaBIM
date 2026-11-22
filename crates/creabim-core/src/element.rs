@@ -1992,20 +1992,30 @@ pub enum ViewStyle {
     /// Every edge, the hidden ones too: to see what is inside and behind,
     /// like a shaft running through the floors.
     Wireframe,
+    /// An architect's white model: surfaces white, glass grey, what is cut
+    /// solid dark, no colours, and the sun's soft shadows.
+    White,
 }
 
 impl ViewStyle {
-    pub const ALL: [ViewStyle; 3] = [
+    pub const ALL: [ViewStyle; 4] = [
         ViewStyle::HiddenLine,
         ViewStyle::Shaded,
         ViewStyle::Wireframe,
+        ViewStyle::White,
     ];
+
+    /// Surfaces drawn as an image under the lines (shaded or white).
+    pub fn shades(self) -> bool {
+        matches!(self, ViewStyle::Shaded | ViewStyle::White)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             ViewStyle::HiddenLine => "Hidden line",
             ViewStyle::Shaded => "Shaded with edges",
             ViewStyle::Wireframe => "Wireframe",
+            ViewStyle::White => "White model",
         }
     }
 }

@@ -817,6 +817,7 @@ How a view draws.
 - `"hidden-line"`
 - `"shaded"`
 - `"wireframe"`
+- `"white"`
 
 ### ScheduleCategory
 

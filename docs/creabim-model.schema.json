@@ -1254,7 +1254,7 @@
     "ViewStyle": {
       "type": "string",
       "description": "How a view draws.",
-      "enum": ["hidden-line", "shaded", "wireframe"]
+      "enum": ["hidden-line", "shaded", "wireframe", "white"]
     },
     "ScheduleCategory": {
       "type": "string",

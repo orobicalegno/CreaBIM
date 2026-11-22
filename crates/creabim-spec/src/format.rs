@@ -889,6 +889,7 @@ spec_enum! {
         HiddenLine = "hidden-line",
         Shaded = "shaded",
         Wireframe = "wireframe",
+        White = "white",
     }
 }
 

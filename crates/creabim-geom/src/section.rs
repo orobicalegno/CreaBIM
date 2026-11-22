@@ -106,7 +106,9 @@ pub fn section_view_with(
     reveal: bool,
 ) -> Drawing {
     let scene = crate::scene::drawn_scene(model);
-    section_view_in(model, &scene, start, end, depth, cut, style, scale, reveal)
+    section_view_in(
+        model, &scene, start, end, depth, cut, style, scale, reveal, None,
+    )
 }
 
 /// [`section_view_with`] from a scene already built (the shared one,
@@ -122,19 +124,21 @@ pub fn section_view_in(
     style: ViewStyle,
     scale: f64,
     reveal: bool,
+    sun: Option<creabim_core::styles::Shadows>,
 ) -> Drawing {
     let frame = SectionFrame::new(start, end, depth);
     let mut items = Vec::new();
 
     let project = |p: DVec3| frame.project(p);
     let revealed = reveal.then(|| revealable(model));
-    let (lines, image) = hidden_lines(
+    let (lines, image) = hidden_lines_lit(
         scene,
         &project,
         frame.depth,
         Some((0.0, frame.length)),
         style,
         revealed.as_ref(),
+        sun,
     );
     items.extend(image);
     items.extend(lines);
@@ -792,9 +796,26 @@ pub(crate) fn hidden_lines_lit(
     reveal: Option<&HashSet<ElementId>>,
     sun: Option<creabim_core::styles::Shadows>,
 ) -> (Vec<PlanItem>, Option<PlanItem>) {
-    let shade = style == ViewStyle::Shaded;
+    let shade = style.shades();
     let wire = style == ViewStyle::Wireframe;
-    let faces = project_faces(scene, project, depth);
+    let white = style == ViewStyle::White;
+    let sun = sun.or(white.then_some(WHITE_SUN));
+    let mut faces = project_faces(scene, project, depth);
+    if white {
+        // white card, the glass a darker grey-blue
+        let glass: HashSet<ElementId> = scene
+            .iter()
+            .filter(|s| s.surface[2] < 0.999)
+            .map(|s| s.id)
+            .collect();
+        for f in &mut faces {
+            f.1 = if glass.contains(&f.0) {
+                [0.50, 0.55, 0.60]
+            } else {
+                [0.97, 0.97, 0.96]
+            };
+        }
+    }
     let (mut lo, mut hi) = extents(&faces, crop);
     // room round the model for its shadow on the ground
     if let (true, Some(sh)) = (shade, sun) {
@@ -979,6 +1000,7 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 style,
                 v.scale,
                 reveal,
+                v.look.cues.shadows,
             );
             // rooms washed behind the cut, from floor to ceiling
             if v.room_colours && *cut {
@@ -1106,6 +1128,10 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 d.items = under;
             }
         }
+    }
+    // the white model over whatever the drawing style coloured
+    if style == ViewStyle::White {
+        whiten(model, &mut d.items);
     }
     Some(d)
 }
@@ -1700,6 +1726,89 @@ struct DepthBuffer {
 /// No element in the cell.
 const EMPTY: u32 = u32::MAX;
 
+/// The sun a white model view takes when its look sets none.
+pub const WHITE_SUN: creabim_core::styles::Shadows = creabim_core::styles::Shadows {
+    // the sun from the south-west, shadows falling north-east
+    direction: 50.0,
+    length: 0.8,
+    opacity: 0.45,
+};
+
+/// A drawing in the white model style: what is cut solid dark grey, no
+/// colours on rooms and hidden elements, coloured surfaces white.
+pub fn whiten(model: &Model, items: &mut Vec<PlanItem>) {
+    // drafting (sketches, notes, marks) keeps its own fills
+    let drafted = |id: ElementId| {
+        !matches!(
+            model.get(id).map(|e| &e.kind),
+            Some(
+                ElementKind::Wall(_)
+                    | ElementKind::Slab(_)
+                    | ElementKind::Roof(_)
+                    | ElementKind::Column(_)
+                    | ElementKind::Beam(_)
+                    | ElementKind::Stair(_)
+                    | ElementKind::Railing(_)
+                    | ElementKind::FreeMesh(_)
+                    | ElementKind::Footing(_)
+                    | ElementKind::Part(_)
+                    | ElementKind::Object(_)
+                    | ElementKind::Site(_)
+                    | ElementKind::Opening(_)
+                    | ElementKind::Shaft(_)
+            )
+        )
+    };
+    items.retain(|it| !matches!(it, PlanItem::Tint { .. }));
+    // a cut outline fills in its look's grey: a dark fill under its lines
+    // instead
+    let mut out = Vec::with_capacity(items.len());
+    for it in std::mem::take(items) {
+        match it {
+            PlanItem::Polygon {
+                id,
+                pen: Pen::Cut,
+                points,
+            } if points.len() >= 3 && !drafted(id) => {
+                let n = points.len();
+                let edges: Vec<PlanItem> = (0..n)
+                    .map(|i| PlanItem::Line {
+                        id,
+                        pen: Pen::Cut,
+                        a: points[i],
+                        b: points[(i + 1) % n],
+                    })
+                    .collect();
+                out.push(PlanItem::Fill {
+                    id,
+                    points,
+                    hatch: creabim_core::Hatch::Solid,
+                    rgb: None,
+                });
+                out.extend(edges);
+            }
+            it => out.push(it),
+        }
+    }
+    *items = out;
+    for it in items.iter_mut() {
+        match it {
+            PlanItem::Fill { id, hatch, rgb, .. } if !drafted(*id) => {
+                *hatch = creabim_core::Hatch::Solid;
+                *rgb = Some([0.26, 0.26, 0.28]);
+            }
+            PlanItem::Room { rgb, .. } => *rgb = None,
+            // a shadow is grey and stays; a coloured surface goes white
+            PlanItem::Shade { id, rgb, .. }
+                if !drafted(*id) && !(rgb[0] == rgb[1] && rgb[1] == rgb[2]) =>
+            {
+                *rgb = [0.97, 0.97, 0.96];
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Toward the sun, in model terms, from a look's shadows: they fall
 /// along `direction`, `length` per metre of height.
 pub fn sun_toward(sh: creabim_core::styles::Shadows) -> Option<DVec3> {
@@ -2177,6 +2286,35 @@ mod tests {
         })
         .unwrap();
         doc.model().clone()
+    }
+
+    #[test]
+    fn white_model_plans_and_sections_are_white_with_dark_cuts_and_shadows() {
+        let m = sample();
+        let plan = m
+            .iter()
+            .find(|e| matches!(&e.kind, ElementKind::View(v) if matches!(v.kind, creabim_core::ViewKind::Plan { .. })))
+            .unwrap()
+            .id;
+        for id in [plan, section_a(&m)] {
+            let m = set_view(&m, id, |v| v.style = ViewStyle::White);
+            let d = view_drawing(&m, id).unwrap();
+            // what is cut is solid dark grey, nothing is tinted
+            assert!(d.items.iter().any(|i| matches!(i,
+                PlanItem::Fill { hatch: creabim_core::Hatch::Solid, rgb: Some(c), .. } if c[0] < 0.3)));
+            assert!(!d.items.iter().any(|i| matches!(i,
+                PlanItem::Fill { id, rgb, .. } if matches!(m.get(*id).map(|e| &e.kind), Some(ElementKind::Wall(_))) && rgb.is_none_or(|c| c[0] > 0.3))));
+            assert!(!d.items.iter().any(|i| matches!(i, PlanItem::Tint { .. })));
+            // and the sun's shadows come as an image
+            let shadowed = d.items.iter().any(|i| match i {
+                PlanItem::Image { raster, .. } => raster
+                    .rgba
+                    .chunks(4)
+                    .any(|p| p[3] > 0 && (p[3] < 255 || p[0] < 200)),
+                _ => false,
+            });
+            assert!(shadowed, "{id:?}");
+        }
     }
 
     #[test]

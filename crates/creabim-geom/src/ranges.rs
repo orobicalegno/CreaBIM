@@ -105,7 +105,7 @@ pub fn plan(model: &Model, v: &View, level: ElementId, cut: f64) -> PlanView {
         return from_above(model, v, level, cut);
     }
     let mut d = crate::plan::plan_view_with(model, level, cut, &v.graphics);
-    if let Some(sh) = v.look.cues.shadows {
+    if let Some(sh) = v.look.cues.shadows.or(white_sun(v)) {
         cast_shadows(model, level, cut, sh, &mut d.items);
     }
     if !r.spans_levels() {
@@ -194,6 +194,11 @@ pub fn from_above_span(model: &Model, v: &View, level: ElementId, _cut: f64) -> 
     let top = r.top.map_or(hi + 1.0, |t| t.z(model, own));
     let bottom = r.bottom.map_or(lo - 1.0, |b| b.z(model, own));
     (top, bottom.min(top - 0.01))
+}
+
+/// The sun a white model plan takes when its look sets none.
+fn white_sun(v: &View) -> Option<creabim_core::styles::Shadows> {
+    (v.style == creabim_core::ViewStyle::White).then_some(crate::section::WHITE_SUN)
 }
 
 /// How fine a cut plan's shadows are drawn, metres a pixel, and the most
@@ -372,7 +377,7 @@ fn from_above(model: &Model, v: &View, level: ElementId, cut: f64) -> PlanView {
             .filter(|t| t.iter().all(|p| p.z <= top - 1e-4 && p.z >= bottom - 1e-6))
             .collect()
     };
-    if let Some(sh) = v.look.cues.shadows {
+    if let Some(sh) = v.look.cues.shadows.or(white_sun(v)) {
         let dir = DVec2::from_angle(sh.direction.to_radians()) * sh.length;
         let grey = 1.0 - sh.opacity.clamp(0.0, 1.0);
         for s in &scene {

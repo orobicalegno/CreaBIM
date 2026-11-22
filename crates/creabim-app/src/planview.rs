@@ -1420,11 +1420,19 @@ pub fn show(
     let hovered = hoverpick::highlighted(&state.hover)
         .filter(|id| !selection.contains(*id) && !response.dragged());
     let hovered_slab = hovered.filter(|id| slabs.iter().any(|(s, _)| s == id));
+    // a white model plan keeps its floors white: only the one pointed at
+    // or picked is washed
+    let white = matches!(
+        doc.model().get(view).map(|e| &e.kind),
+        Some(ElementKind::View(v)) if v.style == creabim_core::ViewStyle::White
+    );
     for (id, points) in &slabs {
         let fill = if selection.contains(*id) {
             SLAB_SELECTED
         } else if hovered_slab == Some(*id) {
             SLAB_HOVER
+        } else if white {
+            continue;
         } else {
             SLAB_FILL
         };

@@ -1075,6 +1075,7 @@ fn view(e: &Element, id: &str, v: &core::View, ids: &Ids) -> f::View {
             core::ViewStyle::HiddenLine => f::ViewStyle::HiddenLine,
             core::ViewStyle::Shaded => f::ViewStyle::Shaded,
             core::ViewStyle::Wireframe => f::ViewStyle::Wireframe,
+            core::ViewStyle::White => f::ViewStyle::White,
         });
     }
     out

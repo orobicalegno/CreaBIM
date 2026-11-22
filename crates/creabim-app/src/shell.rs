@@ -144,6 +144,7 @@ pub(super) fn view_style_icon(s: ViewStyle) -> &'static str {
         ViewStyle::HiddenLine => "render-hidden-line",
         ViewStyle::Shaded => "render-edges",
         ViewStyle::Wireframe => "render-wireframe",
+        ViewStyle::White => "render-hidden-line",
     }
 }
 
@@ -4365,7 +4366,7 @@ impl CreaBimApp {
             if let Some(v) = self.active_view.and_then(|id| self.view(id)) {
                 if matches!(
                     v.kind,
-                    ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                    ViewKind::Plan { .. } | ViewKind::Section { .. } | ViewKind::Axonometric { .. }
                 ) {
                     if matches!(v.kind, ViewKind::Section { .. }) {
                         options.push(json!({
@@ -4377,7 +4378,7 @@ impl CreaBimApp {
                     options.push(json!({
                         "kind": "menu", "key": "viewstyle", "label": "Style",
                         "value": v.style.label(), "icon": view_style_icon(v.style),
-                        "hint": "How this view draws, on its sheets too: hidden line, shaded with edges, or wireframe (every edge, the hidden ones too)",
+                        "hint": "How this view draws, on its sheets too: hidden line, shaded with edges, wireframe (every edge, the hidden ones too) or white model (white surfaces, dark cuts, soft sun shadows)",
                     }));
                 }
                 options.push(json!({
