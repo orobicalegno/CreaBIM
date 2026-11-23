@@ -454,47 +454,89 @@ pub(super) fn look_ui(
             label = Some("Depth cues");
         }
     });
-    let mut sun = c.shadows.is_some();
+    // the sun and the shading of corners: the white model starts from its
+    // own, and an edit makes them the view's
+    let style = v.style;
+    let plan = matches!(v.kind, ViewKind::Plan { .. });
+    let three_d = matches!(v.kind, ViewKind::Axonometric { .. });
+    let c = &mut v.look.cues;
+    let own = if plan {
+        creabim_core::styles::WHITE_PLAN_SUN
+    } else {
+        creabim_core::styles::WHITE_SUN
+    };
+    let shown = c.shadows_for(style, plan);
+    let mut sun = shown.is_some();
     if crate::props::check(ui, "Shadows", &mut sun, "Sun")
-        .on_hover_text("Soft sun shadows: on the ground in plans from above; on the floors in cut plans, from the walls, furniture and all that stands below the cut; on the model and the ground in shaded 3D views. Printed and in PDFs too")
+        .on_hover_text("Soft sun shadows: on the floors in plans, from the walls, furniture and all that stands below the cut; on the model and the ground in sections, elevations and 3D views drawn shaded or as a white model. Printed and in PDFs too")
         .changed()
     {
-        c.shadows = sun.then_some(Shadows {
-            direction: -50.0,
-            length: 0.6,
-            opacity: 0.35,
-        });
+        c.shadows = if sun {
+            Some(c.shadows.filter(|s| s.opacity > 0.0).unwrap_or(own))
+        } else if style == creabim_core::ViewStyle::White {
+            // the white model's own sun, turned off
+            Some(Shadows { opacity: 0.0, ..own })
+        } else {
+            None
+        };
         label = Some("Depth cues");
     }
-    if let Some(s) = &mut c.shadows {
+    if let Some(mut s) = shown {
+        let before = s;
+        if three_d && c.shadows.is_none() {
+            ui.label(
+                egui::RichText::new("The sun turns with the view; set it here to fix it.")
+                    .weak()
+                    .small(),
+            );
+        }
         crate::props::row(ui, "Toward", |ui| {
-            label = label.or(crate::props::fill(
+            crate::props::fill(
                 ui,
                 egui::DragValue::new(&mut s.direction)
                     .speed(1.0)
                     .suffix("°"),
             )
-            .changed()
-            .then_some("Depth cues"));
+            .on_hover_text("Where the shadows fall, degrees anticlockwise from the drawing's right")
         });
-        crate::props::row(ui, "Length", |ui| {
-            label = label.or(crate::props::fill(
+        // the sun's height, from how long a shadow is per metre
+        let mut height = (1.0 / s.length.max(0.01)).atan().to_degrees();
+        crate::props::row(ui, "Sun height", |ui| {
+            if crate::props::fill(
                 ui,
-                egui::DragValue::new(&mut s.length)
-                    .speed(0.05)
-                    .range(0.0..=5.0),
+                egui::DragValue::new(&mut height)
+                    .speed(0.5)
+                    .range(5.0..=89.0)
+                    .suffix("°"),
             )
+            .on_hover_text("How high the sun stands: higher, shorter shadows")
             .changed()
-            .then_some("Depth cues"));
+            {
+                s.length = 1.0 / height.to_radians().tan();
+            }
         });
         crate::props::row(ui, "Strength", |ui| {
             ui.spacing_mut().slider_width = (ui.available_width() - 56.0).max(40.0);
-            label = label.or(ui
-                .add(egui::Slider::new(&mut s.opacity, 0.05..=1.0))
-                .changed()
-                .then_some("Depth cues"));
+            ui.add(egui::Slider::new(&mut s.opacity, 0.05..=1.0))
+                .on_hover_text("How dark the shadows are")
         });
+        if s != before {
+            c.shadows = Some(s);
+            label = Some("Depth cues");
+        }
     }
+    let mut occ = c.occlusion_for(style);
+    crate::props::row(ui, "Occlusion", |ui| {
+        ui.spacing_mut().slider_width = (ui.available_width() - 56.0).max(40.0);
+        if ui
+            .add(egui::Slider::new(&mut occ, 0.0..=1.0).max_decimals(2))
+            .on_hover_text("Ambient occlusion: how much corners, recesses, the underside of eaves and the ground at a wall's foot are shaded. Shaded and white model views")
+            .changed()
+        {
+            c.occlusion = Some(occ);
+            label = Some("Depth cues");
+        }
+    });
     // overrides by category: a sub-section, as Blender's (MU22)
     let oid = egui::Id::new("props.view.overrides.open");
     let open = ui.ctx().data(|d| d.get_temp::<bool>(oid)).unwrap_or(true);

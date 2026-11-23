@@ -440,7 +440,49 @@ pub struct DepthCues {
     /// up to this much at the far end of the view (0..1).
     #[serde(default, skip_serializing_if = "is_zero_f32")]
     pub fade: f32,
+    /// How much corners, recesses and the ground at a wall's foot are
+    /// shaded (0..1), in shaded and white model views; none takes the
+    /// style's own (the white model's 0.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occlusion: Option<f32>,
 }
+
+impl DepthCues {
+    /// The shadows a view in `style` draws: its own, else the white
+    /// model's sun (for plans `plan` true, shorter). A strength of 0 turns
+    /// them off.
+    pub fn shadows_for(&self, style: crate::ViewStyle, plan: bool) -> Option<Shadows> {
+        let white = style == crate::ViewStyle::White;
+        self.shadows
+            .or(white.then_some(if plan { WHITE_PLAN_SUN } else { WHITE_SUN }))
+            .filter(|s| s.opacity > 0.0)
+    }
+
+    /// How much a view in `style` shades its corners.
+    pub fn occlusion_for(&self, style: crate::ViewStyle) -> f32 {
+        let own = if style == crate::ViewStyle::White {
+            0.6
+        } else {
+            0.0
+        };
+        self.occlusion.unwrap_or(own).clamp(0.0, 1.0)
+    }
+}
+
+/// The sun a white model section, elevation or 3D view takes when its look
+/// sets none: from the south-west, shadows falling north-east.
+pub const WHITE_SUN: Shadows = Shadows {
+    direction: 50.0,
+    length: 0.9,
+    opacity: 0.55,
+};
+
+/// The sun a white model plan takes: short, crisp shadows.
+pub const WHITE_PLAN_SUN: Shadows = Shadows {
+    direction: -45.0,
+    length: 0.3,
+    opacity: 0.45,
+};
 
 fn is_zero_f32(v: &f32) -> bool {
     *v == 0.0

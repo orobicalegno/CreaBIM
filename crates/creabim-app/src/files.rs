@@ -203,6 +203,14 @@ pub struct Settings {
     /// the horizon.
     pub sun_azimuth: f64,
     pub sun_altitude: f64,
+    /// How dark the 3D view's shadows are, and how much its corners are
+    /// shaded (0..1).
+    pub shadow_strength_3d: f32,
+    pub occlusion_strength_3d: f32,
+    /// The sun turns with the view, standing `sun_view_angle` degrees to
+    /// the viewer's right of behind them, so its shadow always shows.
+    pub sun_follows_view: bool,
+    pub sun_view_angle: f64,
     /// Width of the Help panel, in points.
     pub help_width: f32,
     /// Which sections of Properties are open, by key, where it differs
@@ -296,6 +304,10 @@ impl Default for Settings {
             occlusion_3d: false,
             sun_azimuth: 150.0,
             sun_altitude: 40.0,
+            shadow_strength_3d: 0.7,
+            occlusion_strength_3d: 0.7,
+            sun_follows_view: true,
+            sun_view_angle: 60.0,
             help_width: 400.0,
             props_open: Default::default(),
             tools_tab: 0,

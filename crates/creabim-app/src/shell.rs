@@ -2325,11 +2325,22 @@ impl CreaBimApp {
                     Some((az, alt)) => {
                         let s = &mut self.shell.settings;
                         (s.sun_azimuth, s.sun_altitude) = (az, alt);
+                        s.sun_follows_view = false;
                         if !s.shadows_3d && s.render_3d != RenderMode::WhiteModel {
                             s.shadows_3d = true;
                         }
                         s.store();
                         self.status = format!("The sun {az:.0}° from true north, {alt:.0}° high.");
+                    }
+                    None if arg == "follow" => {
+                        let s = &mut self.shell.settings;
+                        s.sun_follows_view = !s.sun_follows_view;
+                        s.store();
+                        self.status = if s.sun_follows_view {
+                            "The sun turns with the view: the shadow always falls to the left and away.".into()
+                        } else {
+                            "The real sun, from the project's true north.".into()
+                        };
                     }
                     None => self.sun_dialog = true,
                 }
@@ -3098,7 +3109,11 @@ impl CreaBimApp {
         };
         let sun = |key: &str, label: &str, az: f64, alt: f64| {
             Item::new(format!("sun:{key}"), label)
-                .checked((s.sun_azimuth - az).abs() < 0.5 && (s.sun_altitude - alt).abs() < 0.5)
+                .checked(
+                    !s.sun_follows_view
+                        && (s.sun_azimuth - az).abs() < 0.5
+                        && (s.sun_altitude - alt).abs() < 0.5,
+                )
                 .hint(format!("The sun {az:.0}° from true north, {alt:.0}° high"))
         };
         vec![
@@ -3114,12 +3129,15 @@ impl CreaBimApp {
             Item::sub(
                 "Sun position",
                 vec![
+                    Item::new("sun:follow", "Turn with the view")
+                        .checked(s.sun_follows_view)
+                        .hint("The sun keeps to the same side of the view as you orbit, so the shadow always shows"),
                     sun("morning", "Morning (east, low)", 100.0, 25.0),
                     sun("noon", "Midday (south, high)", 180.0, 60.0),
                     sun("afternoon", "Afternoon (south-west)", 225.0, 40.0),
                     sun("evening", "Evening (west, low)", 265.0, 18.0),
-                    Item::new("sun:dialog", "Set azimuth and height…")
-                        .hint("Type where the sun stands, in degrees"),
+                    Item::new("sun:dialog", "Sun and shadows…")
+                        .hint("Where the sun stands, and how strong the shadows and the shading of corners are"),
                 ],
             )
             .icon("sun"),

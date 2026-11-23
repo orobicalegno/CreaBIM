@@ -114,6 +114,8 @@ pub struct Lighting {
     pub white: bool,
     /// Toward the sun, in model coordinates.
     pub sun: [f32; 3],
+    /// How dark the shadows are, 0 none to 1 full.
+    pub shadow_strength: f32,
 }
 
 impl Default for Lighting {
@@ -123,6 +125,7 @@ impl Default for Lighting {
             ambient_occlusion: 0.0,
             white: false,
             sun: [0.4, -0.6, 0.85],
+            shadow_strength: 0.7,
         }
     }
 }
@@ -246,14 +249,19 @@ fn sky_light(p: vec3<f32>, n: vec3<f32>) -> f32 {
         // the sky from this side, as much as the face looks toward it
         let m = u.sky_vp[k];
         let toward = normalize(vec3<f32>(m[0].z, m[1].z, m[2].z));
-        let facing = 0.35 + 0.65 * max(dot(n, -toward), 0.0);
+        // a face turned away from this side of the sky takes nothing from it
+        let look = dot(n, -toward);
+        if (look < 0.08) { continue; }
+        let facing = look;
+        // the map's cell, in metres, measured along a face this slanted
+        let slack = 0.10 + u.flags.w / 2048.0 * 3.0 / max(look, 0.25);
         var occ = 0.0;
         for (var t = 0; t < 4; t++) {
             let o = vec2<f32>(f32(t % 2) - 0.5, f32(t / 2) - 0.5) * 3.0;
             let c = clamp(vec2<i32>(q.xy * 1024.0 + o), vec2<i32>(0), vec2<i32>(1023));
             let d = dot(textureLoad(sky_map, c, k, 0), vec4<f32>(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
             let gap = (q.z - d) * u.flags.w;
-            if (gap > 0.18) { occ += exp(-gap / 2.5); }
+            if (gap > slack) { occ += exp(-gap / 2.5); }
         }
         s += facing * (1.0 - occ / 4.0);
         w += facing;
@@ -304,13 +312,14 @@ struct VOut {
     let rough = clamp(i.surface.x, 0.04, 1.0);
     let metal = clamp(i.surface.y, 0.0, 1.0);
     let base = pow(i.color, vec3<f32>(2.2));
-    let sh = sun_light(i.world, n);
+    // the shadow as strong as asked
+    let sh = mix(1.0, sun_light(i.world, n), u.ground.w);
     let ao = sky_light(i.world, n);
     let diffuse = max(dot(n, l), 0.0) * sh;
     let sky = 0.5 + 0.5 * n.z;
     if (u.flags.z > 0.5) {
-        // the white model: soft sky, the sun's light and shadow, no shine
-        let w = base * ((0.28 + 0.40 * sky) * ao * ao + 0.50 * diffuse * (0.6 + 0.4 * ao));
+        // the white model: bright sky, the sun's light and shadow, no shine
+        let w = base * ((0.36 + 0.30 * sky) * ao + 0.55 * diffuse);
         return vec4<f32>(pow(max(w, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2)), clamp(i.surface.z, 0.05, 1.0));
     }
     let lit = base * (1.0 - metal) * ((0.30 + 0.25 * sky) * ao + 0.55 * diffuse);
@@ -338,7 +347,7 @@ struct VOut {
     let n = vec3<f32>(0.0, 0.0, 1.0);
     let sh = sun_light(i.world, n);
     let ao = sky_light(i.world, n);
-    let k = (1.0 - 0.38 * (1.0 - sh)) * (0.40 + 0.60 * ao * ao);
+    let k = (1.0 - 0.62 * u.ground.w * (1.0 - sh)) * (0.35 + 0.65 * ao);
     return vec4<f32>(u.ground.rgb * k, 1.0);
 }
 "#;
@@ -1142,7 +1151,7 @@ impl Viewport3d {
                 background[0] as f32,
                 background[1] as f32,
                 background[2] as f32,
-                1.0,
+                lighting.shadow_strength.clamp(0.0, 1.0),
             ],
         };
         rs.queue

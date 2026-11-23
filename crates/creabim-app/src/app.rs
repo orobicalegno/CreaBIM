@@ -2789,7 +2789,7 @@ impl CreaBimApp {
                 let s = &mut self.shell.settings;
                 egui::Grid::new("sun_grid").num_columns(2).show(ui, |ui| {
                     ui.label("Azimuth")
-                        .on_hover_text("Degrees clockwise from the project's true north: 90 east, 180 south, 270 west");
+                        .on_hover_text("Degrees clockwise from the project's true north: 90 east, 180 south, 270 west (when the sun does not turn with the view)");
                     ui.add(
                         egui::DragValue::new(&mut s.sun_azimuth)
                             .range(0.0..=360.0)
@@ -2807,8 +2807,31 @@ impl CreaBimApp {
                     ui.end_row();
                 });
                 ui.add(egui::Slider::new(&mut s.sun_azimuth, 0.0..=360.0).show_value(false));
+                ui.checkbox(&mut s.sun_follows_view, "Turn with the view")
+                    .on_hover_text("The sun stays at the same side of the view as you orbit, so the shadow always falls to the left and away, where it shows. Off: the real sun, from the project's true north");
+                if s.sun_follows_view {
+                    ui.horizontal(|ui| {
+                        ui.label("From the right")
+                            .on_hover_text("Degrees from behind you toward your right: 0 the sun at your back, 90 at your right");
+                        ui.add(
+                            egui::DragValue::new(&mut s.sun_view_angle)
+                                .range(-180.0..=180.0)
+                                .speed(1.0)
+                                .suffix("°"),
+                        );
+                    });
+                }
+                ui.separator();
                 ui.checkbox(&mut s.shadows_3d, "Sun shadows");
+                ui.horizontal(|ui| {
+                    ui.label("Shadow strength");
+                    ui.add(egui::Slider::new(&mut s.shadow_strength_3d, 0.0..=1.0));
+                });
                 ui.checkbox(&mut s.occlusion_3d, "Ambient occlusion");
+                ui.horizontal(|ui| {
+                    ui.label("Occlusion strength");
+                    ui.add(egui::Slider::new(&mut s.occlusion_strength_3d, 0.0..=1.0));
+                });
                 ui.separator();
                 close = ui.button("Close").clicked();
             });
@@ -2854,12 +2877,24 @@ impl CreaBimApp {
             ambient_occlusion: if wire {
                 0.0
             } else if s.occlusion_3d || white {
-                0.85
+                s.occlusion_strength_3d.clamp(0.0, 1.0)
             } else {
                 0.0
             },
             white,
-            sun: sun_direction(s.sun_azimuth, s.sun_altitude, north),
+            sun: if s.sun_follows_view {
+                // toward the sun: from behind the viewer, turned to their
+                // right, so the shadow falls to the left and away
+                let look = (self.camera.target - self.camera.eye()).truncate();
+                let back = (-look).normalize_or(glam::Vec2::NEG_Y);
+                let toward =
+                    glam::Vec2::from_angle(s.sun_view_angle.to_radians() as f32).rotate(back);
+                let alt = (s.sun_altitude.clamp(1.0, 90.0) as f32).to_radians();
+                [toward.x * alt.cos(), toward.y * alt.cos(), alt.sin()]
+            } else {
+                sun_direction(s.sun_azimuth, s.sun_altitude, north)
+            },
+            shadow_strength: s.shadow_strength_3d,
         }
     }
 

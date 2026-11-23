@@ -105,8 +105,11 @@ pub fn plan(model: &Model, v: &View, level: ElementId, cut: f64) -> PlanView {
         return from_above(model, v, level, cut);
     }
     let mut d = crate::plan::plan_view_with(model, level, cut, &v.graphics);
-    if let Some(sh) = v.look.cues.shadows.or(white_sun(v)) {
-        cast_shadows(model, level, cut, sh, &mut d.items);
+    {
+        let style = v.style;
+        let sun = v.look.cues.shadows_for(style, true);
+        let occlusion = v.look.cues.occlusion_for(style);
+        cast_shadows(model, level, cut, sun, occlusion, &mut d.items);
     }
     if !r.spans_levels() {
         return d;
@@ -196,15 +199,10 @@ pub fn from_above_span(model: &Model, v: &View, level: ElementId, _cut: f64) -> 
     (top, bottom.min(top - 0.01))
 }
 
-/// The sun a white model plan takes when its look sets none.
-fn white_sun(v: &View) -> Option<creabim_core::styles::Shadows> {
-    (v.style == creabim_core::ViewStyle::White).then_some(crate::section::WHITE_SUN)
-}
-
 /// How fine a cut plan's shadows are drawn, metres a pixel, and the most
 /// pixels their image may take each way.
-const SHADOW_PIXEL: f64 = 0.02;
-const SHADOW_MAX_PIXELS: usize = 3000;
+const SHADOW_PIXEL: f64 = 0.01;
+const SHADOW_MAX_PIXELS: usize = 4000;
 
 /// The sun's shadows on a cut plan: what stands on the floor, up to the cut,
 /// throws its shadow along the look's direction, each point by its height.
@@ -215,21 +213,39 @@ fn cast_shadows(
     model: &Model,
     level: ElementId,
     cut: f64,
-    sh: creabim_core::styles::Shadows,
+    sh: Option<creabim_core::styles::Shadows>,
+    occlusion: f32,
     items: &mut Vec<PlanItem>,
 ) {
+    let occlusion = occlusion.clamp(0.0, 1.0);
+    if sh.is_none() && occlusion <= 0.0 {
+        return;
+    }
     let floor = model.level(level).map_or(0.0, |l| l.elevation);
     let top = floor + cut;
-    let dir = DVec2::from_angle(sh.direction.to_radians()) * sh.length;
-    let ground = |id: ElementId| {
-        matches!(
+    let dir = sh.map_or(DVec2::ZERO, |sh| {
+        DVec2::from_angle(sh.direction.to_radians()) * sh.length
+    });
+    // what lies on or under the floor, and the spaces and ceilings (volumes
+    // of air, not things), throw no shadow
+    let casts = |id: ElementId| {
+        !matches!(
             model.get(id).map(|e| &e.kind),
-            Some(ElementKind::Slab(_) | ElementKind::Site(_))
+            Some(
+                ElementKind::Slab(_)
+                    | ElementKind::Site(_)
+                    | ElementKind::Room(_)
+                    | ElementKind::Ceiling(_)
+                    | ElementKind::Opening(_)
+                    | ElementKind::Shaft(_)
+            )
         )
     };
-    let mut tris: Vec<[DVec2; 3]> = Vec::new();
+    // each triangle thrown along the sun, and as it stands (its footprint)
+    let mut thrown: Vec<[DVec2; 3]> = Vec::new();
+    let mut foot: Vec<[DVec2; 3]> = Vec::new();
     for s in crate::scene::drawn_scene(model) {
-        if ground(s.id) {
+        if s.ghost || s.is_lining() || !casts(s.id) {
             continue;
         }
         for t in s.mesh.indices.chunks(3) {
@@ -238,64 +254,94 @@ fn cast_shadows(
             let (lo, hi) = t
                 .iter()
                 .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.z), b.max(p.z)));
-            // standing on this floor, reaching above it, starting below the cut
-            if hi <= floor + 0.02 || lo >= top || lo < floor - 0.05 {
+            // reaching above the floor and starting below the cut (a wall
+            // from its footing up counts from the floor)
+            if hi <= floor + 0.02 || lo >= top {
                 continue;
             }
-            let q = t.map(|p| p.truncate() + dir * (p.z.min(top) - floor).max(0.0));
-            if (q[1] - q[0]).perp_dot(q[2] - q[0]).abs() > 1e-8 {
-                tris.push(q);
+            let flat = t.map(|p| p.truncate());
+            if (flat[1] - flat[0]).perp_dot(flat[2] - flat[0]).abs() > 1e-8 {
+                foot.push(flat);
+            }
+            let q = t.map(|p| p.truncate() + dir * (p.z.clamp(floor, top) - floor));
+            if sh.is_some() && (q[1] - q[0]).perp_dot(q[2] - q[0]).abs() > 1e-8 {
+                thrown.push(q);
             }
         }
     }
-    if tris.is_empty() {
+    if thrown.is_empty() && foot.is_empty() {
         return;
     }
     let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
-    for p in tris.iter().flatten() {
+    for p in thrown.iter().chain(foot.iter()).flatten() {
         lo = lo.min(*p);
         hi = hi.max(*p);
     }
-    // room round the edge for the blur
-    let blur = 0.06;
-    lo -= DVec2::splat(blur * 3.0);
-    hi += DVec2::splat(blur * 3.0);
+    // room round the edge for the softening
+    let reach = 0.35;
+    lo -= DVec2::splat(reach);
+    hi += DVec2::splat(reach);
     let span = hi - lo;
     let px = SHADOW_PIXEL.max(span.max_element() / SHADOW_MAX_PIXELS as f64);
     let (w, h) = (
         (span.x / px).ceil() as usize + 1,
         (span.y / px).ceil() as usize + 1,
     );
-    // what the shadows cover, row 0 at the top
-    let mut mask = vec![0f32; w * h];
-    for t in &tris {
-        let c = t.map(|p| DVec2::new((p.x - lo.x) / px, (hi.y - p.y) / px));
-        let (a, b) = (
-            c.iter().fold(DVec2::splat(f64::MAX), |m, p| m.min(*p)),
-            c.iter().fold(DVec2::splat(f64::MIN), |m, p| m.max(*p)),
-        );
-        let area = (c[1] - c[0]).perp_dot(c[2] - c[0]);
-        for y in (a.y.floor().max(0.0) as usize)..=(b.y.ceil() as usize).min(h - 1) {
-            for x in (a.x.floor().max(0.0) as usize)..=(b.x.ceil() as usize).min(w - 1) {
-                let p = DVec2::new(x as f64 + 0.5, y as f64 + 0.5);
-                let e = |i: usize, j: usize| (c[j] - c[i]).perp_dot(p - c[i]) * area.signum();
-                if e(0, 1) >= 0.0 && e(1, 2) >= 0.0 && e(2, 0) >= 0.0 {
-                    mask[y * w + x] = 1.0;
+    // what triangles cover, row 0 at the top
+    let cover = |tris: &[[DVec2; 3]]| {
+        let mut mask = vec![0f32; w * h];
+        for t in tris {
+            let c = t.map(|p| DVec2::new((p.x - lo.x) / px, (hi.y - p.y) / px));
+            let (a, b) = (
+                c.iter().fold(DVec2::splat(f64::MAX), |m, p| m.min(*p)),
+                c.iter().fold(DVec2::splat(f64::MIN), |m, p| m.max(*p)),
+            );
+            let area = (c[1] - c[0]).perp_dot(c[2] - c[0]);
+            for y in (a.y.floor().max(0.0) as usize)..=(b.y.ceil() as usize).min(h - 1) {
+                for x in (a.x.floor().max(0.0) as usize)..=(b.x.ceil() as usize).min(w - 1) {
+                    let p = DVec2::new(x as f64 + 0.5, y as f64 + 0.5);
+                    let e = |i: usize, j: usize| (c[j] - c[i]).perp_dot(p - c[i]) * area.signum();
+                    if e(0, 1) >= 0.0 && e(1, 2) >= 0.0 && e(2, 0) >= 0.0 {
+                        mask[y * w + x] = 1.0;
+                    }
                 }
             }
         }
-    }
-    // soft edges: a box blur, twice, each way
-    let r = ((blur / px).round() as usize).max(1);
-    for _ in 0..2 {
-        mask = box_blur(&mask, w, h, r, true);
-        mask = box_blur(&mask, w, h, r, false);
-    }
-    let alpha = sh.opacity.clamp(0.0, 1.0) * 255.0;
+        mask
+    };
+    let soften = |mut mask: Vec<f32>, metres: f64| {
+        let r = ((metres / px).round() as usize).max(1);
+        for _ in 0..2 {
+            mask = box_blur(&mask, w, h, r, true);
+            mask = box_blur(&mask, w, h, r, false);
+        }
+        mask
+    };
+    // the shadows crisp, only just softened
+    let shadow = if thrown.is_empty() {
+        vec![0f32; w * h]
+    } else {
+        soften(cover(&thrown), 0.012)
+    };
+    // the floor darkening toward what stands on it: the footprint spread
+    // out, kept off the footprint itself
+    let standing = cover(&foot);
+    let gather = if occlusion > 0.0 {
+        soften(standing.clone(), 0.12)
+    } else {
+        vec![0f32; w * h]
+    };
+    let strength = sh.map_or(0.0, |s| s.opacity.clamp(0.0, 1.0));
     let mut rgba = Vec::with_capacity(w * h * 4);
     let mut key = 0xcbf2_9ce4_8422_2325u64;
-    for m in &mask {
-        let a = (m * alpha).round() as u8;
+    for i in 0..w * h {
+        let ao = if standing[i] > 0.5 {
+            0.0
+        } else {
+            (gather[i] * 1.6).min(1.0) * occlusion * 0.45
+        };
+        let dark = 1.0 - (1.0 - shadow[i] * strength) * (1.0 - ao);
+        let a = (dark * 255.0).round() as u8;
         rgba.extend_from_slice(&[20, 22, 28, a]);
         key = (key ^ a as u64).wrapping_mul(0x100_0000_01b3);
     }
@@ -312,6 +358,12 @@ fn cast_shadows(
         clip: None,
     };
     // over the floors and rooms, under everything else
+    let ground = |id: ElementId| {
+        matches!(
+            model.get(id).map(|e| &e.kind),
+            Some(ElementKind::Slab(_) | ElementKind::Site(_))
+        )
+    };
     let under = |it: &PlanItem| {
         matches!(it, PlanItem::Room { .. } | PlanItem::Tint { .. })
             || !matches!(
@@ -332,7 +384,7 @@ fn cast_shadows(
 
 /// `src` (`w` by `h`) averaged over `2r + 1` pixels along its rows, or its
 /// columns.
-fn box_blur(src: &[f32], w: usize, h: usize, r: usize, rows: bool) -> Vec<f32> {
+pub(crate) fn box_blur(src: &[f32], w: usize, h: usize, r: usize, rows: bool) -> Vec<f32> {
     let mut out = vec![0f32; src.len()];
     let (n, lines) = if rows { (w, h) } else { (h, w) };
     let at = |line: usize, i: usize| if rows { line * w + i } else { i * w + line };
@@ -377,7 +429,7 @@ fn from_above(model: &Model, v: &View, level: ElementId, cut: f64) -> PlanView {
             .filter(|t| t.iter().all(|p| p.z <= top - 1e-4 && p.z >= bottom - 1e-6))
             .collect()
     };
-    if let Some(sh) = v.look.cues.shadows.or(white_sun(v)) {
+    if let Some(sh) = v.look.cues.shadows_for(v.style, true) {
         let dir = DVec2::from_angle(sh.direction.to_radians()) * sh.length;
         let grey = 1.0 - sh.opacity.clamp(0.0, 1.0);
         for s in &scene {
