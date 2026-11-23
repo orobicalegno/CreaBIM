@@ -823,23 +823,35 @@ pub(crate) fn hidden_lines_lit(
 ) -> (Vec<PlanItem>, Option<PlanItem>) {
     let shade = style.shades();
     let wire = style == ViewStyle::Wireframe;
-    let white = style == ViewStyle::White;
+    let white = style.is_model();
+    let maquette = style == ViewStyle::Maquette;
     let mut faces = project_faces(scene, project, depth);
+    // which faces are wood, by their place in the scene
+    let wood: Vec<bool> = scene.iter().map(|s| maquette && lit.is_wood(s)).collect();
     if white {
-        // white card, the glass a darker grey-blue
-        let glass: HashSet<ElementId> = scene
-            .iter()
-            .filter(|s| s.surface[2] < 0.999)
-            .map(|s| s.id)
-            .collect();
-        for f in &mut faces {
-            f.1 = if glass.contains(&f.0) {
-                [0.50, 0.55, 0.60]
+        // white card, the glass a darker grey-blue; the maquette's wood
+        // in its own colour
+        for (k, f) in faces.iter_mut().enumerate() {
+            f.1 = if scene[k].surface[2] < 0.999 {
+                if maquette {
+                    [0.62, 0.68, 0.72]
+                } else {
+                    [0.50, 0.55, 0.60]
+                }
+            } else if wood[k] {
+                f.1.map(|c| (c * 1.08).min(1.0))
+            } else if maquette {
+                [0.99, 0.99, 0.985]
             } else {
                 [0.97, 0.97, 0.96]
             };
         }
     }
+    let light = if maquette {
+        (MAQUETTE_AMBIENT, MAQUETTE_SUN_SHARE)
+    } else {
+        (WHITE_AMBIENT, WHITE_SUN_SHARE)
+    };
     let (mut lo, mut hi) = extents(&faces, crop);
     // room round the model for its shadow on the ground
     if let (true, Some(sh)) = (shade, lit.sun) {
@@ -854,12 +866,12 @@ pub(crate) fn hidden_lines_lit(
         .and_then(sun_toward)
         .filter(|_| white)
         .map(|s| (project(s) - o).normalize_or_zero());
-    let mut zbuf = DepthBuffer::render_lit(&faces, lo, hi, shade, sun_view);
+    let mut zbuf = DepthBuffer::render_lit(&faces, lo, hi, shade, sun_view, light);
     if reveal.is_some() {
         zbuf.render_backs(&faces);
     }
     if shade && (lit.sun.is_some() || lit.occlusion > 0.0) {
-        zbuf.cast_sun(scene, project, lit, white);
+        zbuf.cast_sun(scene, project, &lit, white, light, &wood);
     }
     let image = zbuf.image();
     let zbuf = &zbuf;
@@ -872,10 +884,15 @@ pub(crate) fn hidden_lines_lit(
         (project(DVec3::Y).z - o.z) as f32,
         (project(DVec3::Z).z - o.z) as f32,
     );
+    // the joints between like faces left out, when the look says so
+    let joints = (!lit.joints && !wire).then(|| crate::flush::FlushIndex::new(scene));
     let per_item = par_map(scene, |index, s| {
         let mut items = Vec::new();
         let revealed = reveal.is_some_and(|r| r.contains(&s.id));
         for (a, b) in feature_edges_seen(s, view) {
+            if joints.as_ref().is_some_and(|j| j.is_joint(index, a, b)) {
+                continue;
+            }
             let Some((a, b)) = clip_segment(project(a), project(b), 1e-4, depth) else {
                 continue;
             };
@@ -1031,7 +1048,7 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 style,
                 v.scale,
                 reveal,
-                Lit::of(v, style, false),
+                Lit::of(model, v, style, false),
             );
             // rooms washed behind the cut, from floor to ceiling
             if v.room_colours && *cut {
@@ -1051,7 +1068,7 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 style,
                 reveal,
                 &crop,
-                Lit::of(v, style, false),
+                Lit::of(model, v, style, false),
             )
         }
         creabim_core::ViewKind::Perspective {
@@ -1161,8 +1178,8 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
         }
     }
     // the white model over whatever the drawing style coloured
-    if style == ViewStyle::White {
-        whiten(model, &mut d.items);
+    if style.is_model() {
+        whiten(model, &mut d.items, style == ViewStyle::Maquette);
     }
     Some(d)
 }
@@ -1761,25 +1778,61 @@ struct DepthBuffer {
 const WHITE_AMBIENT: f64 = 0.68;
 const WHITE_SUN_SHARE: f64 = 0.45;
 
+/// The maquette's light: brighter still.
+const MAQUETTE_AMBIENT: f64 = 0.80;
+const MAQUETTE_SUN_SHARE: f64 = 0.34;
+
 /// How a shaded view is lit: the sun's shadows and how much its corners
 /// are shaded.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Lit {
     pub sun: Option<creabim_core::styles::Shadows>,
     pub occlusion: f32,
-    /// The sun is the white model's own: a 3D view turns it with the view,
+    /// The sun is the model style's own: a 3D view turns it with the view,
     /// so the shadow always falls to the left and away, where it shows.
     pub follows_view: bool,
+    /// Draw the joints between like faces in one plane.
+    pub joints: bool,
+    /// The scene's wooden items (by element and layer), for the maquette.
+    pub wood: std::sync::Arc<HashSet<(ElementId, Option<usize>)>>,
+}
+
+impl Default for Lit {
+    fn default() -> Self {
+        Self {
+            sun: None,
+            occlusion: 0.0,
+            follows_view: false,
+            joints: true,
+            wood: Default::default(),
+        }
+    }
 }
 
 impl Lit {
     /// As view `v` in `style` has it (`plan` for a plan's shorter sun).
-    pub fn of(v: &creabim_core::View, style: ViewStyle, plan: bool) -> Self {
+    pub fn of(model: &Model, v: &creabim_core::View, style: ViewStyle, plan: bool) -> Self {
+        let wood = if style == ViewStyle::Maquette {
+            crate::scene::shared_scene(model)
+                .iter()
+                .filter(|s| crate::scene::is_wood(model, s))
+                .map(|s| (s.id, s.layer.as_ref().map(|l| l.index)))
+                .collect()
+        } else {
+            HashSet::new()
+        };
         Self {
             sun: v.look.cues.shadows_for(style, plan),
             occlusion: v.look.cues.occlusion_for(style),
             follows_view: v.look.cues.shadows.is_none(),
+            joints: v.look.cues.joints_for(style),
+            wood: std::sync::Arc::new(wood),
         }
+    }
+
+    fn is_wood(&self, s: &SceneItem) -> bool {
+        self.wood
+            .contains(&(s.id, s.layer.as_ref().map(|l| l.index)))
     }
 }
 
@@ -1788,7 +1841,14 @@ const EMPTY: u32 = u32::MAX;
 
 /// A drawing in the white model style: what is cut solid dark grey, no
 /// colours on rooms and hidden elements, coloured surfaces white.
-pub fn whiten(model: &Model, items: &mut Vec<PlanItem>) {
+pub fn whiten(model: &Model, items: &mut Vec<PlanItem>, maquette: bool) {
+    let cut = if maquette { 0.45 } else { 0.26 };
+    let wood = |id: ElementId| {
+        maquette
+            && model
+                .get(id)
+                .is_some_and(|e| crate::scene::is_wood_element(model, e))
+    };
     // drafting (sketches, notes, marks) keeps its own fills
     let drafted = |id: ElementId| {
         !matches!(
@@ -1847,18 +1907,28 @@ pub fn whiten(model: &Model, items: &mut Vec<PlanItem>) {
         match it {
             PlanItem::Fill { id, hatch, rgb, .. } if !drafted(*id) => {
                 *hatch = creabim_core::Hatch::Solid;
-                *rgb = Some([0.26, 0.26, 0.28]);
+                *rgb = Some([cut, cut, cut + 0.02]);
             }
             PlanItem::Room { rgb, .. } => *rgb = None,
             // a shadow is grey and stays; a coloured surface goes white
             PlanItem::Shade { id, rgb, .. }
-                if !drafted(*id) && !(rgb[0] == rgb[1] && rgb[1] == rgb[2]) =>
+                if !drafted(*id) && !wood(*id) && !(rgb[0] == rgb[1] && rgb[1] == rgb[2]) =>
             {
                 *rgb = [0.97, 0.97, 0.96];
             }
             _ => {}
         }
     }
+}
+
+/// The grain of wood at a point: long streaks, wavering, and a fine
+/// mottle, as a factor round 1.
+fn grain(p: DVec3) -> f64 {
+    let along = p.x * 0.8 + p.y * 0.6;
+    let waver = (p.z * 2.3 + p.x * 1.7 + p.y * 1.1).sin() * 2.5;
+    let streak = 0.5 + 0.5 * (along * 9.0 + waver).sin();
+    let fine = 0.5 + 0.5 * (along * 41.0 + waver * 3.0 + p.z * 17.0).sin();
+    0.86 + 0.09 * streak + 0.05 * fine
 }
 
 /// Toward the sun, in model terms, from a look's shadows: they fall
@@ -1875,13 +1945,20 @@ const LIGHT: DVec3 = DVec3::new(-0.45, 0.65, -0.62);
 
 impl DepthBuffer {
     fn render(faces: &Faces, lo: DVec2, hi: DVec2, shade: bool) -> Self {
-        Self::render_lit(faces, lo, hi, shade, None)
+        Self::render_lit(faces, lo, hi, shade, None, (WHITE_AMBIENT, WHITE_SUN_SHARE))
     }
 
     /// [`DepthBuffer::render`], with `sun` (toward it, in view terms)
     /// lighting the faces as the white model's are, instead of the fixed
     /// light from the upper left.
-    fn render_lit(faces: &Faces, lo: DVec2, hi: DVec2, shade: bool, sun: Option<DVec3>) -> Self {
+    fn render_lit(
+        faces: &Faces,
+        lo: DVec2,
+        hi: DVec2,
+        shade: bool,
+        sun: Option<DVec3>,
+        (ambient, sun_share): (f64, f64),
+    ) -> Self {
         let size = hi - lo;
         let px = (size.x.max(size.y) / 2048.0).max(0.005);
         let w = (size.x / px).ceil() as usize + 1;
@@ -1918,7 +1995,7 @@ impl DepthBuffer {
                                 n = -n;
                             }
                             let f = n.dot(s).max(0.0);
-                            (WHITE_AMBIENT + WHITE_SUN_SHARE * f, f as f32)
+                            (ambient + sun_share * f, f as f32)
                         }
                         None => (0.55 + 0.45 * n.dot(light).abs(), 0.0),
                     };
@@ -1983,8 +2060,10 @@ impl DepthBuffer {
         &mut self,
         scene: &[SceneItem],
         project: &(dyn Fn(DVec3) -> DVec3 + Sync),
-        lit: Lit,
+        lit: &Lit,
         white: bool,
+        (ambient, sun_share): (f64, f64),
+        wood: &[bool],
     ) {
         let o = project(DVec3::ZERO);
         let a = glam::DMat3::from_cols(
@@ -2169,6 +2248,7 @@ impl DepthBuffer {
         let shade_of = |i: usize| shading[i] as f64;
         let facing = &self.facing;
         let depth = &self.depth;
+        let nearest = &self.nearest;
         let Some(rgba) = self.rgba.as_mut() else {
             return;
         };
@@ -2188,9 +2268,13 @@ impl DepthBuffer {
                                 // the sky's share shaded in corners, the
                                 // sun's where it reaches
                                 let f = facing[i] as f64;
-                                let was = WHITE_AMBIENT + WHITE_SUN_SHARE * f;
-                                let now = WHITE_AMBIENT * ao + WHITE_SUN_SHARE * f * sun_in;
-                                let k = now / was;
+                                let was = ambient + sun_share * f;
+                                let now = ambient * ao + sun_share * f * sun_in;
+                                let mut k = now / was;
+                                // the maquette's wood in its grain
+                                if wood.get(nearest[i] as usize).copied().unwrap_or(false) {
+                                    k *= grain(p);
+                                }
                                 for c in &mut px4[..3] {
                                     *c = (*c as f64 * k).round().clamp(0.0, 255.0) as u8;
                                 }
@@ -2826,7 +2910,7 @@ mod tests {
                 opacity: 0.6,
             }),
             occlusion: 0.5,
-            follows_view: false,
+            ..Lit::default()
         });
         // the ground's shadow: see-through dark where nothing stood before
         assert!(lit

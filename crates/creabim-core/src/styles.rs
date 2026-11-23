@@ -445,6 +445,11 @@ pub struct DepthCues {
     /// style's own (the white model's 0.6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occlusion: Option<f32>,
+    /// Draw the line where two faces of one material carry on in one plane
+    /// (a wall on a wall); none takes the style's own (the model styles
+    /// leave them out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joints: Option<bool>,
 }
 
 impl DepthCues {
@@ -452,22 +457,52 @@ impl DepthCues {
     /// model's sun (for plans `plan` true, shorter). A strength of 0 turns
     /// them off.
     pub fn shadows_for(&self, style: crate::ViewStyle, plan: bool) -> Option<Shadows> {
-        let white = style == crate::ViewStyle::White;
         self.shadows
-            .or(white.then_some(if plan { WHITE_PLAN_SUN } else { WHITE_SUN }))
+            .or(own_sun(style, plan))
             .filter(|s| s.opacity > 0.0)
     }
 
     /// How much a view in `style` shades its corners.
     pub fn occlusion_for(&self, style: crate::ViewStyle) -> f32 {
-        let own = if style == crate::ViewStyle::White {
-            0.6
-        } else {
-            0.0
+        let own = match style {
+            crate::ViewStyle::White => 0.6,
+            crate::ViewStyle::Maquette => 0.5,
+            _ => 0.0,
         };
         self.occlusion.unwrap_or(own).clamp(0.0, 1.0)
     }
+
+    /// Whether a view in `style` draws the joints between like faces.
+    pub fn joints_for(&self, style: crate::ViewStyle) -> bool {
+        self.joints.unwrap_or(!style.is_model())
+    }
 }
+
+/// The sun a view in `style` takes when its look sets none (`plan` for a
+/// plan's shorter one): the model styles' own.
+pub fn own_sun(style: crate::ViewStyle, plan: bool) -> Option<Shadows> {
+    match (style, plan) {
+        (crate::ViewStyle::White, false) => Some(WHITE_SUN),
+        (crate::ViewStyle::White, true) => Some(WHITE_PLAN_SUN),
+        (crate::ViewStyle::Maquette, false) => Some(MAQUETTE_SUN),
+        (crate::ViewStyle::Maquette, true) => Some(MAQUETTE_PLAN_SUN),
+        _ => None,
+    }
+}
+
+/// The maquette's sun: strong, its shadows light and soft.
+pub const MAQUETTE_SUN: Shadows = Shadows {
+    direction: 50.0,
+    length: 1.0,
+    opacity: 0.42,
+};
+
+/// The maquette's sun on a plan.
+pub const MAQUETTE_PLAN_SUN: Shadows = Shadows {
+    direction: -45.0,
+    length: 0.35,
+    opacity: 0.32,
+};
 
 /// The sun a white model section, elevation or 3D view takes when its look
 /// sets none: from the south-west, shadows falling north-east.

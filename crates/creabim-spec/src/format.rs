@@ -890,6 +890,7 @@ spec_enum! {
         Shaded = "shaded",
         Wireframe = "wireframe",
         White = "white",
+        Maquette = "maquette",
     }
 }
 

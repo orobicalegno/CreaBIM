@@ -1175,6 +1175,53 @@ pub fn edit_mesh_to_tri(mesh: &creabim_core::EditMesh, origin: DVec3) -> TriMesh
     m
 }
 
+/// Is the item wood (its layer's material, else its element's): by the
+/// material's category, its timber hatch or its name. The maquette shows
+/// wood in its own grain.
+pub fn is_wood(model: &Model, item: &SceneItem) -> bool {
+    let layer = item
+        .layer
+        .as_ref()
+        .and_then(|l| l.material)
+        .and_then(|m| model.get(m))
+        .and_then(|e| match &e.kind {
+            ElementKind::Material(m) => Some((e, m)),
+            _ => None,
+        });
+    if let Some((e, m)) = layer {
+        return wooden(e, m);
+    }
+    model
+        .get(item.id)
+        .is_some_and(|e| is_wood_element(model, e))
+}
+
+/// Is element `e` of wood, by its material.
+pub fn is_wood_element(model: &Model, e: &Element) -> bool {
+    creabim_core::marks::material_of(model, e).is_some_and(|(e, m)| wooden(e, m))
+}
+
+fn wooden(e: &Element, m: &creabim_core::Material) -> bool {
+    if m.hatch == creabim_core::Hatch::Timber {
+        return true;
+    }
+    // a material's own category says, when it has one (wood fibre
+    // insulation is insulation)
+    let category = m.category.to_lowercase();
+    if !category.is_empty() {
+        return ["wood", "timber", "legno"]
+            .iter()
+            .any(|w| category.contains(w));
+    }
+    let words = format!("{} {}", e.name, m.description).to_lowercase();
+    [
+        "wood", "timber", "legno", "oak", "larch", "pine", "spruce", "beech", "walnut", "rovere",
+        "larice", "abete", "faggio", "noce", "plywood", "glulam",
+    ]
+    .iter()
+    .any(|w| words.contains(w))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -36,16 +36,25 @@ pub enum RenderMode {
     /// An architect's white model: every surface white, soft sky light,
     /// sun shadows and shading in the corners, faint edges.
     WhiteModel,
+    /// A study model of card and wood: bright white, the wood in its own
+    /// grain, strong soft light, faint lines.
+    Maquette,
 }
 
 impl RenderMode {
-    pub const ALL: [RenderMode; 5] = [
+    pub const ALL: [RenderMode; 6] = [
         RenderMode::Shaded,
         RenderMode::ShadedEdges,
         RenderMode::HiddenLine,
         RenderMode::Wireframe,
         RenderMode::WhiteModel,
+        RenderMode::Maquette,
     ];
+
+    /// The model styles: white model and maquette.
+    pub fn is_model(self) -> bool {
+        matches!(self, RenderMode::WhiteModel | RenderMode::Maquette)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -54,6 +63,7 @@ impl RenderMode {
             RenderMode::HiddenLine => "Hidden line",
             RenderMode::Wireframe => "Wireframe",
             RenderMode::WhiteModel => "White model",
+            RenderMode::Maquette => "Maquette",
         }
     }
 
@@ -64,6 +74,7 @@ impl RenderMode {
             RenderMode::HiddenLine => "render-hidden-line",
             RenderMode::Wireframe => "render-wireframe",
             RenderMode::WhiteModel => "render-hidden-line",
+            RenderMode::Maquette => "render-hidden-line",
         }
     }
 
@@ -79,6 +90,9 @@ impl RenderMode {
             }
             RenderMode::WhiteModel => {
                 "A white study model: soft light, sun shadows, shaded corners and faint edges"
+            }
+            RenderMode::Maquette => {
+                "A card and wood model: bright white, wood in its grain, strong soft light"
             }
         }
     }
@@ -112,6 +126,8 @@ pub struct Lighting {
     /// 0 none to 1 full.
     pub ambient_occlusion: f32,
     pub white: bool,
+    /// The maquette's brighter light and wood grain.
+    pub maquette: bool,
     /// Toward the sun, in model coordinates.
     pub sun: [f32; 3],
     /// How dark the shadows are, 0 none to 1 full.
@@ -124,6 +140,7 @@ impl Default for Lighting {
             shadows: false,
             ambient_occlusion: 0.0,
             white: false,
+            maquette: false,
             sun: [0.4, -0.6, 0.85],
             shadow_strength: 0.7,
         }
@@ -317,6 +334,20 @@ struct VOut {
     let ao = sky_light(i.world, n);
     let diffuse = max(dot(n, l), 0.0) * sh;
     let sky = 0.5 + 0.5 * n.z;
+    if (u.flags.z > 1.5) {
+        // the maquette: brighter still, its wood in its grain
+        var b = base;
+        if (i.surface.y < -0.5) {
+            let p = i.world;
+            let along = p.x * 0.8 + p.y * 0.6;
+            let waver = sin(p.z * 2.3 + p.x * 1.7 + p.y * 1.1) * 2.5;
+            let streak = 0.5 + 0.5 * sin(along * 9.0 + waver);
+            let fine = 0.5 + 0.5 * sin(along * 41.0 + waver * 3.0 + p.z * 17.0);
+            b = base * (0.80 + 0.14 * streak + 0.06 * fine);
+        }
+        let w = b * ((0.52 + 0.26 * sky) * ao + 0.42 * diffuse);
+        return vec4<f32>(pow(clamp(w, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.2)), clamp(i.surface.z, 0.05, 1.0));
+    }
     if (u.flags.z > 0.5) {
         // the white model: bright sky, the sun's light and shadow, no shine
         let w = base * ((0.36 + 0.30 * sky) * ao + 0.55 * diffuse);
@@ -1143,7 +1174,13 @@ impl Viewport3d {
             flags: [
                 if lighting.shadows { 1.0 } else { 0.0 },
                 lighting.ambient_occlusion.clamp(0.0, 1.0),
-                if lighting.white { 1.0 } else { 0.0 },
+                if lighting.maquette {
+                    2.0
+                } else if lighting.white {
+                    1.0
+                } else {
+                    0.0
+                },
                 // a light map's depth, in metres (its far plane at 4 radii)
                 radius * 4.0,
             ],

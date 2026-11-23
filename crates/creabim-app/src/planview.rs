@@ -1424,7 +1424,7 @@ pub fn show(
     // or picked is washed
     let white = matches!(
         doc.model().get(view).map(|e| &e.kind),
-        Some(ElementKind::View(v)) if v.style == creabim_core::ViewStyle::White
+        Some(ElementKind::View(v)) if v.style.is_model()
     );
     for (id, points) in &slabs {
         let fill = if selection.contains(*id) {

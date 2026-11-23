@@ -2845,10 +2845,13 @@ impl CreaBimApp {
 
     /// The 3D view's background, for the paper's darkness and the shading.
     pub(crate) fn background_3d(&self) -> [f64; 3] {
-        if self.shell.settings.render_3d == crate::render3d::RenderMode::WhiteModel
-            && !self.paper_is_dark
-        {
-            return [0.94, 0.94, 0.93];
+        if !self.paper_is_dark {
+            match self.shell.settings.render_3d {
+                crate::render3d::RenderMode::WhiteModel => return [0.94, 0.94, 0.93],
+                // the maquette on its grey board
+                crate::render3d::RenderMode::Maquette => return [0.86, 0.86, 0.87],
+                _ => {}
+            }
         }
         if self.paper_is_dark {
             BACKGROUND_3D_DARK
@@ -2862,7 +2865,8 @@ impl CreaBimApp {
     /// project's true north; the white model always in sun and sky.
     pub(crate) fn lighting_3d(&self) -> crate::render3d::Lighting {
         let s = &self.shell.settings;
-        let white = s.render_3d == crate::render3d::RenderMode::WhiteModel;
+        let white = s.render_3d.is_model();
+        let maquette = s.render_3d == crate::render3d::RenderMode::Maquette;
         let wire = matches!(
             s.render_3d,
             crate::render3d::RenderMode::Wireframe | crate::render3d::RenderMode::HiddenLine
@@ -2882,6 +2886,7 @@ impl CreaBimApp {
                 0.0
             },
             white,
+            maquette,
             sun: if s.sun_follows_view {
                 // toward the sun: from behind the viewer, turned to their
                 // right, so the shadow falls to the left and away
@@ -2970,6 +2975,9 @@ impl CreaBimApp {
         } else if mode == crate::render3d::RenderMode::WhiteModel {
             // the white model's edges: faint, as a pencil line on card
             [0.62, 0.62, 0.63]
+        } else if mode == crate::render3d::RenderMode::Maquette {
+            // the maquette's: all but gone
+            [0.80, 0.80, 0.80]
         } else {
             [0.10, 0.10, 0.11]
         };
@@ -2977,7 +2985,11 @@ impl CreaBimApp {
         // rest see-through when asked
         let spot = &self.plan.spotlight;
         let ghost = self.plan.spotlight_ghost && !spot.is_empty();
-        for item in &self.scene {
+        // the model styles leave out the joints between like faces
+        let joints = (mode.is_model() && !self.shell.settings.joints_3d)
+            .then(|| creabim_geom::flush::FlushIndex::new(&self.scene));
+        let maquette = mode == crate::render3d::RenderMode::Maquette;
+        for (index, item) in self.scene.iter().enumerate() {
             let selected = spot.contains(&item.id);
             // X-ray: what holds others turns see-through with its edges
             // drawn; the framing that sits in it stays solid
@@ -3013,9 +3025,13 @@ impl CreaBimApp {
             if (mode.edges() || selected) && (!xrayed || wire) {
                 let c = if selected { highlight } else { edge_colour };
                 for &(a, b) in snaps::feature_edges_cached(&item.mesh).iter() {
+                    if !selected && joints.as_ref().is_some_and(|j| j.is_joint(index, a, b)) {
+                        continue;
+                    }
                     ghost_lines.push((a, b, c));
                 }
             }
+            let wood = maquette && creabim_geom::scene::is_wood(self.doc.model(), item);
             if mode == crate::render3d::RenderMode::Wireframe {
                 continue;
             }
@@ -3043,6 +3059,11 @@ impl CreaBimApp {
                     [0.42, 0.47, 0.52]
                 }
                 crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                crate::render3d::RenderMode::Maquette if item.surface[2] < 0.999 => {
+                    [0.58, 0.64, 0.68]
+                }
+                crate::render3d::RenderMode::Maquette if wood => item.color,
+                crate::render3d::RenderMode::Maquette => [0.98, 0.98, 0.975],
                 _ => item.color,
             };
             let mut colors =
@@ -3066,6 +3087,12 @@ impl CreaBimApp {
                 ]
             } else {
                 item.surface
+            };
+            // the maquette's wood takes its grain (a mark the shader reads)
+            let surface = if wood {
+                [surface[0], -1.0, surface[2]]
+            } else {
+                surface
             };
             if xrayed {
                 for &(a, b) in snaps::feature_edges_cached(&item.mesh).iter() {
@@ -3123,7 +3150,7 @@ impl CreaBimApp {
         // one plane at a time (MU18): while a face is the workplane, the
         // ground grid dims to a hint
         let face_plane = self.workplane.is_some();
-        if self.shell.settings.ground_grid && mode != crate::render3d::RenderMode::WhiteModel {
+        if self.shell.settings.ground_grid && !mode.is_model() {
             // as far out as 50 lines each way, at least the old 50 m
             let reach = (spacing * 25.0).max(25.0);
             // quiet: a little off the paper, so edges and vertex dots
@@ -3346,6 +3373,15 @@ impl CreaBimApp {
                     [0.42, 0.47, 0.52]
                 }
                 crate::render3d::RenderMode::WhiteModel => [0.93, 0.93, 0.92],
+                crate::render3d::RenderMode::Maquette if item.surface[2] < 0.999 => {
+                    [0.58, 0.64, 0.68]
+                }
+                crate::render3d::RenderMode::Maquette
+                    if creabim_geom::scene::is_wood(self.doc.model(), item) =>
+                {
+                    item.color
+                }
+                crate::render3d::RenderMode::Maquette => [0.98, 0.98, 0.975],
                 _ => item.color,
             };
             for (t, c) in item.mesh.indices.as_chunks::<3>().0.iter().enumerate() {

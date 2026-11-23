@@ -818,6 +818,7 @@ How a view draws.
 - `"shaded"`
 - `"wireframe"`
 - `"white"`
+- `"maquette"`
 
 ### ScheduleCategory
 

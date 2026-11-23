@@ -145,6 +145,7 @@ pub(super) fn view_style_icon(s: ViewStyle) -> &'static str {
         ViewStyle::Shaded => "render-edges",
         ViewStyle::Wireframe => "render-wireframe",
         ViewStyle::White => "render-hidden-line",
+        ViewStyle::Maquette => "render-hidden-line",
     }
 }
 
@@ -2303,6 +2304,17 @@ impl CreaBimApp {
                     "Sun shadows off.".into()
                 };
             }
+            "joints3d" => {
+                let s = &mut self.shell.settings;
+                s.joints_3d = !s.joints_3d;
+                s.store();
+                self.geometry_key = None;
+                self.status = if s.joints_3d {
+                    "Joints between like faces drawn.".into()
+                } else {
+                    "Joints between like faces left out: a wall on a wall of one material reads as one.".into()
+                };
+            }
             "occlusion3d" => {
                 let s = &mut self.shell.settings;
                 s.occlusion_3d = !s.occlusion_3d;
@@ -2326,7 +2338,7 @@ impl CreaBimApp {
                         let s = &mut self.shell.settings;
                         (s.sun_azimuth, s.sun_altitude) = (az, alt);
                         s.sun_follows_view = false;
-                        if !s.shadows_3d && s.render_3d != RenderMode::WhiteModel {
+                        if !s.shadows_3d && !s.render_3d.is_model() {
                             s.shadows_3d = true;
                         }
                         s.store();
@@ -3122,6 +3134,9 @@ impl CreaBimApp {
                 .checked(shadows_on)
                 .icon("sun")
                 .hint("The sun casts shadows on the model and the ground, from the project's true north"),
+            Item::new("joints3d", "Joints between like faces")
+                .checked(s.joints_3d)
+                .hint("In the white model and the maquette: draw the line where two faces of one material carry on in one plane, as a wall on the wall below"),
             Item::new("occlusion3d", "Ambient occlusion")
                 .checked(s.occlusion_3d)
                 .icon("moon")

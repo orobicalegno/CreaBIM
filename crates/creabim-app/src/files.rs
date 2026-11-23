@@ -211,6 +211,9 @@ pub struct Settings {
     /// the viewer's right of behind them, so its shadow always shows.
     pub sun_follows_view: bool,
     pub sun_view_angle: f64,
+    /// The white model and the maquette draw the joints between like
+    /// faces in one plane (a wall on the wall below).
+    pub joints_3d: bool,
     /// Width of the Help panel, in points.
     pub help_width: f32,
     /// Which sections of Properties are open, by key, where it differs
@@ -308,6 +311,7 @@ impl Default for Settings {
             occlusion_strength_3d: 0.7,
             sun_follows_view: true,
             sun_view_angle: 60.0,
+            joints_3d: false,
             help_width: 400.0,
             props_open: Default::default(),
             tools_tab: 0,

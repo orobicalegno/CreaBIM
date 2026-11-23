@@ -1673,6 +1673,7 @@ fn view(c: &mut Ctx, v: &f::View, at: &Path) {
             f::ViewStyle::Shaded => core::ViewStyle::Shaded,
             f::ViewStyle::Wireframe => core::ViewStyle::Wireframe,
             f::ViewStyle::White => core::ViewStyle::White,
+            f::ViewStyle::Maquette => core::ViewStyle::Maquette,
         };
     }
     view.room_colours = v.room_colours;

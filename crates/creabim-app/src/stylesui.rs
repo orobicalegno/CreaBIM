@@ -460,11 +460,11 @@ pub(super) fn look_ui(
     let plan = matches!(v.kind, ViewKind::Plan { .. });
     let three_d = matches!(v.kind, ViewKind::Axonometric { .. });
     let c = &mut v.look.cues;
-    let own = if plan {
+    let own = creabim_core::styles::own_sun(style, plan).unwrap_or(if plan {
         creabim_core::styles::WHITE_PLAN_SUN
     } else {
         creabim_core::styles::WHITE_SUN
-    };
+    });
     let shown = c.shadows_for(style, plan);
     let mut sun = shown.is_some();
     if crate::props::check(ui, "Shadows", &mut sun, "Sun")
@@ -473,7 +473,7 @@ pub(super) fn look_ui(
     {
         c.shadows = if sun {
             Some(c.shadows.filter(|s| s.opacity > 0.0).unwrap_or(own))
-        } else if style == creabim_core::ViewStyle::White {
+        } else if style.is_model() {
             // the white model's own sun, turned off
             Some(Shadows { opacity: 0.0, ..own })
         } else {
@@ -537,6 +537,14 @@ pub(super) fn look_ui(
             label = Some("Depth cues");
         }
     });
+    let mut joints = c.joints_for(style);
+    if crate::props::check(ui, "Joints", &mut joints, "Between like faces")
+        .on_hover_text("Draw the line where two faces of one material carry on in one plane, as a wall on the wall below. The white model and the maquette leave them out")
+        .changed()
+    {
+        c.joints = Some(joints);
+        label = Some("Depth cues");
+    }
     // overrides by category: a sub-section, as Blender's (MU22)
     let oid = egui::Id::new("props.view.overrides.open");
     let open = ui.ctx().data(|d| d.get_temp::<bool>(oid)).unwrap_or(true);
