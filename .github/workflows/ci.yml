@@ -37,6 +37,10 @@ jobs:
       - name: Format
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
+      - name: Preview publishing script
+        # the preview is never deleted, and a failed upload leaves the last good one
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/test-publish-preview.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
@@ -158,17 +162,28 @@ jobs:
 
   preview-release:
     # the Volumen builds of a PR, as a pre-release anyone can download with
-    # no GitHub account: one rolling "volumen-anteprima", replaced each time
+    # no GitHub account: one rolling "volumen-anteprima", updated in place
+    # only once every check has passed; a failed build, check or upload
+    # leaves the last good preview downloadable
     name: Public preview download
-    needs: [windows-build, linux-build]
+    needs: [test, ifc, windows-build, linux-build]
     if: >-
+      success() &&
       github.event_name == 'pull_request' &&
       startsWith(github.head_ref, 'volumen-') &&
       github.event.pull_request.head.repo.full_name == github.repository
+    # one publish at a time, none cut short: a newer one waits its turn
+    concurrency:
+      group: volumen-preview
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -184,18 +199,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          cat > notes.md <<NOTES
-          Anteprima di Volumen dalla PR #${PR} (commit ${SHA:0:7}), compilata il $(date -u +%Y-%m-%d).
-
-          - **Windows:** scarica \`Volumen-windows-x64.zip\`, estrailo e avvia \`Volumen.exe\`. Se Windows avvisa di un editore sconosciuto: *Ulteriori informazioni* › *Esegui comunque*.
-          - **Fedora:** \`sudo dnf install ./Volumen-*.rpm\`, poi avvia Volumen dal menu delle applicazioni.
-          - **Altri Linux:** estrai \`Volumen-linux-x64.tar.gz\` e avvia \`./volumen\`.
-
-          Versione di prova, sostituita a ogni aggiornamento.
-          NOTES
-          gh release delete volumen-anteprima --yes --cleanup-tag || true
-          gh release create volumen-anteprima dist/* --prerelease --target "$SHA" \
-            --title "Volumen – anteprima (PR #${PR})" --notes-file notes.md
+        run: bash .github/scripts/publish-preview.sh dist "${{ github.event.pull_request.head.sha }}" "${{ github.event.pull_request.number }}"

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# A stand-in for the GitHub CLI, for test-publish-preview.sh: one release,
+# its files and its tag kept as files in $STATE. FAIL_UPLOAD_AT and
+# FAIL_RENAME_AT make the n-th upload or rename fail (a cut connection);
+# TRUNCATE makes every upload one byte short (a corrupted upload).
+set -euo pipefail
+S=$STATE; mkdir -p "$S/assets"
+next_id() { n=$(cat "$S/next" 2>/dev/null || echo 100); echo $((n+1)) > "$S/next"; echo $n; }
+tick() { # count operations; fail when $1 reaches its limit
+  local k=$1 c; c=$(( $(cat "$S/count.$k" 2>/dev/null || echo 0) + 1 )); echo $c > "$S/count.$k"
+  local lim_var="FAIL_${k^^}_AT"; local lim=${!lim_var:-0}
+  if [ "$lim" -gt 0 ] && [ "$c" -ge "$lim" ]; then echo "simulated failure: $k #$c" >&2; exit 1; fi
+}
+cmd=$1; shift
+if [ "$cmd" = release ]; then
+  sub=$1; shift
+  case $sub in
+    view) [ -f "$S/release" ] ;;
+    create) touch "$S/release"; echo "created $1" >> "$S/log" ;;
+    edit) echo "edited" >> "$S/log" ;;
+    upload) shift; for f in "$@"; do tick upload; id=$(next_id); size=$(stat -c %s "$f");
+              [ -n "${TRUNCATE:-}" ] && size=$((size-1));
+              printf '%s\t%s\t%s\n' "$id" "$(basename "$f")" "$size" > "$S/assets/$id"; done ;;
+  esac
+  exit 0
+fi
+# gh api
+method=GET; path=""; fields=()
+while [ $# -gt 0 ]; do case $1 in
+  -X) method=$2; shift 2 ;; --jq|-q) shift 2 ;; --paginate) shift ;;
+  -f|-F) fields+=("$2"); shift 2 ;; *) path=$1; shift ;; esac; done
+case "$method $path" in
+  "GET "*/pulls/*) echo "$HEAD_SHA" ;;
+  "GET "*/releases/tags/*) echo 1 ;;
+  "GET "*/releases/1/assets) cat "$S"/assets/* 2>/dev/null || true ;;
+  "PATCH "*/releases/assets/*) tick rename; id=${path##*/}; name=${fields[0]#name=};
+     IFS=$'\t' read -r i n z < "$S/assets/$id"; printf '%s\t%s\t%s\n' "$i" "$name" "$z" > "$S/assets/$id" ;;
+  "DELETE "*/releases/assets/*) rm "$S/assets/${path##*/}" ;;
+  "GET "*/git/refs/tags/*) [ -f "$S/tag" ] ;;
+  "PATCH "*/git/refs/tags/*|"POST "*/git/refs) for f in "${fields[@]}"; do case $f in sha=*) echo "${f#sha=}" > "$S/tag" ;; esac; done ;;
+  *) echo "fake gh: unhandled $method $path" >&2; exit 2 ;;
+esac
