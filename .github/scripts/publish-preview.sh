@@ -172,7 +172,7 @@ if gh api "$api/git/refs/tags/$tag" >/dev/null 2>&1; then
 else
   gh api -X POST "$api/git/refs" -f ref="refs/tags/$tag" -f sha="$sha" >/dev/null
 fi
-gh release edit "$tag" --prerelease --title "$title" --notes-file "$notes" >/dev/null
+gh release edit "$tag" --prerelease --target "$sha" --title "$title" --notes-file "$notes" >/dev/null
 
 # 5. the old files: those stepped aside, and those the new build no longer
 #    has (the RPM's name carries its date)
