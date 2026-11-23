@@ -8570,13 +8570,20 @@ impl CreaBimApp {
             self.prop_tab = PropTab::Element;
             self.status = "Reference added. Drag its middle to move it, a corner to scale it, the round grip to turn it; Calibrate sets an exact size. Alt+F2 hides it.".into();
             if r_source_dxf {
-                // show it: the view fits its drawing again
+                // show it: its plan opened in an area, fitted to it all
                 self.plan.cameras.remove(&v);
                 self.plan.area_cameras.retain(|(_, view), _| *view != v);
+                self.active_view = Some(v);
+                self.areas.seen = None;
+                let plan = self
+                    .doc
+                    .model()
+                    .get(v)
+                    .map_or(String::new(), |e| e.name.clone());
                 self.status = if moved {
-                    "DXF added under this plan. It was drawn far from the model, so it was brought over it: drag its middle (or MOVE) to put it in place; Calibrate sets an exact size.".into()
+                    format!("DXF added to the {plan}, beside the model: it was drawn far from it (survey or map coordinates). Drag its middle (or MOVE) to put it in place; Calibrate sets an exact size; Drawn › Over puts it over the walls.")
                 } else {
-                    "DXF added under this plan, at its own coordinates. Drag its middle to move it; Properties › Element sets its colour and strength; EXPLODE turns it into drafting lines.".into()
+                    format!("DXF added to the {plan}, at its own coordinates, under the model. Properties › Element: Drawn › Over shows it over the walls, Colour and Strength set its look; EXPLODE turns it into drafting lines.")
                 };
             }
             if r_source_dxf && crate::trace::DXF_CAPPED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -13378,7 +13385,20 @@ fn far_drawing(model: &Model, b: [glam::DVec2; 2]) -> Option<glam::DVec2> {
         || b[1].x < lo.x - margin
         || b[0].y > hi.y + margin
         || b[1].y < lo.y - margin;
-    apart.then_some((lo + hi) / 2.0)
+    if !apart {
+        return None;
+    }
+    // beside the model, to its right, not over it where its walls and
+    // floors would hide it; at the origin when there is no model yet
+    if hi == lo {
+        return Some(glam::DVec2::ZERO);
+    }
+    let width = (b[1].x - b[0].x).abs();
+    let gap = ((hi - lo).max_element() * 0.15).max(2.0);
+    Some(glam::DVec2::new(
+        hi.x + gap + width / 2.0,
+        (lo.y + hi.y) / 2.0,
+    ))
 }
 
 impl CreaBimApp {
