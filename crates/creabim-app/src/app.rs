@@ -13870,20 +13870,20 @@ impl CreaBimApp {
             self.footings_under_selection();
         }
         self.open_view_menu();
-        self.materials_window(&ctx);
-        self.assemblies_window(&ctx);
-        self.types_window(&ctx);
+        self.in_dialog("materials", |s| s.materials_window(&ctx));
+        self.in_dialog("asm", |s| s.assemblies_window(&ctx));
+        self.in_dialog("types", |s| s.types_window(&ctx));
         self.type_preview_window(&ctx);
         self.catalogue_window(&ctx);
-        self.levels_window(&ctx);
+        self.in_dialog("levels", |s| s.levels_window(&ctx));
         self.level_copy_window(&ctx);
-        self.styles_window(&ctx);
+        self.in_dialog("annstyles", |s| s.styles_window(&ctx));
         self.sun_window(&ctx);
-        self.templates_window(&ctx);
-        self.units_window(&ctx);
+        self.in_dialog("templates", |s| s.templates_window(&ctx));
+        self.in_dialog("units", |s| s.units_window(&ctx));
         self.divide_window(&ctx);
         self.profiles_window(&ctx);
-        self.settings_window(&ctx);
+        self.in_dialog("settings", |s| s.settings_window(&ctx));
         // the paper follows the setting and the theme; a change redraws
         // the 3D view's grid and background
         let dark = self.dark_paper(&ctx);
@@ -13898,15 +13898,15 @@ impl CreaBimApp {
         self.calibrate_window(&ctx);
         self.sheets_export_window(&ctx);
         self.new_project_window(&ctx);
-        self.marks_window(&ctx);
-        self.graphic_styles_window(&ctx);
+        self.in_dialog("marks", |s| s.marks_window(&ctx));
+        self.in_dialog("gstyles", |s| s.graphic_styles_window(&ctx));
         self.ground_spacing_window(&ctx);
         self.import_report_window(&ctx);
         self.help_window(&ctx);
         self.report_window(&ctx);
-        self.drafting_settings_window(&ctx);
-        self.layer_manager_window(&ctx);
-        self.ucs_manager_window(&ctx);
+        self.in_dialog("dsettings", |s| s.drafting_settings_window(&ctx));
+        self.in_dialog("layers", |s| s.layer_manager_window(&ctx));
+        self.in_dialog("ucs", |s| s.ucs_manager_window(&ctx));
         self.cmdline_window(&ctx);
         self.cmd_history_window(&ctx);
         self.close_window(&ctx);

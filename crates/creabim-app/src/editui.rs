@@ -98,6 +98,66 @@ mod tests {
         app
     }
 
+    /// Rename the first wall: one undo step.
+    fn rename_a_wall(app: &mut CreaBimApp, name: &str) {
+        let id = app
+            .doc
+            .model()
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Wall(_)))
+            .unwrap()
+            .id;
+        app.doc
+            .edit(id, "Rename", |e| e.name = name.into())
+            .unwrap();
+    }
+
+    fn wall_names(app: &CreaBimApp) -> Vec<String> {
+        app.doc
+            .model()
+            .iter()
+            .filter(|e| matches!(e.kind, ElementKind::Wall(_)))
+            .map(|e| e.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn cancel_in_a_window_never_takes_back_work_done_elsewhere() {
+        let mut app = app();
+        app.dialog_begin("asm");
+        // the window's own change, then work elsewhere while it stays open
+        app.in_dialog("asm", |s| rename_a_wall(s, "In the window"));
+        rename_a_wall(&mut app, "Drawn meanwhile");
+        let steps = app.doc.undo_steps().len();
+        app.dialog_end("asm", false);
+        // the work done elsewhere stays, and so (under it) the window's
+        assert_eq!(app.doc.undo_steps().len(), steps);
+        assert!(wall_names(&app).contains(&"Drawn meanwhile".to_string()));
+        // a window's change on top is taken back, and only that
+        let before = app.doc.undo_steps().len();
+        app.dialog_begin("asm");
+        app.in_dialog("asm", |s| rename_a_wall(s, "Second"));
+        app.dialog_end("asm", false);
+        assert_eq!(app.doc.undo_steps().len(), before);
+        assert!(wall_names(&app).contains(&"Drawn meanwhile".to_string()));
+    }
+
+    #[test]
+    fn undo_never_repeats_on_enter_or_a_quick_right_click() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        rename_a_wall(&mut app, "One");
+        rename_a_wall(&mut app, "Two");
+        rename_a_wall(&mut app, "Three");
+        app.cmd_start(&ctx, "UNDO");
+        assert!(wall_names(&app).contains(&"Two".to_string()));
+        // Enter on an empty line (and a quick right-click, which repeats
+        // the same last command): no more undoing
+        assert!(app.cmd.last.as_deref() != Some("UNDO"));
+        app.cmd_enter(&ctx, "");
+        assert!(wall_names(&app).contains(&"Two".to_string()));
+    }
+
     fn shaft(app: &CreaBimApp) -> ElementId {
         app.doc
             .model()

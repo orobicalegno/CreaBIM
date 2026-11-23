@@ -1003,7 +1003,11 @@ impl CreaBimApp {
         let Some(name) = ALIASES.iter().map(|(n, _)| *n).find(|n| *n == c) else {
             return;
         };
-        self.cmd.last = Some(name.to_string());
+        // Undo and Redo never repeat on their own: a quick right-click or
+        // Enter after them would take back one more step each time
+        if !matches!(name, "UNDO" | "REDO" | "MREDO") {
+            self.cmd.last = Some(name.to_string());
+        }
         self.cmd.log.push(format!("Command: {name}"));
         let detail = |app: &mut Self, ctx: &egui::Context| {
             app.pick_tool(ctx, Tool::Detail);
@@ -1335,9 +1339,13 @@ impl CreaBimApp {
             } else if (self.cmd.running.is_some() && !idle_tool) || self.plan.outline.is_some() {
                 self.cmd_enter(ctx, "");
             } else if let Some(c) = self.cmd.last.clone() {
-                // nothing being drawn: the last command again, as AutoCAD
+                // nothing being drawn: the last command again, as AutoCAD,
+                // said so in the status bar
                 self.cmd.running = None;
                 self.cmd_start(ctx, &c);
+                self.say(format!(
+                    "Right-click repeats the last command: {c}. Esc stops it."
+                ));
             } else if self.plan.tool != Tool::Select {
                 self.cmd.esc = true;
             }

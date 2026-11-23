@@ -11,7 +11,9 @@ pub(super) struct DialogSnap {
     snap: crate::snaps::SnapSettings,
     guide_step: f64,
     ucs: crate::planview::Ucs,
-    undo: usize,
+    /// The undo steps the window itself made: Cancel takes back these, and
+    /// never what was done elsewhere while it stood open.
+    own: std::collections::HashSet<creabim_core::StepId>,
 }
 
 impl CreaBimApp {
@@ -27,9 +29,26 @@ impl CreaBimApp {
                 snap: self.plan.snap,
                 guide_step: self.plan.guide_step,
                 ucs: self.plan.ucs,
-                undo: self.doc.undo_steps().len(),
+                own: Default::default(),
             },
         );
+    }
+
+    /// Run window `key` for a frame, noting the undo steps it makes as its
+    /// own.
+    pub(super) fn in_dialog(&mut self, key: &'static str, window: impl FnOnce(&mut Self)) {
+        let before = self.doc.undo_steps().last().map(|s| s.id);
+        window(self);
+        let Some(snap) = self.dialogs.get_mut(key) else {
+            return;
+        };
+        let steps = self.doc.undo_steps();
+        let start = before
+            .and_then(|b| steps.iter().rposition(|s| s.id == b))
+            .map_or(0, |i| i + 1);
+        // a step the window amended keeps its id: it counts as the
+        // window's only if the window made it
+        snap.own.extend(steps[start..].iter().map(|s| s.id));
     }
 
     /// Save or Cancel pressed in window `key`'s last frame.
@@ -76,11 +95,36 @@ impl CreaBimApp {
         self.plan.snap = s.snap;
         self.plan.guide_step = s.guide_step;
         self.plan.ucs = s.ucs;
-        while self.doc.undo_steps().len() > s.undo && self.doc.undo() {}
+        // the window's own changes, from the newest, as long as they are
+        // the newest: what was done elsewhere meanwhile is never undone
+        let mut undone = 0;
+        while self
+            .doc
+            .undo_steps()
+            .last()
+            .is_some_and(|t| s.own.contains(&t.id))
+            && self.doc.undo()
+        {
+            undone += 1;
+        }
+        let left = self
+            .doc
+            .undo_steps()
+            .iter()
+            .filter(|t| s.own.contains(&t.id))
+            .count();
         self.plan.forget_snaps();
         self.snaps_3d = None;
         self.geometry_key = None;
-        self.status = "Cancelled: put back as it was.".into();
+        self.status = if left > 0 {
+            format!(
+                "Cancelled the window's last {undone} change(s). {left} earlier one(s) stay: other work came after them, and Cancel never takes that back (Ctrl+Z steps back through everything)."
+            )
+        } else if undone > 0 {
+            "Cancelled: the window's changes put back. Work done elsewhere meanwhile stays.".into()
+        } else {
+            "Cancelled. Nothing the window changed was left to put back.".into()
+        };
     }
 }
 
