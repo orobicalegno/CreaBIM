@@ -8,6 +8,10 @@
 # preview downloadable whatever goes wrong:
 #
 #   1. a newer commit of the PR has come meanwhile: stop, it will publish;
+#   1b. a permanent copy, named for its date and commit, is made first:
+#      as a hidden draft, its files uploaded and checked, then shown; if
+#      anything fails the draft goes and nothing else is touched. Copies are
+#      never deleted here (a keeping policy is for later);
 #   2. leftovers of an interrupted run are put right (see `tidy`);
 #   3. the new files are uploaded beside the old ones, under "next-" names,
 #      and checked (every file there, at its size);
@@ -46,6 +50,54 @@ Anteprima di Volumen dalla PR #${pr} (commit ${sha:0:7}), compilata il $(date -u
 Versione di prova, sostituita a ogni aggiornamento riuscito: un aggiornamento con controlli falliti non la sostituisce.
 NOTES
 title="Volumen – anteprima (PR #${pr})"
+
+# the files of release $1 (its id): id, name and size, one per line
+assets_of() { gh api --paginate "$api/releases/$1/assets" --jq '.[] | [.id, .name, .size] | @tsv'; }
+
+# 1b. the permanent copy of this build
+# a build already kept (a re-run after a failed swap) is not kept twice
+kept_already=$(gh api --paginate "$api/releases" --jq ".[] | select(.draft | not) | select(.tag_name | startswith(\"$tag-\")) | select(.tag_name | contains(\"-${sha:0:7}\")) | .tag_name")
+kept_already=${kept_already%%$'\n'*}
+if [ -n "$kept_already" ]; then
+  log "Already kept as $kept_already."
+else
+  # the copy's name: its date and commit, and a number when (a re-run) that
+  # name is taken already
+  release_of() { gh api --paginate "$api/releases" --jq ".[] | select(.tag_name == \"$1\") | .id"; }
+  keep_base="$tag-$(date -u +%Y%m%d-%H%M)-${sha:0:7}"
+  keep_tag=$keep_base
+  k=1
+  while [ -n "$(release_of "$keep_tag")" ]; do
+    k=$((k + 1))
+    keep_tag="$keep_base-$k"
+  done
+  keep_notes=$(mktemp)
+  cat > "$keep_notes" <<NOTES
+Copia conservata dell'anteprima di Volumen dalla PR #${pr} (commit ${sha:0:7}), compilata il $(date -u +%Y-%m-%d). Non viene sostituita: serve a riprendere una versione precedente o a capire da quando c'è un problema.
+
+L'anteprima più recente è sempre in **volumen-anteprima**.
+NOTES
+  gh release create "$keep_tag" "$dist"/* --draft --prerelease --latest=false --target "$sha" \
+    --title "Volumen – anteprima ${sha:0:7} ($(date -u +%Y-%m-%d))" --notes-file "$keep_notes" >/dev/null || {
+    log "The permanent copy could not be made: nothing published."
+    kid=$(release_of "$keep_tag")
+    [ -z "$kid" ] || gh api -X DELETE "$api/releases/$kid" >/dev/null || true
+    exit 1
+  }
+  kid=$(release_of "$keep_tag")
+  kept_ok=1
+  for f in "$dist"/*; do
+    n=$(basename "$f")
+    got=$(assets_of "$kid" | awk -F'\t' -v n="$n" '$2 == n { print $3 }')
+    [ "$got" = "$(stat -c %s "$f")" ] || { log "Copy check failed for $n"; kept_ok=0; }
+  done
+  if [ $kept_ok -ne 1 ] || ! gh api -X PATCH "$api/releases/$kid" -F draft=false >/dev/null; then
+    log "The permanent copy failed its check: its draft goes, nothing published."
+    gh api -X DELETE "$api/releases/$kid" >/dev/null || true
+    exit 1
+  fi
+  log "Kept as $keep_tag."
+fi
 
 # the release, made empty the first time (never deleted)
 if ! gh release view "$tag" >/dev/null 2>&1; then

@@ -26,7 +26,7 @@ zip_of() { echo "Volumen-windows-x64.zip of build $1" | wc -c; }
 zip_now() { awk -F'\t' '$2 == "Volumen-windows-x64.zip" { print $3 }' "$STATE"/assets/* 2>/dev/null; }
 run() { rm -f "$STATE"/count.*; HEAD_SHA=$1 bash "$publish" "$work/dist" "$2" 13 >"$work/out" 2>&1; echo $?; }
 check() { # name, condition
-  if eval "$2"; then echo "ok   $1"; else echo "FAIL $1 (files: $(files); tag: $(cat "$STATE/tag" 2>/dev/null))"; fails=$((fails+1)); fi
+  if eval "$2"; then echo "ok   $1"; else echo "FAIL $1 (files: $(files); tag: $(cat "$STATE/tag" 2>/dev/null))"; sed 's/^/       | /' "$work/out"; fails=$((fails+1)); fi
 }
 complete() { # exactly the four files of a build, no leftovers
   [ "$(files)" = "SHA256SUMS.txt Volumen-1.1.2_$1-x86_64.rpm Volumen-linux-x64.tar.gz Volumen-windows-x64.zip " ]
@@ -61,5 +61,19 @@ build OLD 20261101; e=$(run eeee oldsha)
 check "a build overtaken by a newer commit publishes nothing" "[ $e = 0 ] && complete 20261125 && [ \$(zip_now) = \$(zip_of D) ]"
 
 check "the release was never deleted or made again" "[ \$(grep -c created \$STATE/log) = 1 ]"
+
+# the kept copies (intervento 2): one per published build, never deleted
+kept() { for d in "$STATE"/kept/*/; do [ -d "$d" ] && [ ! -f "$d/draft" ] && cat "$d/tag"; done | wc -l; }
+drafts() { for d in "$STATE"/kept/*/; do [ -f "$d/draft" ] && echo x; done | wc -l; }
+check "every published build left its kept copy (A, B, C, D)" "[ \$(kept) = 4 ]"
+check "no half-made copy is left behind" "[ \$(drafts) = 0 ]"
+
+build F 20261126
+e=$(TRUNCATE_KEEP=1 run ffff ffff)
+check "a corrupted kept copy stops the publish" "[ $e != 0 ] && [ \$(zip_now) = \$(zip_of D) ] && [ \$(kept) = 4 ] && [ \$(drafts) = 0 ]"
+e=$(FAIL_KEEP_AT=2 run ffff ffff)
+check "a cut upload of the kept copy stops the publish" "[ $e != 0 ] && [ \$(zip_now) = \$(zip_of D) ] && [ \$(kept) = 4 ] && [ \$(drafts) = 0 ]"
+e=$(run ffff ffff)
+check "then it publishes, and keeps its copy" "[ $e = 0 ] && complete 20261126 && [ \$(kept) = 5 ]"
 
 [ $fails = 0 ] && echo "all checks passed" || { echo "$fails check(s) failed"; exit 1; }
