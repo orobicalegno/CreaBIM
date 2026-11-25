@@ -288,16 +288,39 @@ contatore accanto al puntatore apre l'elenco di tutti: resta così.
   box; poi ciò che si colpisce dal più vicino; le linee di griglia solo se
   non si colpisce nient'altro.
 
-### Proposta (non ancora applicata)
+### Orientamento deciso (non ancora applicato)
 
-Nelle viste 2D, gruppi in quest'ordine: elementi costruttivi (muri, solai,
-tetti, pilastri, travi, scale, ringhiere, porte, finestre, arredi); disegno
-2D e annotazioni; riferimenti (griglie, livelli, guide, linee di sezione,
-DXF e immagini, crop box); locali. Nello stesso gruppo l'ultimo creato per
-primo, con due eccezioni: porte e finestre prima del muro che le ospita, e
-un clic proprio sulla testa di una griglia (il cerchio con la lettera)
-prende la griglia. Nel 3D nessun cambiamento. Da decidere: le annotazioni
-prima o dopo gli elementi costruttivi.
+Indicazioni dell'utente per un intervento futuro, da fare con i suoi test:
+
+- nelle viste 2D gli **elementi costruttivi** (muri, solai, tetti,
+  pilastri, travi, scale, ringhiere, arredi) vengono prima dei
+  **riferimenti** (griglie, livelli, guide, linee di sezione, DXF e
+  immagini, crop box);
+- **porte e finestre** prima del muro che le ospita;
+- **quote ed etichette** hanno la precedenza quando si clicca proprio sul
+  loro testo o sulla loro grafica;
+- le **griglie** si prendono dalle teste (il cerchio con la lettera);
+- nello stesso gruppo, l'ultimo creato per primo, e gli altri restano
+  facili da raggiungere;
+- **Tab** e l'elenco degli elementi sotto il puntatore restano come sono;
+- nel **3D** nessun cambiamento.
+
+## Miglioramenti futuri (non fatti)
+
+- **Avvio con una GPU non compatibile**: se la scheda grafica o il driver
+  non vanno bene, all'avvio serve un messaggio comprensibile (che cosa non
+  va e cosa provare) e un registro di diagnostica da poter inviare. Come si
+  presenta oggi l'errore non è stato verificato (qui non c'è una GPU vera).
+  Non toccato in C1–C3.
+- **Ripristina mentre uno strumento è a metà**: dal codice, oggi Ctrl+Y
+  rifà l'ultimo passo annullato anche con punti non confermati in corso
+  (letto, non provato con un test). Se vada
+  bloccato (come chiedere prima di finire o di uscire dallo strumento) è da
+  valutare a parte; C1 non l'ha cambiato. Fa eccezione la catena di muri o
+  travi (C2), dove Ripristina rimette il pezzo e la catena riparte dalla
+  sua fine.
+- **Catena di muri nel riquadro 3D**: Ctrl+Z toglie il punto in corso ma
+  non riprende la catena come in pianta (C2 copre la pianta).
 
 ## Bug già corretti e protetti
 
