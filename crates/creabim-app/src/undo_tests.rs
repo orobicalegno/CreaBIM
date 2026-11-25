@@ -664,9 +664,9 @@ fn fixed_c1_undo_after_a_walls_first_click_keeps_earlier_work() {
     );
 }
 
+/// Was a known bug (G4), fixed by C2.
 #[test]
-#[ignore = "known bug (G4): after Ctrl+Z in a wall chain, the chain resumes from the removed wall's end, see docs/regressioni.md"]
-fn known_bug_undo_in_a_wall_chain_resumes_from_the_previous_point() {
+fn fixed_c2_undo_in_a_wall_chain_resumes_from_the_previous_point() {
     let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Wall);
     let pts = [
         egui::Pos2::new(400.0, 400.0),
@@ -768,6 +768,10 @@ const TOOL_GROUPS: [&[crate::planview::Tool]; 6] = {
 /// With each tool of `tools`, one, two and three clicks, then Ctrl+Z:
 /// while the tool is part way, nothing confirmed may change. The number of
 /// cases where a tool was part way.
+///
+/// One exception, on purpose since C2: in a chain of walls or beams the
+/// pieces drawn are confirmed, and Ctrl+Z takes back the last of them (and
+/// only that: one step, the project exactly as before the last click).
 fn undo_part_way_keeps_confirmed_work(tools: &[crate::planview::Tool]) -> usize {
     let pts = [
         egui::Pos2::new(450.0, 380.0),
@@ -779,7 +783,9 @@ fn undo_part_way_keeps_confirmed_work(tools: &[crate::planview::Tool]) -> usize 
     for &tool in tools {
         for clicks in 1..=pts.len() {
             let (mut app, ctx, mut t, _) = drawing_with(tool);
+            let mut before_last = snap(&app);
             for p in &pts[..clicks] {
+                before_last = snap(&app);
                 click_plan(&mut app, &ctx, &mut t, *p);
             }
             if !part_way(&app) {
@@ -788,8 +794,13 @@ fn undo_part_way_keeps_confirmed_work(tools: &[crate::planview::Tool]) -> usize 
             checked += 1;
             let now = snap(&app);
             let steps = app.doc.undo_steps().len();
+            let in_chain = !app.plan.chain_steps.is_empty();
             app.run_command(&ctx, crate::commands::Command::Undo, None);
-            if app.doc.undo_steps().len() != steps || app.doc.model() != &now {
+            let kept = app.doc.undo_steps().len() == steps && app.doc.model() == &now;
+            let chain_piece_back = in_chain
+                && app.doc.undo_steps().len() + 1 == steps
+                && app.doc.model() == &before_last;
+            if !kept && !chain_piece_back {
                 wrong.push(format!("{tool:?} after {clicks} click(s)"));
             }
         }
@@ -904,5 +915,304 @@ fn c1_esc_drops_the_whole_outline_and_ctrl_z_only_its_last_corner() {
         app.plan.tool,
         crate::planview::Tool::Select,
         "second Esc leaves it"
+    );
+}
+
+// ---------------------------------------------------------------------
+// C2: Ctrl+Z in a chain of walls or beams takes back the chain's last
+// piece and goes on from where it started; Redo puts it back.
+// ---------------------------------------------------------------------
+
+/// The plan points a chain is clicked through.
+const CHAIN: [egui::Pos2; 4] = [
+    egui::Pos2::new(400.0, 380.0),
+    egui::Pos2::new(600.0, 380.0),
+    egui::Pos2::new(600.0, 560.0),
+    egui::Pos2::new(420.0, 560.0),
+];
+
+/// After each piece of a chain: the project, and where the chain was then
+/// to go on from.
+type Pieces = Vec<(Model, Option<DVec2>)>;
+
+/// Draw a chain with `tool` through every point of `CHAIN`: the project
+/// before the tool, and after each piece.
+fn draw_chain(
+    tool: crate::planview::Tool,
+    arc: bool,
+) -> (CreaBimApp, egui::Context, f64, Model, Pieces) {
+    let (mut app, ctx, mut t, before) = drawing_with(tool);
+    if arc {
+        app.plan.wall_shape = 1;
+    }
+    let mut after = Vec::new();
+    let mut steps = app.doc.undo_steps().len();
+    let points: Vec<egui::Pos2> = if arc {
+        // an arc wall: its start, its end, a point it passes through; the
+        // next one starts where it ended: its end, a point it passes
+        vec![
+            CHAIN[0],
+            CHAIN[1],
+            egui::Pos2::new(500.0, 330.0),
+            CHAIN[2],
+            egui::Pos2::new(650.0, 470.0),
+        ]
+    } else {
+        CHAIN.to_vec()
+    };
+    for p in points {
+        click_plan(&mut app, &ctx, &mut t, p);
+        if app.doc.undo_steps().len() > steps {
+            steps = app.doc.undo_steps().len();
+            after.push((snap(&app), app.plan.pending));
+        }
+    }
+    (app, ctx, t, before, after)
+}
+
+fn count(m: &Model, pick: fn(&ElementKind) -> bool) -> usize {
+    m.iter().filter(|e| pick(&e.kind)).count()
+}
+
+/// The chain checks, for walls straight or arced and for beams: Ctrl+Z
+/// steps back a piece at a time to the first click, then takes that back,
+/// then (nothing part way) undoes the earlier work as ever; the project is
+/// each time exactly as it was, joins and layers included.
+fn chain_steps_back(tool: crate::planview::Tool, arc: bool, what: &str) {
+    let (mut app, ctx, _t, before, after) = draw_chain(tool, arc);
+    let pieces = after.len();
+    assert!(pieces >= 2, "{what}: at least two pieces drawn ({pieces})");
+    let steps_before = app.doc.undo_steps().len() - pieces;
+    for k in (0..pieces).rev() {
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        let (want, from) = if k == 0 {
+            (&before, None)
+        } else {
+            (&after[k - 1].0, after[k - 1].1)
+        };
+        same(
+            app.doc.model(),
+            want,
+            &format!("{what}: after taking back piece {}", k + 1),
+        );
+        assert_eq!(app.plan.tool, tool, "{what}: the tool stays");
+        if k > 0 {
+            assert_eq!(
+                app.plan.pending, from,
+                "{what}: the chain goes on from where the remaining piece ends"
+            );
+        }
+    }
+    // back to the first click: still part way, then nothing
+    assert!(
+        app.plan.pending.is_some(),
+        "{what}: the first click is left"
+    );
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    assert!(app.plan.pending.is_none(), "{what}: then it goes");
+    same(
+        app.doc.model(),
+        &before,
+        &format!("{what}: the earlier work kept"),
+    );
+    assert_eq!(
+        app.doc.undo_steps().len(),
+        steps_before,
+        "{what}: no earlier step undone"
+    );
+}
+
+#[test]
+fn c2_undo_in_a_chain_of_straight_walls_steps_back_a_wall_at_a_time() {
+    chain_steps_back(crate::planview::Tool::Wall, false, "straight walls");
+}
+
+#[test]
+fn c2_undo_in_a_chain_of_arc_walls_steps_back_an_arc_at_a_time() {
+    chain_steps_back(crate::planview::Tool::Wall, true, "arc walls");
+}
+
+#[test]
+fn c2_undo_in_a_chain_of_beams_steps_back_a_beam_at_a_time() {
+    chain_steps_back(crate::planview::Tool::Beam, false, "beams");
+}
+
+#[test]
+fn c2_redo_in_a_chain_puts_the_piece_back_and_the_chain_goes_on_from_its_end() {
+    for (tool, what) in [
+        (crate::planview::Tool::Wall, "walls"),
+        (crate::planview::Tool::Beam, "beams"),
+    ] {
+        let (mut app, ctx, mut t, _before, after) = draw_chain(tool, false);
+        let last = after.len() - 1;
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        app.run_command(&ctx, crate::commands::Command::Redo, None);
+        same(
+            app.doc.model(),
+            &after[last - 1].0,
+            &format!("{what}: Redo puts a piece back"),
+        );
+        assert_eq!(
+            app.plan.pending,
+            after[last - 1].1,
+            "{what}: and the chain is at its end"
+        );
+        app.run_command(&ctx, crate::commands::Command::Redo, None);
+        same(
+            app.doc.model(),
+            &after[last].0,
+            &format!("{what}: Redo again"),
+        );
+        assert_eq!(
+            app.plan.pending, after[last].1,
+            "{what}: at the last piece's end"
+        );
+        // and on: a new piece starts where the chain stands
+        let pieces = |m: &Model| {
+            count(m, |k| {
+                matches!(k, ElementKind::Wall(_) | ElementKind::Beam(_))
+            })
+        };
+        let n = pieces(app.doc.model());
+        click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(380.0, 470.0));
+        assert_eq!(pieces(app.doc.model()), n + 1, "{what}: the chain goes on");
+    }
+}
+
+#[test]
+fn c2_a_beam_drawn_after_undo_joins_the_beam_the_chain_stands_on() {
+    let (mut app, ctx, mut t, _before, after) = draw_chain(crate::planview::Tool::Beam, false);
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    // the beam the chain now ends on
+    let last_beam = after[after.len() - 2]
+        .0
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::Beam(_)))
+        .last()
+        .map(|e| e.id);
+    assert_eq!(
+        app.plan.members.last_beam, last_beam,
+        "the chain stands on the beam before"
+    );
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(380.0, 470.0));
+    // the new beam is drawn, as one step with its join to that beam
+    let tx = &app.doc.undo_steps().last().unwrap().tx;
+    assert_eq!(
+        tx.ops.len(),
+        2,
+        "the new beam and its join to the one before"
+    );
+}
+
+#[test]
+fn c2_a_chain_interrupted_by_other_work_never_undoes_that_work_by_surprise() {
+    let (mut app, ctx, _t, _before, after) = draw_chain(crate::planview::Tool::Wall, false);
+    // a change elsewhere while the chain is on (a material recoloured)
+    recolour_a_material(&mut app);
+    let recoloured = snap(&app);
+    // Ctrl+Z: the chain's point goes (C1), nothing in the project
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(
+        app.doc.model(),
+        &recoloured,
+        "Ctrl+Z with the chain interrupted",
+    );
+    assert!(app.plan.pending.is_none(), "the chain ends");
+    // then Ctrl+Z is the history's: the colour, then the last wall
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(
+        app.doc.model(),
+        &after[after.len() - 1].0,
+        "the colour undone",
+    );
+}
+
+#[test]
+fn c2_an_arcs_end_clicked_goes_first_and_the_chain_stays() {
+    let (mut app, ctx, mut t, _before, after) = draw_chain(crate::planview::Tool::Wall, true);
+    // the next arc's end clicked, not bent yet
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(420.0, 560.0));
+    assert!(app.plan.wall_arc_end.is_some());
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    assert!(app.plan.wall_arc_end.is_none(), "the arc's end goes first");
+    same(
+        app.doc.model(),
+        &after[after.len() - 1].0,
+        "nothing in the project",
+    );
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(
+        app.doc.model(),
+        &after[after.len() - 2].0,
+        "then the last arc",
+    );
+    assert_eq!(
+        app.plan.pending,
+        after[after.len() - 2].1,
+        "and on from its start"
+    );
+}
+
+#[test]
+fn c2_after_esc_or_another_tool_ctrl_z_is_the_historys_again() {
+    for end in ["esc", "tool"] {
+        let (mut app, ctx, _t, _before, after) = draw_chain(crate::planview::Tool::Wall, false);
+        if end == "esc" {
+            app.plan.cancel();
+        } else {
+            app.pick_tool(&ctx, crate::planview::Tool::Slab);
+            assert_eq!(app.plan.tool, crate::planview::Tool::Slab);
+        }
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        same(
+            app.doc.model(),
+            &after[after.len() - 2].0,
+            &format!("{end}: the last wall undone"),
+        );
+        assert!(app.plan.pending.is_none(), "{end}: no chain brought back");
+        app.run_command(&ctx, crate::commands::Command::Redo, None);
+        same(
+            app.doc.model(),
+            &after[after.len() - 1].0,
+            &format!("{end}: Redo as ever"),
+        );
+        assert!(app.plan.pending.is_none(), "{end}: still no chain");
+    }
+}
+
+#[test]
+fn c2_a_chain_stepped_back_saves_and_reopens_as_it_is() {
+    let (mut app, ctx, _t, _before, after) = draw_chain(crate::planview::Tool::Wall, false);
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    let path = std::env::temp_dir().join(format!("c2-chain-{}.creabim", std::process::id()));
+    creabim_store::save(&path, &app.doc).expect("saves");
+    let back = creabim_store::load(&path).expect("reopens");
+    let _ = std::fs::remove_file(&path);
+    same(
+        back.model(),
+        &after[after.len() - 2].0,
+        "saved and reopened",
+    );
+}
+
+#[test]
+fn c2_the_walls_left_meet_as_they_did_before_the_last_one() {
+    // layers and corner joins are worked out from the walls themselves:
+    // the plan drawn after Ctrl+Z is the plan drawn before the last wall
+    let (mut app, ctx, _t, _before, after) = draw_chain(crate::planview::Tool::Wall, false);
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    let plan = |m: &Model| {
+        let level = m
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Level(_)))
+            .unwrap()
+            .id;
+        format!("{:?}", creabim_geom::plan::plan_view(m, level, 1.2).items)
+    };
+    assert_eq!(
+        plan(app.doc.model()),
+        plan(&after[after.len() - 2].0),
+        "the plan, layers and joins"
     );
 }

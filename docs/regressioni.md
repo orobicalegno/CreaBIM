@@ -108,7 +108,6 @@ cargo test -p creabim-app --bin creabim-app known_bug -- --ignored
 
 | Bug | Test disattivato | Causa |
 |---|---|---|
-| Dopo Ctrl+Z in una catena di muri, la catena riparte dalla fine del muro tolto, dove non c'è più niente | `undo_tests::known_bug_undo_in_a_wall_chain_resumes_from_the_previous_point` | Lo strumento ricorda solo l'ultimo punto (`pending`); Annulla toglie il muro ma non riporta indietro il punto |
 | Cancel nelle 4 finestre di impostazioni rimette anche le impostazioni cambiate altrove mentre era aperta | `undo_tests::known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere` | All'apertura viene fotografato **tutto** l'insieme delle impostazioni e Cancel lo rimette intero (`osnapui.rs`, `dialog_end`); per le finestre del progetto invece si tiene conto di ciò che ha cambiato la finestra stessa |
 
 Osservato durante l'analisi: l'elenco "uno strumento ha qualcosa in corso"
@@ -149,6 +148,57 @@ contorno) il test dei vertici fallisce. Non verificato: gli strumenti nel
 **riquadro 3D** (la catena di muri in 3D è trattata dallo stesso codice, ma
 non c'è ancora un test che la disegni) e in **sezione**; il Ripristina
 durante uno strumento a metà (da valutare a parte).
+
+Un'eccezione voluta, introdotta da C2: in una catena di muri o di travi i
+pezzi già disegnati sono confermati, e Ctrl+Z toglie l'ultimo (solo quello).
+Il test dei 6 gruppi l'ammette in modo stretto: un solo passo annullato e
+il progetto esattamente com'era prima dell'ultimo clic.
+
+## Annulla e Ripristina in una catena di muri o travi (C2, corretto)
+
+**Bug corretto.** Disegnando muri (o travi) uno dopo l'altro, Ctrl+Z
+toglieva l'ultimo muro ma la catena ripartiva dalla fine del muro tolto,
+dove non c'era più niente. Causa: lo strumento ricordava solo l'ultimo
+punto (`pending`), e Annulla non sapeva che quel punto apparteneva al muro
+tolto.
+
+**Ora:** lo strumento tiene l'elenco dei pezzi della catena
+(`PlanState::chain_steps`: il passo della cronologia, l'inizio, la fine e,
+per le travi, la trave a cui si aggancia). Con la catena in corso e niente
+altro a metà, Ctrl+Z toglie l'ultimo pezzo e la catena riparte dal suo
+inizio; Ctrl+Z ancora toglie il pezzo prima, e così via fino al primo
+punto, poi il primo punto, poi la cronologia come sempre. Ripristina
+rimette il pezzo e la catena riparte dalla sua fine. Vale solo se l'ultimo
+passo della cronologia è proprio quel pezzo: se nel frattempo è stato
+fatto altro (un colore cambiato, un'altra modifica), la catena si chiude e
+Ctrl+Z non tocca quel lavoro per sorpresa. Esc, il clic destro e il cambio
+di strumento chiudono la catena: dopo, Annulla e Ripristina sono quelli di
+sempre.
+
+| Comportamento | Test |
+|---|---|
+| Muri dritti: Ctrl+Z ripetuto toglie un muro alla volta, il progetto ogni volta identico a prima, e la catena riparte dal punto giusto; poi il primo punto; nessun passo precedente annullato | `c2_undo_in_a_chain_of_straight_walls_steps_back_a_wall_at_a_time` |
+| Lo stesso con i muri ad arco | `c2_undo_in_a_chain_of_arc_walls_steps_back_an_arc_at_a_time` |
+| Lo stesso con le travi | `c2_undo_in_a_chain_of_beams_steps_back_a_beam_at_a_time` |
+| Ripristina (muri e travi) rimette il pezzo, la catena riparte dalla sua fine e si può continuare | `c2_redo_in_a_chain_puts_the_piece_back_and_the_chain_goes_on_from_its_end` |
+| Dopo Ctrl+Z la trave nuova si aggancia alla trave su cui la catena è rimasta (giunzione nello stesso passo) | `c2_a_beam_drawn_after_undo_joins_the_beam_the_chain_stands_on` |
+| Arco a metà (fine cliccata, non ancora curvato): Ctrl+Z toglie prima quella, la catena resta | `c2_an_arcs_end_clicked_goes_first_and_the_chain_stays` |
+| Catena interrotta da un'altra modifica: Ctrl+Z non la annulla per sorpresa | `c2_a_chain_interrupted_by_other_work_never_undoes_that_work_by_surprise` |
+| Dopo Esc o un altro strumento, Annulla e Ripristina come sempre | `c2_after_esc_or_another_tool_ctrl_z_is_the_historys_again` |
+| Il progetto, salvato e riaperto dopo Ctrl+Z nella catena, è identico | `c2_a_chain_stepped_back_saves_and_reopens_as_it_is` |
+| La pianta disegnata (stratigrafie e giunzioni d'angolo comprese) è la stessa di prima dell'ultimo muro | `c2_the_walls_left_meet_as_they_did_before_the_last_one` |
+| Il caso trovato in G4 (test riattivato) | `fixed_c2_undo_in_a_wall_chain_resumes_from_the_previous_point` |
+
+Verificato: prima della correzione 5 dei primi 6 test falliscono; in una
+copia isolata, togliendo la parte di Annulla falliscono 8 test su 11 (i 3
+che passano sono controlli di sicurezza, veri anche prima), togliendo
+quella di Ripristina fallisce il test di Ripristina. Coerenza 2D/3D: il
+progetto dopo Ctrl+Z è identico elemento per elemento a quello di prima,
+e la pianta disegnata è la stessa; il 3D si costruisce dallo stesso
+progetto, ma **non** è stato provato a schermo né su una GPU. Non coperta:
+la catena di muri disegnata nel **riquadro 3D** (`pending_3d`): lì Ctrl+Z
+toglie il punto in corso (C1) e poi annulla come sempre, senza riprendere
+la catena.
 
 ## Altri comportamenti dubbi emersi dai test
 

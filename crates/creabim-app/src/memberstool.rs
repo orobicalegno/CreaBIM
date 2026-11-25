@@ -217,8 +217,10 @@ pub fn click(
                     .last_beam
                     .and_then(|id| doc.model().get(id).cloned())
                     .filter(|pe| matches!(&pe.kind, ElementKind::Beam(pb) if pb.end.distance(a) < 1e-6));
+                    let stood_on = state.members.last_beam;
+                    let beam = e.id;
                     state.members.last_beam = Some(e.id);
-                    match prev {
+                    let done = match prev {
                         Some(pe) => {
                             let (mut pe2, mut ne) = (pe.clone(), e);
                             if let (ElementKind::Beam(pb), ElementKind::Beam(nb)) =
@@ -230,7 +232,11 @@ pub fn click(
                             doc.commit(Transaction::new("Draw beam").replace(pe, pe2).insert(ne))
                         }
                         None => add(doc, selection, e, "Draw beam"),
+                    };
+                    if done.is_ok() {
+                        state.note_chain_piece(doc, a, p, stood_on, Some(beam));
                     }
+                    done
                 }
                 Some(_) => Ok(()),
             }

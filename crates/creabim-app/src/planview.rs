@@ -378,6 +378,11 @@ pub struct PlanState {
     pub wall_shape: u8,
     /// An arc wall's end, once clicked: the next click bends it.
     pub wall_arc_end: Option<DVec2>,
+    /// The pieces of the wall or beam chain being drawn, oldest first:
+    /// Ctrl+Z takes back the last and the chain goes on from its start
+    /// (C2); those taken back, for Redo.
+    pub chain_steps: Vec<ChainStep>,
+    pub chain_redo: Vec<ChainStep>,
     /// Section line handle being dragged, and the line when the drag began.
     drag: Option<(Handle, DVec2, DVec2, DVec2)>,
     /// Dimension being drawn: its points so far, attached and as drawn.
@@ -655,9 +660,24 @@ impl PlanState {
     }
 }
 
+/// One piece of a wall or beam chain, as drawn: the step that put it in
+/// the project, the tool, where it starts and ends, and the beam the chain
+/// stood on before it and the beam it is (beams only).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainStep {
+    pub step: creabim_core::StepId,
+    pub tool: Tool,
+    pub start: DVec2,
+    pub end: DVec2,
+    pub last_beam: Option<ElementId>,
+    pub beam: Option<ElementId>,
+}
+
 impl Default for PlanState {
     fn default() -> Self {
         Self {
+            chain_steps: vec![],
+            chain_redo: vec![],
             cameras: HashMap::new(),
             divide_marks: vec![],
             divide_labels: vec![],
@@ -810,6 +830,7 @@ impl PlanState {
     /// Drop any half-finished tool input.
     pub fn cancel(&mut self) {
         self.pending = None;
+        self.end_chain();
         self.dim.clear();
         self.chain_line = None;
         self.anno.clear();
@@ -839,6 +860,101 @@ impl PlanState {
             || !self.members.path.is_empty()
             || self.align.has_input()
             || !self.details.path.is_empty()
+    }
+
+    /// A piece of a wall or beam chain went into the project as the last
+    /// step: note it, for Ctrl+Z (C2). A piece not going on from the last
+    /// one starts a new chain.
+    pub fn note_chain_piece(
+        &mut self,
+        doc: &Document,
+        start: DVec2,
+        end: DVec2,
+        last_beam: Option<ElementId>,
+        beam: Option<ElementId>,
+    ) {
+        let Some(step) = doc.undo_steps().last().map(|s| s.id) else {
+            return;
+        };
+        if self
+            .chain_steps
+            .last()
+            .is_some_and(|c| c.tool != self.tool || c.end.distance(start) > 1e-9)
+        {
+            self.chain_steps.clear();
+        }
+        self.chain_redo.clear();
+        self.chain_steps.push(ChainStep {
+            step,
+            tool: self.tool,
+            start,
+            end,
+            last_beam,
+            beam,
+        });
+    }
+
+    /// The chain is over: Ctrl+Z goes back to the history as ever.
+    pub fn end_chain(&mut self) {
+        self.chain_steps.clear();
+        self.chain_redo.clear();
+    }
+
+    /// Ctrl+Z in a wall or beam chain, with nothing else part way: take the
+    /// chain's last piece out of the project and go on from where it
+    /// started. Only when that piece is the last step of the history and
+    /// the chain still stands at its end; otherwise the chain is over and
+    /// `false` (Ctrl+Z then does what it does without one).
+    pub fn chain_undo(&mut self, doc: &mut Document) -> bool {
+        let Some(last) = self.chain_steps.last().cloned() else {
+            return false;
+        };
+        // an arc's end clicked: that goes first (C1), the chain stays
+        if self.wall_arc_end.is_some() {
+            return false;
+        }
+        let on = last.tool == self.tool
+            && self.pending.is_some_and(|p| p.distance(last.end) < 1e-9)
+            && doc.undo_steps().last().is_some_and(|s| s.id == last.step);
+        if !on {
+            self.end_chain();
+            return false;
+        }
+        if !doc.undo() {
+            self.end_chain();
+            return false;
+        }
+        self.chain_steps.pop();
+        self.pending = Some(last.start);
+        self.members.last_beam = last.last_beam;
+        self.chain_redo.push(last);
+        true
+    }
+
+    /// Redo right after [`Self::chain_undo`]: the piece back, and the
+    /// chain on from its end. `false` when the next redo is not that piece
+    /// or the chain has moved on.
+    pub fn chain_redo(&mut self, doc: &mut Document) -> bool {
+        let Some(next) = self.chain_redo.last().cloned() else {
+            return false;
+        };
+        let on = next.tool == self.tool
+            && self.wall_arc_end.is_none()
+            && self.pending.is_some_and(|p| p.distance(next.start) < 1e-9)
+            && doc.redo_steps().last().is_some_and(|s| s.id == next.step);
+        if !on {
+            self.chain_redo.clear();
+            return false;
+        }
+        if !doc.redo() {
+            self.chain_redo.clear();
+            return false;
+        }
+        self.chain_redo.pop();
+        self.pending = Some(next.end);
+        self.members.last_beam = next.beam;
+        self.chain_steps.push(next);
+        true
     }
 
     /// Ctrl+Z while a tool is part way: take back the last thing it has not
@@ -3996,7 +4112,9 @@ fn plan_click(
                 state.pending = Some(b);
                 state.wall_arc_end = None;
                 state.status = Some("Arc wall placed. Click the next one's end, or Esc.".into());
-                doc.commit(Transaction::new("Draw arc wall").insert(e))
+                doc.commit(Transaction::new("Draw arc wall").insert(e))?;
+                state.note_chain_piece(doc, a, b, None, None);
+                Ok(())
             }
             _ => Ok(()),
         },
@@ -4010,7 +4128,9 @@ fn plan_click(
                 let e = state.typed(doc.model(), Element::new("Wall", ElementKind::Wall(w)));
                 selection.only(e.id);
                 state.pending = Some(p);
-                doc.commit(Transaction::new("Draw wall").insert(e))
+                doc.commit(Transaction::new("Draw wall").insert(e))?;
+                state.note_chain_piece(doc, a, p, None, None);
+                Ok(())
             }
             Some(_) => Ok(()),
         },

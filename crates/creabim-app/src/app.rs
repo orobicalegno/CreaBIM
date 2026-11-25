@@ -1909,6 +1909,22 @@ impl CreaBimApp {
                 self.selection.clear();
                 self.face = None;
             }
+            // a wall or beam chain on, with nothing else part way: Undo
+            // takes its last piece back and the chain goes on from where
+            // that piece started (C2)
+            Command::Undo
+                if self
+                    .plan
+                    .chain_steps
+                    .last()
+                    .is_some_and(|c| c.tool == self.plan.tool)
+                    && self.plan.chain_undo(&mut self.doc) =>
+            {
+                self.drop_stale_selection();
+                self.say(
+                    "Undo: the chain's last piece taken back; click on to draw it again, Ctrl+Z for the one before, Esc to end.",
+                );
+            }
             // a tool part way (LINE, PLINE, a slab's outline, a wall's first
             // point, points being picked...): Undo takes back what the tool
             // has not confirmed yet, a point at a time, as AutoCAD's U, and
@@ -1940,6 +1956,10 @@ impl CreaBimApp {
                     self.status = format!("Undid: {}", label.unwrap_or_default());
                     self.drop_stale_selection();
                 }
+            }
+            Command::Redo if self.plan.chain_redo(&mut self.doc) => {
+                self.drop_stale_selection();
+                self.say("Redo: the chain's piece put back; the chain goes on from its end.");
             }
             Command::Redo => {
                 let label = self.doc.redo_label().map(str::to_owned);
