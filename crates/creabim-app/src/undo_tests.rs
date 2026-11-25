@@ -552,3 +552,183 @@ fn opening_and_closing_a_window_again_and_again_leaves_the_project_as_it_was() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// KNOWN BUGS, found by G4. Each test holds the RIGHT behaviour, so today
+// it fails: it is ignored (`#[ignore]`) so the suite stays green, and is
+// listed in docs/regressioni.md. When its bug is fixed, remove the
+// `#[ignore]` line in the same commit as the fix. To see them fail now:
+//
+//     cargo test -p creabim-app --bin creabim-app known_bug -- --ignored
+// ---------------------------------------------------------------------
+
+/// A frame of the plan as the app draws it, with `events`.
+fn plan_frame(app: &mut CreaBimApp, ctx: &egui::Context, t: &mut f64, events: Vec<egui::Event>) {
+    *t += 1.0 / 60.0;
+    let rect = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0));
+    let raw = egui::RawInput {
+        screen_rect: Some(rect),
+        events,
+        time: Some(*t),
+        max_texture_side: Some(8192),
+        ..Default::default()
+    };
+    let mut out = ctx.run_ui(raw, |ui| app.show_plan(ui, rect, Color32::WHITE));
+    out.textures_delta.clear();
+}
+
+/// A click with the left button at `at`, as the pointer comes and goes.
+fn click_plan(app: &mut CreaBimApp, ctx: &egui::Context, t: &mut f64, at: egui::Pos2) {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    plan_frame(app, ctx, t, vec![egui::Event::PointerMoved(at)]);
+    plan_frame(app, ctx, t, vec![egui::Event::PointerMoved(at)]);
+    plan_frame(app, ctx, t, vec![button(true)]);
+    plan_frame(app, ctx, t, vec![button(false)]);
+    plan_frame(app, ctx, t, vec![]);
+}
+
+/// The starter house with its ground floor plan shown, tool `tool` picked,
+/// after one earlier change (a layer thickened): the app, a context, the
+/// clock and the project as it was before the tool.
+fn drawing_with(tool: crate::planview::Tool) -> (CreaBimApp, egui::Context, f64, Model) {
+    let mut app = house();
+    let ctx = egui::Context::default();
+    let plan = app
+        .doc
+        .model()
+        .iter()
+        .find(
+            |e| matches!(&e.kind, ElementKind::View(v) if matches!(v.kind, ViewKind::Plan { .. })),
+        )
+        .map(|e| e.id)
+        .unwrap();
+    app.active_view = Some(plan);
+    let mut t = 0.0;
+    plan_frame(&mut app, &ctx, &mut t, vec![]);
+    thicken_a_layer(&mut app);
+    let before = snap(&app);
+    let i = crate::planview::Tool::ALL
+        .iter()
+        .position(|x| *x == tool)
+        .unwrap();
+    app.run_action(&ctx, &format!("tool:{i}"));
+    (app, ctx, t, before)
+}
+
+#[test]
+#[ignore = "known bug (G4): Ctrl+Z while drawing a slab's outline undoes earlier work, see docs/regressioni.md"]
+fn known_bug_undo_while_drawing_a_slab_outline_keeps_earlier_work() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Slab);
+    for x in [500.0, 700.0, 700.0] {
+        let y = if x == 700.0
+            && app
+                .plan
+                .outline
+                .as_ref()
+                .is_some_and(|o| o.points.len() == 2)
+        {
+            600.0
+        } else {
+            400.0
+        };
+        click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(x, y));
+    }
+    let corners = |app: &CreaBimApp| app.plan.outline.as_ref().map_or(0, |o| o.points.len());
+    assert_eq!(corners(&app), 3, "three corners clicked");
+    same(
+        app.doc.model(),
+        &before,
+        "while drawing, nothing is confirmed yet",
+    );
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    // the right behaviour: the last corner goes, the earlier work stays
+    same(app.doc.model(), &before, "Ctrl+Z while drawing the outline");
+    assert_eq!(corners(&app), 2, "Ctrl+Z takes back the last corner");
+}
+
+#[test]
+#[ignore = "known bug (G4): Ctrl+Z after a wall's first click undoes earlier work, see docs/regressioni.md"]
+fn known_bug_undo_after_a_walls_first_click_keeps_earlier_work() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Wall);
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 400.0));
+    assert!(app.plan.pending.is_some(), "the wall's start is clicked");
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    // the right behaviour: the start point goes, the earlier work stays
+    same(app.doc.model(), &before, "Ctrl+Z after the first click");
+    assert!(
+        app.plan.pending.is_none(),
+        "Ctrl+Z takes back the start point"
+    );
+}
+
+#[test]
+#[ignore = "known bug (G4): after Ctrl+Z in a wall chain, the chain resumes from the removed wall's end, see docs/regressioni.md"]
+fn known_bug_undo_in_a_wall_chain_resumes_from_the_previous_point() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Wall);
+    let pts = [
+        egui::Pos2::new(400.0, 400.0),
+        egui::Pos2::new(600.0, 400.0),
+        egui::Pos2::new(600.0, 600.0),
+    ];
+    for p in pts {
+        click_plan(&mut app, &ctx, &mut t, p);
+    }
+    let walls = |app: &CreaBimApp| {
+        app.doc
+            .model()
+            .iter()
+            .filter(|e| matches!(e.kind, ElementKind::Wall(_)))
+            .count()
+    };
+    let n_before = before
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::Wall(_)))
+        .count();
+    assert_eq!(walls(&app), n_before + 2, "two walls drawn in the chain");
+    let second_start = app.plan.pending.map(|_| ()).and_then(|_| {
+        app.doc
+            .model()
+            .iter()
+            .filter_map(|e| match &e.kind {
+                ElementKind::Wall(w) => Some(w.start),
+                _ => None,
+            })
+            .last()
+    });
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    assert_eq!(walls(&app), n_before + 1, "Ctrl+Z takes back the last wall");
+    // the right behaviour: the chain goes on from where the remaining wall
+    // ends (the removed wall's start), not from a point with no wall
+    assert_eq!(
+        app.plan.pending, second_start,
+        "the chain resumes from the previous point"
+    );
+}
+
+#[test]
+#[ignore = "known bug (G4): Cancel in a settings window puts back settings changed elsewhere, see docs/regressioni.md"]
+fn known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere() {
+    for w in WINDOWS.iter().filter(|w| !w.by_close) {
+        let mut r = Run::new();
+        let before = r.app.shell.settings.render_3d;
+        let other = if before == crate::render3d::RenderMode::Maquette {
+            crate::render3d::RenderMode::Shaded
+        } else {
+            crate::render3d::RenderMode::Maquette
+        };
+        r.open(w);
+        // while it is open, the 3D style is changed from the Render menu
+        r.app.shell.settings.render_3d = other;
+        r.close(w, false);
+        assert_eq!(
+            r.app.shell.settings.render_3d, other,
+            "{}: Cancel keeps a setting the window never touched",
+            w.key
+        );
+    }
+}

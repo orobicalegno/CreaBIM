@@ -95,20 +95,27 @@ niente; U6 Save si comporta come Cancel; U7 la finestra non riconosce le
 proprie modifiche; U8 Annulla in PLINE annulla il comando precedente; U9
 Save annulla l'ultimo passo.
 
-### Problemi trovati (da correggere, non fissati nei test)
+### Bug noti, con il loro test disattivato
 
-- **Annulla durante il contorno di un solaio annulla il lavoro precedente.**
-  Con due punti del contorno già cliccati, Ctrl+Z ha annullato la modifica
-  fatta prima (una stratigrafia), e i punti del solaio sono rimasti.
-  Annulla "dentro il comando" vale oggi solo per LINE, PLINE e i comandi che
-  chiedono punti, non per il contorno dei solai.
-- **Annulla durante una catena di muri.** Ogni muro della catena è confermato
-  subito; Ctrl+Z toglie correttamente l'ultimo muro, ma il disegno riprende
-  dalla fine del muro tolto, dove non c'è più niente.
-- **Cancel delle finestre di impostazioni** (Settings, Drafting settings,
-  Layers, UCS) rimette **tutte** le impostazioni com'erano all'apertura,
-  anche quelle cambiate altrove nel frattempo (per esempio lo stile
-  Maquette scelto dal menu Render torna a Shaded).
+Ogni bug ha un test che descrive il comportamento **corretto**: oggi fallisce,
+quindi è disattivato (`#[ignore]`) perché la suite resti verde. Va riattivato
+(togliendo la riga `#[ignore]`) nello stesso commit della correzione. Per
+vederli fallire adesso:
+
+```bash
+cargo test -p creabim-app --bin creabim-app known_bug -- --ignored
+```
+
+| Bug | Test disattivato | Causa |
+|---|---|---|
+| Ctrl+Z durante il contorno di un solaio annulla il lavoro fatto prima (i punti del contorno restano) | `undo_tests::known_bug_undo_while_drawing_a_slab_outline_keeps_earlier_work` | L'Annulla "dentro il comando" (`app.rs`, `Command::Undo`) conosce solo il percorso di LINE/PLINE (`details.path`) e i punti chiesti dai comandi (`cmd_pick`): per ogni altro strumento a metà (contorno, primo punto di un muro, quote, travi…) va dritto alla cronologia |
+| Ctrl+Z dopo il primo clic di un muro annulla il lavoro fatto prima | `undo_tests::known_bug_undo_after_a_walls_first_click_keeps_earlier_work` | La stessa del precedente |
+| Dopo Ctrl+Z in una catena di muri, la catena riparte dalla fine del muro tolto, dove non c'è più niente | `undo_tests::known_bug_undo_in_a_wall_chain_resumes_from_the_previous_point` | Lo strumento ricorda solo l'ultimo punto (`pending`); Annulla toglie il muro ma non riporta indietro il punto |
+| Cancel nelle 4 finestre di impostazioni rimette anche le impostazioni cambiate altrove mentre era aperta | `undo_tests::known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere` | All'apertura viene fotografato **tutto** l'insieme delle impostazioni e Cancel lo rimette intero (`osnapui.rs`, `dialog_end`); per le finestre del progetto invece si tiene conto di ciò che ha cambiato la finestra stessa |
+
+Osservato durante l'analisi: l'elenco "uno strumento ha qualcosa in corso"
+usato da Esc e dal clic destro (`PlanState::has_input`) non comprende il
+percorso dello strumento Parti né la catena di muri disegnata nel 3D.
 
 ## Altri comportamenti dubbi emersi dai test
 
@@ -120,8 +127,46 @@ Save annulla l'ultimo passo.
   pixel per lato (egui-wgpu 0.36), e su una scheda che non li ha il programma
   non parte del tutto. Il limite di 2048 è quello predefinito di egui, usato
   nei test. Da correggere comunque per robustezza (proposta a parte).
+  **Se la scheda video non supporta 8192 pixel** (verificato leggendo il
+  codice di egui-wgpu 0.36 ed eframe 0.36, non su una scheda reale): la
+  richiesta di apertura della scheda fallisce, non c'è un secondo tentativo
+  con un limite più basso o con un'altra scheda, l'errore arriva a `main`; su
+  Windows, dove il programma non ha console, **Volumen non si apre e non
+  mostra nessun messaggio**, e non scrive nemmeno nel registro attività.
+  Riguarda solo schede molto vecchie: quelle DirectX 11 e successive
+  supportano almeno 16384 pixel.
 - **Griglia sopra il muro.** Un clic sull'asse di un muro che coincide con
-  una linea di griglia seleziona la griglia, non il muro.
+  una linea di griglia seleziona la griglia, non il muro. Ordine attuale e
+  proposta: vedi *Selezione degli elementi sovrapposti*.
+
+## Selezione degli elementi sovrapposti
+
+Dove più elementi sono sotto il puntatore, **Tab** passa al successivo e il
+contatore accanto al puntatore apre l'elenco di tutti: resta così.
+
+### Ordine attuale (in cui un clic li prende)
+
+- **Viste 2D** (piante, sezioni, prospetti, viste 3D salvate;
+  `planview.rs`, `under_pointer` e `hit_all`): prima le annotazioni (quote,
+  etichette, note, testi); poi simboli e segni (porte e finestre, teste e
+  linee di griglia, marche di sezione e di vista); poi le campiture di ciò
+  che è tagliato (muri, solai); poi crop box e riferimenti (DXF, immagini);
+  poi ciò che il raggio colpisce nel modello. Solo fra gli elementi di
+  disegno 2D (dettagli, note) l'ultimo creato viene per primo.
+- **Riquadro 3D** (`app.rs`, `under_3d`): schizzi, teste di griglia e crop
+  box; poi ciò che si colpisce dal più vicino; le linee di griglia solo se
+  non si colpisce nient'altro.
+
+### Proposta (non ancora applicata)
+
+Nelle viste 2D, gruppi in quest'ordine: elementi costruttivi (muri, solai,
+tetti, pilastri, travi, scale, ringhiere, porte, finestre, arredi); disegno
+2D e annotazioni; riferimenti (griglie, livelli, guide, linee di sezione,
+DXF e immagini, crop box); locali. Nello stesso gruppo l'ultimo creato per
+primo, con due eccezioni: porte e finestre prima del muro che le ospita, e
+un clic proprio sulla testa di una griglia (il cerchio con la lettera)
+prende la griglia. Nel 3D nessun cambiamento. Da decidere: le annotazioni
+prima o dopo gli elementi costruttivi.
 
 ## Bug già corretti e protetti
 
