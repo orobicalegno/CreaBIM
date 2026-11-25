@@ -23,6 +23,8 @@ mod detailtool;
 mod editmode;
 mod files;
 mod fillpreview;
+#[cfg(test)]
+mod gesture_tests;
 mod ghost;
 mod handles;
 mod help;
