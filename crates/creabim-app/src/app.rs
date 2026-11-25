@@ -81,6 +81,9 @@ mod stylesui;
 mod typepreview;
 #[path = "typesui.rs"]
 mod typesui;
+#[cfg(test)]
+#[path = "undo_tests.rs"]
+mod undo_tests;
 #[path = "wallsui.rs"]
 mod wallsui;
 
