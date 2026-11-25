@@ -108,7 +108,7 @@ cargo test -p creabim-app --bin creabim-app known_bug -- --ignored
 
 | Bug | Test disattivato | Causa |
 |---|---|---|
-| Cancel nelle 4 finestre di impostazioni rimette anche le impostazioni cambiate altrove mentre era aperta | `undo_tests::known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere` | All'apertura viene fotografato **tutto** l'insieme delle impostazioni e Cancel lo rimette intero (`osnapui.rs`, `dialog_end`); per le finestre del progetto invece si tiene conto di ciò che ha cambiato la finestra stessa |
+| (nessuno al momento: i tre trovati in G4 sono corretti da C1, C2 e C3) | | |
 
 Osservato durante l'analisi: l'elenco "uno strumento ha qualcosa in corso"
 usato da Esc e dal clic destro (`PlanState::has_input`) non comprende il
@@ -221,6 +221,54 @@ la catena.
 - **Griglia sopra il muro.** Un clic sull'asse di un muro che coincide con
   una linea di griglia seleziona la griglia, non il muro. Ordine attuale e
   proposta: vedi *Selezione degli elementi sovrapposti*.
+
+## Cancel nelle finestre e impostazioni (C3, corretto)
+
+**Bug corretto.** Il Cancel di una finestra (impostazioni, snap, UCS, ma
+anche le finestre del progetto) rimetteva **tutte** le impostazioni com'erano
+all'apertura: anche quelle cambiate altrove mentre la finestra era aperta
+(lo stile 3D dal menu Render, gli snap con F3, l'angolo polare, l'UCS).
+Causa: all'apertura si fotografava l'intero insieme delle impostazioni e
+Cancel lo rimetteva intero (`osnapui.rs`, `dialog_end`).
+
+**Scelta del meccanismo.** Valutati: (a) confronto tra un fotogramma e
+l'altro, (b) registrazione esplicita, in ogni finestra, di ogni impostazione
+cambiata. La (b) chiede di toccare ogni riga che scrive un'impostazione in
+13 finestre, ed è facile dimenticarne una. Applicata la (a), ma solo **dentro
+il codice della finestra**: `in_dialog` confronta le impostazioni subito
+prima e subito dopo che la finestra gira, e ciò che cambia lì è della
+finestra; ciò che cambia fuori (menu, tasti, riga di comando, altre
+finestre) non le viene mai attribuito. Il confronto è voce per voce (ogni
+singola impostazione), e per ognuna si tiene il valore prima del primo
+cambiamento della finestra e l'ultimo valore lasciato dalla finestra.
+
+**Ora:** Cancel rimette solo le voci cambiate dalla finestra, ciascuna al
+valore che aveva prima che la finestra la cambiasse. Se la stessa voce è
+stata cambiata di nuovo altrove dopo la finestra, resta la modifica più
+recente, e la barra di stato lo dice. Le modifiche al progetto seguono la
+regola che c'era già (solo i passi della finestra, solo se sono gli ultimi).
+
+| Comportamento | Test |
+|---|---|
+| In tutte le 13 finestre, Cancel tiene le impostazioni cambiate altrove mentre era aperta (anche dopo altri fotogrammi della finestra); il caso di G4, test riattivato | `fixed_c3_cancel_in_a_settings_window_keeps_settings_changed_elsewhere` |
+| Cancel rimette ciò che la finestra ha cambiato; Save lo tiene | `c3_cancel_puts_back_what_the_window_changed_and_save_keeps_it` |
+| Cambiamenti della finestra e altrove insieme: tornano solo quelli della finestra; la stessa voce cambiata dopo altrove resta, e la barra di stato lo dice | `c3_cancel_puts_back_its_own_and_keeps_what_was_done_elsewhere_meanwhile` |
+| Voce cambiata prima altrove e poi dalla finestra: Cancel la riporta al valore messo altrove | `c3_a_setting_changed_elsewhere_then_by_the_window_goes_back_to_the_elsewhere_value` |
+| Due finestre aperte insieme (Impostazioni e Drafting Settings): ognuna rimette solo il suo | `c3_two_windows_open_each_cancel_puts_back_only_its_own` |
+| Aperture ripetute con Cancel, Save, Cancel, Cancel vuoto | `c3_opening_again_and_again_with_save_and_cancel` |
+| Dopo Cancel, le impostazioni si salvano e rileggono uguali (`settings.json`) e il progetto salvato si riapre uguale | `c3_after_cancel_the_settings_and_the_project_save_and_reopen_as_they_are` |
+
+Verificato: prima della correzione 5 test su 7 falliscono (i 2 che passano
+controllano ciò che il vecchio meccanismo faceva già bene). In una copia
+isolata: attribuendo alla finestra anche i cambiamenti fatti fuori dal suo
+codice falliscono 3 test; rimettendo sempre le voci anche se cambiate dopo
+altrove ne fallisce 1. Limiti: i test fanno il cambiamento "della finestra"
+dentro il suo fotogramma (`in_dialog`), non cliccando i suoi controlli uno
+per uno; una finestra che cambiasse un'impostazione in un momento diverso
+dal proprio fotogramma (per esempio con un'azione rimandata) non sarebbe
+riconosciuta come sua: non ho controllato ogni comando di ogni finestra
+per escluderlo. Le voci che sono elenchi (per esempio gli
+spazi di lavoro) contano come una voce sola.
 
 ## Selezione degli elementi sovrapposti
 

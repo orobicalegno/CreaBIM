@@ -708,27 +708,219 @@ fn fixed_c2_undo_in_a_wall_chain_resumes_from_the_previous_point() {
     );
 }
 
+/// Was a known bug (G4), fixed by C3: and the window keeps running a few
+/// frames after the change elsewhere, as it does in the app.
 #[test]
-#[ignore = "known bug (G4): Cancel in a settings window puts back settings changed elsewhere, see docs/regressioni.md"]
-fn known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere() {
-    for w in WINDOWS.iter().filter(|w| !w.by_close) {
+fn fixed_c3_cancel_in_a_settings_window_keeps_settings_changed_elsewhere() {
+    for w in &WINDOWS {
         let mut r = Run::new();
-        let before = r.app.shell.settings.render_3d;
-        let other = if before == crate::render3d::RenderMode::Maquette {
+        r.open(w);
+        // while it is open: the 3D style from the Render menu, the snaps
+        // switched off (F3), the polar angle and the UCS from the command
+        // line
+        let want = elsewhere(&mut r.app);
+        for _ in 0..3 {
+            r.frame(w);
+        }
+        r.close(w, false);
+        assert_eq!(what_settings(&r.app), want, "{}: Cancel keeps them", w.key);
+    }
+}
+
+// ---------------------------------------------------------------------
+// C3: Cancel in a window puts back the settings that window changed, and
+// only those.
+// ---------------------------------------------------------------------
+
+/// The settings Cancel may put back, as one value to compare.
+type Settled = (
+    crate::files::Settings,
+    crate::snaps::SnapSettings,
+    f64,
+    crate::planview::Ucs,
+);
+
+fn what_settings(app: &CreaBimApp) -> Settled {
+    (
+        app.shell.settings.clone(),
+        app.plan.snap,
+        app.plan.guide_step,
+        app.plan.ucs,
+    )
+}
+
+/// Settings changed somewhere else than the window; the settings then.
+fn elsewhere(app: &mut CreaBimApp) -> Settled {
+    app.shell.settings.render_3d =
+        if app.shell.settings.render_3d == crate::render3d::RenderMode::Maquette {
             crate::render3d::RenderMode::Shaded
         } else {
             crate::render3d::RenderMode::Maquette
         };
+    app.plan.snap.on = !app.plan.snap.on;
+    app.plan.guide_step = 7.5;
+    app.plan.ucs.angle = 0.3;
+    what_settings(app)
+}
+
+/// Settings changed by a window itself.
+fn in_the_window(app: &mut CreaBimApp) {
+    app.shell.settings.crosshair = !app.shell.settings.crosshair;
+    app.shell.settings.marker_size = app.shell.settings.marker_size.wrapping_add(3);
+    app.plan.snap.midpoint = !app.plan.snap.midpoint;
+    app.plan.guide_step = 22.5;
+    app.plan.ucs.origin = DVec2::new(2.0, 3.0);
+}
+
+#[test]
+fn c3_cancel_puts_back_what_the_window_changed_and_save_keeps_it() {
+    for w in &WINDOWS {
+        let mut r = Run::new();
+        let at_open = what_settings(&r.app);
         r.open(w);
-        // while it is open, the 3D style is changed from the Render menu
-        r.app.shell.settings.render_3d = other;
+        r.in_window(w, in_the_window);
+        r.frame(w);
         r.close(w, false);
         assert_eq!(
-            r.app.shell.settings.render_3d, other,
-            "{}: Cancel keeps a setting the window never touched",
+            what_settings(&r.app),
+            at_open,
+            "{}: Cancel puts them back",
+            w.key
+        );
+
+        let mut r = Run::new();
+        r.open(w);
+        r.in_window(w, in_the_window);
+        let changed = what_settings(&r.app);
+        r.close(w, true);
+        assert_eq!(what_settings(&r.app), changed, "{}: Save keeps them", w.key);
+    }
+}
+
+#[test]
+fn c3_cancel_puts_back_its_own_and_keeps_what_was_done_elsewhere_meanwhile() {
+    for w in &WINDOWS {
+        let mut r = Run::new();
+        r.open(w);
+        r.in_window(w, in_the_window);
+        // after the window's change, others elsewhere
+        let mut want = elsewhere(&mut r.app);
+        r.frame(w);
+        r.close(w, false);
+        // what the window changed goes back; the guide step, changed by
+        // both, keeps the later change (made elsewhere)
+        let at_open = Run::new();
+        want.0.crosshair = at_open.app.shell.settings.crosshair;
+        want.0.marker_size = at_open.app.shell.settings.marker_size;
+        want.1.midpoint = at_open.app.plan.snap.midpoint;
+        want.3.origin = at_open.app.plan.ucs.origin;
+        assert_eq!(what_settings(&r.app), want, "{}", w.key);
+        assert!(
+            r.app.status.contains("changed elsewhere"),
+            "{}: the status says what stays: {}",
+            w.key,
+            r.app.status
+        );
+    }
+}
+
+#[test]
+fn c3_a_setting_changed_elsewhere_then_by_the_window_goes_back_to_the_elsewhere_value() {
+    for w in &WINDOWS {
+        let mut r = Run::new();
+        r.open(w);
+        // first elsewhere, then the window changes the same setting
+        r.app.plan.guide_step = 7.5;
+        r.frame(w);
+        r.in_window(w, |a| a.plan.guide_step = 22.5);
+        r.close(w, false);
+        assert_eq!(
+            r.app.plan.guide_step, 7.5,
+            "{}: back to before the window's change",
             w.key
         );
     }
+}
+
+#[test]
+fn c3_two_windows_open_each_cancel_puts_back_only_its_own() {
+    let (a, b) = (&WINDOWS[9], &WINDOWS[10]);
+    assert_eq!((a.key, b.key), ("settings", "dsettings"));
+    let mut r = Run::new();
+    let at_open = what_settings(&r.app);
+    r.open(a);
+    r.open(b);
+    r.in_window(a, |s| {
+        s.shell.settings.crosshair = !s.shell.settings.crosshair
+    });
+    r.in_window(b, |s| s.plan.snap.midpoint = !s.plan.snap.midpoint);
+    let both = what_settings(&r.app);
+    r.close(a, false);
+    assert_eq!(
+        r.app.shell.settings.crosshair, at_open.0.crosshair,
+        "a's change goes"
+    );
+    assert_eq!(r.app.plan.snap.midpoint, both.1.midpoint, "b's stays");
+    r.frame(b);
+    r.close(b, false);
+    assert_eq!(what_settings(&r.app), at_open, "then b's goes too");
+}
+
+#[test]
+fn c3_opening_again_and_again_with_save_and_cancel() {
+    for w in &WINDOWS {
+        let mut r = Run::new();
+        let at_start = what_settings(&r.app);
+        r.open(w);
+        r.in_window(w, in_the_window);
+        r.close(w, false);
+        assert_eq!(what_settings(&r.app), at_start, "{}: first Cancel", w.key);
+        r.open(w);
+        r.in_window(w, |s| s.plan.guide_step = 30.0);
+        r.close(w, true);
+        r.open(w);
+        r.in_window(w, |s| s.plan.guide_step = 45.0);
+        r.close(w, false);
+        assert_eq!(
+            r.app.plan.guide_step, 30.0,
+            "{}: back to what was saved",
+            w.key
+        );
+        r.open(w);
+        r.close(w, false);
+        assert_eq!(
+            r.app.plan.guide_step, 30.0,
+            "{}: an empty Cancel changes nothing",
+            w.key
+        );
+    }
+}
+
+#[test]
+fn c3_after_cancel_the_settings_and_the_project_save_and_reopen_as_they_are() {
+    let w = &WINDOWS[9];
+    let mut r = Run::new();
+    r.open(w);
+    r.in_window(w, in_the_window);
+    let want = elsewhere(&mut r.app);
+    r.close(w, false);
+    // the settings, as stored in settings.json and read back
+    let text = serde_json::to_string_pretty(&r.app.shell.settings).unwrap();
+    let back: crate::files::Settings = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        back, r.app.shell.settings,
+        "settings.json reads back the same"
+    );
+    assert_eq!(
+        back.render_3d, want.0.render_3d,
+        "with the change made elsewhere"
+    );
+    // the project, saved and reopened
+    let path = std::env::temp_dir().join(format!("c3-{}.creabim", std::process::id()));
+    creabim_store::save(&path, &r.app.doc).expect("saves");
+    let reopened = creabim_store::load(&path).expect("reopens");
+    let _ = std::fs::remove_file(&path);
+    same(reopened.model(), r.app.doc.model(), "the project");
 }
 
 // ---------------------------------------------------------------------

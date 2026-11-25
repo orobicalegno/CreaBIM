@@ -5,15 +5,86 @@
 
 use super::*;
 
-/// What a window found when it opened: its Cancel puts it all back.
+/// What a window changed, for its Cancel: the undo steps it made, and the
+/// settings it set itself (C3), each with its value before the window's
+/// first change and the value the window left.
 pub(super) struct DialogSnap {
-    settings: crate::files::Settings,
-    snap: crate::snaps::SnapSettings,
-    guide_step: f64,
-    ucs: crate::planview::Ucs,
+    /// The settings when the window opened (its first frame).
+    at_open: serde_json::Value,
+    /// Each setting the window changed (a path into [`settings_now`]):
+    /// its value before the window's first change, and the window's last.
+    settings: Vec<(Vec<String>, serde_json::Value, serde_json::Value)>,
     /// The undo steps the window itself made: Cancel takes back these, and
     /// never what was done elsewhere while it stood open.
     own: std::collections::HashSet<creabim_core::StepId>,
+}
+
+/// The settings a window's Cancel may put back, as one value: the app's
+/// settings, the snaps, the polar angle and the UCS.
+fn settings_now(app: &CreaBimApp) -> serde_json::Value {
+    serde_json::json!({
+        "settings": serde_json::to_value(&app.shell.settings).unwrap_or_default(),
+        "snap": serde_json::to_value(app.plan.snap).unwrap_or_default(),
+        "guide_step": app.plan.guide_step,
+        "ucs": {
+            "x": app.plan.ucs.origin.x,
+            "y": app.plan.ucs.origin.y,
+            "angle": app.plan.ucs.angle,
+        },
+    })
+}
+
+/// Every setting that differs between `a` and `b`, at its deepest level:
+/// its path, and its values in `a` and `b`.
+fn changed(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    path: &mut Vec<String>,
+    out: &mut Vec<(Vec<String>, serde_json::Value, serde_json::Value)>,
+) {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+            for k in keys {
+                path.push(k.clone());
+                changed(
+                    x.get(k).unwrap_or(&Value::Null),
+                    y.get(k).unwrap_or(&Value::Null),
+                    path,
+                    out,
+                );
+                path.pop();
+            }
+        }
+        _ if a != b => out.push((path.clone(), a.clone(), b.clone())),
+        _ => {}
+    }
+}
+
+fn at<'a>(v: &'a serde_json::Value, path: &[String]) -> &'a serde_json::Value {
+    path.iter()
+        .try_fold(v, |v, k| v.get(k))
+        .unwrap_or(&serde_json::Value::Null)
+}
+
+fn set_at(v: &mut serde_json::Value, path: &[String], to: serde_json::Value) {
+    let Some((last, up)) = path.split_last() else {
+        *v = to;
+        return;
+    };
+    let mut v = v;
+    for k in up {
+        let Some(next) = v.get_mut(k) else { return };
+        v = next;
+    }
+    if let Some(o) = v.as_object_mut() {
+        if to.is_null() {
+            o.remove(last);
+        } else {
+            o.insert(last.clone(), to);
+        }
+    }
 }
 
 impl CreaBimApp {
@@ -22,26 +93,42 @@ impl CreaBimApp {
         if self.dialogs.contains_key(key) {
             return;
         }
+        let at_open = settings_now(self);
         self.dialogs.insert(
             key,
             DialogSnap {
-                settings: self.shell.settings.clone(),
-                snap: self.plan.snap,
-                guide_step: self.plan.guide_step,
-                ucs: self.plan.ucs,
+                at_open,
+                settings: vec![],
                 own: Default::default(),
             },
         );
     }
 
-    /// Run window `key` for a frame, noting the undo steps it makes as its
-    /// own.
+    /// Run window `key` for a frame, noting as its own the undo steps it
+    /// makes and the settings it changes while it runs: what changes
+    /// elsewhere (a menu, a key, another window) happens outside and is
+    /// never counted as the window's.
     pub(super) fn in_dialog(&mut self, key: &'static str, window: impl FnOnce(&mut Self)) {
         let before = self.doc.undo_steps().last().map(|s| s.id);
+        let settings_before = self.dialogs.contains_key(key).then(|| settings_now(self));
         window(self);
+        if !self.dialogs.contains_key(key) {
+            return;
+        }
+        let settings_after = settings_now(self);
         let Some(snap) = self.dialogs.get_mut(key) else {
             return;
         };
+        // opened in this frame: from what it found
+        let from = settings_before.as_ref().unwrap_or(&snap.at_open);
+        let mut now = vec![];
+        changed(from, &settings_after, &mut vec![], &mut now);
+        for (path, was, is) in now {
+            match snap.settings.iter_mut().find(|(p, _, _)| *p == path) {
+                Some(own) => own.2 = is,
+                None => snap.settings.push((path, was, is)),
+            }
+        }
         let steps = self.doc.undo_steps();
         let start = before
             .and_then(|b| steps.iter().rposition(|s| s.id == b))
@@ -49,6 +136,48 @@ impl CreaBimApp {
         // a step the window amended keeps its id: it counts as the
         // window's only if the window made it
         snap.own.extend(steps[start..].iter().map(|s| s.id));
+    }
+
+    /// Put back the settings window `s` changed, each as it was before the
+    /// window changed it, unless it was changed again elsewhere since (the
+    /// later change stays). How many stayed so.
+    fn put_back_settings(&mut self, s: &DialogSnap) -> usize {
+        let now = settings_now(self);
+        let mut back = now.clone();
+        let mut kept = 0;
+        for (path, was, last) in &s.settings {
+            if at(&now, path) == last {
+                set_at(&mut back, path, was.clone());
+            } else {
+                kept += 1;
+            }
+        }
+        if back == now {
+            return kept;
+        }
+        if back["settings"] != now["settings"] {
+            match serde_json::from_value(back["settings"].clone()) {
+                Ok(v) => {
+                    self.shell.settings = v;
+                    self.shell.settings.store();
+                }
+                Err(e) => self.say(format!("Cancel could not put the settings back: {e}")),
+            }
+        }
+        if back["snap"] != now["snap"] {
+            if let Ok(v) = serde_json::from_value(back["snap"].clone()) {
+                self.plan.snap = v;
+            }
+        }
+        if let Some(g) = back["guide_step"].as_f64() {
+            self.plan.guide_step = g;
+        }
+        let ucs = |k: &str| back["ucs"][k].as_f64();
+        if let (Some(x), Some(y), Some(a)) = (ucs("x"), ucs("y"), ucs("angle")) {
+            self.plan.ucs.origin = glam::DVec2::new(x, y);
+            self.plan.ucs.angle = a;
+        }
+        kept
     }
 
     /// Save or Cancel pressed in window `key`'s last frame.
@@ -90,11 +219,7 @@ impl CreaBimApp {
         if keep {
             return;
         }
-        self.shell.settings = s.settings;
-        self.shell.settings.store();
-        self.plan.snap = s.snap;
-        self.plan.guide_step = s.guide_step;
-        self.plan.ucs = s.ucs;
+        let kept = self.put_back_settings(&s);
         // the window's own changes, from the newest, as long as they are
         // the newest: what was done elsewhere meanwhile is never undone
         let mut undone = 0;
@@ -116,7 +241,7 @@ impl CreaBimApp {
         self.plan.forget_snaps();
         self.snaps_3d = None;
         self.geometry_key = None;
-        self.status = if left > 0 {
+        let mut status = if left > 0 {
             format!(
                 "Cancelled the window's last {undone} change(s). {left} earlier one(s) stay: other work came after them, and Cancel never takes that back (Ctrl+Z steps back through everything)."
             )
@@ -125,6 +250,12 @@ impl CreaBimApp {
         } else {
             "Cancelled. Nothing the window changed was left to put back.".into()
         };
+        if kept > 0 {
+            status.push_str(&format!(
+                " {kept} setting(s) the window changed stay as they were changed elsewhere afterwards."
+            ));
+        }
+        self.status = status;
     }
 }
 
