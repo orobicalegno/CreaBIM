@@ -621,8 +621,7 @@ fn drawing_with(tool: crate::planview::Tool) -> (CreaBimApp, egui::Context, f64,
 }
 
 #[test]
-#[ignore = "known bug (G4): Ctrl+Z while drawing a slab's outline undoes earlier work, see docs/regressioni.md"]
-fn known_bug_undo_while_drawing_a_slab_outline_keeps_earlier_work() {
+fn fixed_c1_undo_while_drawing_a_slab_outline_keeps_earlier_work() {
     let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Slab);
     for x in [500.0, 700.0, 700.0] {
         let y = if x == 700.0
@@ -652,8 +651,7 @@ fn known_bug_undo_while_drawing_a_slab_outline_keeps_earlier_work() {
 }
 
 #[test]
-#[ignore = "known bug (G4): Ctrl+Z after a wall's first click undoes earlier work, see docs/regressioni.md"]
-fn known_bug_undo_after_a_walls_first_click_keeps_earlier_work() {
+fn fixed_c1_undo_after_a_walls_first_click_keeps_earlier_work() {
     let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Wall);
     click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 400.0));
     assert!(app.plan.pending.is_some(), "the wall's start is clicked");
@@ -731,4 +729,180 @@ fn known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere() {
             w.key
         );
     }
+}
+
+// ---------------------------------------------------------------------
+// C1: Ctrl+Z while a tool is part way takes back what the tool has not
+// confirmed yet, never earlier work.
+// ---------------------------------------------------------------------
+
+/// Does a tool have input not confirmed yet (points clicked, a pick made)?
+fn part_way(app: &CreaBimApp) -> bool {
+    app.plan.has_input()
+        || !app.plan.parts.path.is_empty()
+        || app.pending_3d.is_some()
+        || app
+            .plan
+            .cmd_pick
+            .as_ref()
+            .is_some_and(|(_, p)| !p.is_empty())
+}
+
+/// Every plan tool, in groups run side by side (each group is a test).
+const TOOL_GROUPS: [&[crate::planview::Tool]; 6] = {
+    use crate::planview::Tool::*;
+    [
+        &[Wall, Slab, Shaft, Beam, Roof, Stair, Railing, Footing],
+        &[
+            Extrusion, Sweep, Void, Terrain, Paving, Planting, Object, Mass, Column,
+        ],
+        &[Room, RoomSeparator, Ceiling, Door, Window, Opening],
+        &[Section, Elevation, Callout, Camera, Level],
+        &[
+            Dimension, Tag, Angle, Radius, Diameter, ArcLength, Note, SpotLevel,
+        ],
+        &[Sketch, Guide, Grid, Align, Detail],
+    ]
+};
+
+/// With each tool of `tools`, one, two and three clicks, then Ctrl+Z:
+/// while the tool is part way, nothing confirmed may change. The number of
+/// cases where a tool was part way.
+fn undo_part_way_keeps_confirmed_work(tools: &[crate::planview::Tool]) -> usize {
+    let pts = [
+        egui::Pos2::new(450.0, 380.0),
+        egui::Pos2::new(650.0, 380.0),
+        egui::Pos2::new(650.0, 560.0),
+    ];
+    let mut checked = 0;
+    let mut wrong = Vec::new();
+    for &tool in tools {
+        for clicks in 1..=pts.len() {
+            let (mut app, ctx, mut t, _) = drawing_with(tool);
+            for p in &pts[..clicks] {
+                click_plan(&mut app, &ctx, &mut t, *p);
+            }
+            if !part_way(&app) {
+                continue;
+            }
+            checked += 1;
+            let now = snap(&app);
+            let steps = app.doc.undo_steps().len();
+            app.run_command(&ctx, crate::commands::Command::Undo, None);
+            if app.doc.undo_steps().len() != steps || app.doc.model() != &now {
+                wrong.push(format!("{tool:?} after {clicks} click(s)"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "Ctrl+Z took back confirmed work while a tool was part way:\n  {}",
+        wrong.join("\n  ")
+    );
+    checked
+}
+
+#[test]
+fn c1_every_plan_tool_is_in_a_group() {
+    for tool in crate::planview::Tool::ALL {
+        if tool != crate::planview::Tool::Select {
+            assert!(
+                TOOL_GROUPS.iter().any(|g| g.contains(&tool)),
+                "{tool:?} is checked by no c1_undo_part_way test"
+            );
+        }
+    }
+}
+
+#[test]
+fn c1_undo_part_way_walls_slabs_roofs_stairs() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[0]) >= 15);
+}
+
+#[test]
+fn c1_undo_part_way_parts_and_site() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[1]) >= 9);
+}
+
+#[test]
+fn c1_undo_part_way_rooms_and_openings() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[2]) >= 6);
+}
+
+#[test]
+fn c1_undo_part_way_views() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[3]) >= 6);
+}
+
+#[test]
+fn c1_undo_part_way_annotation() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[4]) >= 10);
+}
+
+#[test]
+fn c1_undo_part_way_drafting() {
+    assert!(undo_part_way_keeps_confirmed_work(TOOL_GROUPS[5]) >= 8);
+}
+
+#[test]
+fn c1_with_nothing_part_way_undo_takes_back_the_last_step_as_ever() {
+    use crate::planview::Tool;
+    for tool in [Tool::Select, Tool::Wall, Tool::Slab, Tool::Dimension] {
+        let (mut app, ctx, _t, before) = drawing_with(tool);
+        assert!(!part_way(&app), "{tool:?}: picked, nothing clicked yet");
+        let steps = app.doc.undo_steps().len();
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        assert_eq!(
+            app.doc.undo_steps().len(),
+            steps - 1,
+            "{tool:?}: one step undone"
+        );
+        assert_ne!(
+            app.doc.model(),
+            &before,
+            "{tool:?}: the earlier change undone"
+        );
+    }
+}
+
+#[test]
+fn c1_esc_drops_the_whole_outline_and_ctrl_z_only_its_last_corner() {
+    let corners = |app: &CreaBimApp| app.plan.outline.as_ref().map_or(0, |o| o.points.len());
+    let draw = || {
+        let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Slab);
+        for p in [
+            egui::Pos2::new(450.0, 380.0),
+            egui::Pos2::new(650.0, 380.0),
+            egui::Pos2::new(650.0, 560.0),
+        ] {
+            click_plan(&mut app, &ctx, &mut t, p);
+        }
+        (app, ctx, before)
+    };
+    // Ctrl+Z: one corner at a time, the tool and the earlier work kept
+    let (mut app, ctx, before) = draw();
+    assert_eq!(corners(&app), 3);
+    for left in [2, 1, 0] {
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        assert_eq!(corners(&app), left, "Ctrl+Z takes back one corner");
+        same(app.doc.model(), &before, "Ctrl+Z while drawing");
+    }
+    assert_eq!(app.plan.tool, crate::planview::Tool::Slab, "the tool stays");
+    // Esc (and a right-click, through the same step back): the whole
+    // outline, then the tool
+    let (mut app, _ctx, before) = draw();
+    assert!(app.plan.step_back());
+    assert_eq!(corners(&app), 0, "Esc drops the outline");
+    assert_eq!(
+        app.plan.tool,
+        crate::planview::Tool::Slab,
+        "first Esc keeps the tool"
+    );
+    same(app.doc.model(), &before, "Esc");
+    assert!(app.plan.step_back());
+    assert_eq!(
+        app.plan.tool,
+        crate::planview::Tool::Select,
+        "second Esc leaves it"
+    );
 }

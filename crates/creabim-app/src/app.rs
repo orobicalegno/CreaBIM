@@ -1909,26 +1909,30 @@ impl CreaBimApp {
                 self.selection.clear();
                 self.face = None;
             }
-            // inside a command (LINE, PLINE, a shape being drawn, points
-            // being picked) Undo takes back the last point, as AutoCAD's U
+            // a tool part way (LINE, PLINE, a slab's outline, a wall's first
+            // point, points being picked...): Undo takes back what the tool
+            // has not confirmed yet, a point at a time, as AutoCAD's U, and
+            // never anything already in the project
             Command::Undo
-                if !self.plan.details.path.is_empty()
+                if self.plan.has_input()
+                    || !self.plan.parts.path.is_empty()
+                    || self.pending_3d.is_some()
                     || self
                         .plan
                         .cmd_pick
                         .as_ref()
                         .is_some_and(|(_, p)| !p.is_empty()) =>
             {
-                if self.plan.details.path.pop().is_some() {
-                    if self.plan.pline_arcs.len() > self.plan.details.path.len().saturating_sub(1) {
-                        self.plan.pline_arcs.pop();
+                let what = match self.plan.take_back_input() {
+                    Some(what) => what,
+                    None => {
+                        self.pending_3d = None;
+                        "the first point"
                     }
-                } else if let Some((_, p)) = &mut self.plan.cmd_pick {
-                    p.pop();
-                }
-                self.say(
-                    "Undo: the last point is taken back. Ctrl+Z again takes back the one before.",
-                );
+                };
+                self.say(format!(
+                    "Undo: {what} taken back; what is in the project stays. Ctrl+Z again takes back the one before."
+                ));
             }
             Command::Undo => {
                 let label = self.doc.undo_label().map(str::to_owned);

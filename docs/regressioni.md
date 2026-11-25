@@ -108,14 +108,47 @@ cargo test -p creabim-app --bin creabim-app known_bug -- --ignored
 
 | Bug | Test disattivato | Causa |
 |---|---|---|
-| Ctrl+Z durante il contorno di un solaio annulla il lavoro fatto prima (i punti del contorno restano) | `undo_tests::known_bug_undo_while_drawing_a_slab_outline_keeps_earlier_work` | L'Annulla "dentro il comando" (`app.rs`, `Command::Undo`) conosce solo il percorso di LINE/PLINE (`details.path`) e i punti chiesti dai comandi (`cmd_pick`): per ogni altro strumento a metà (contorno, primo punto di un muro, quote, travi…) va dritto alla cronologia |
-| Ctrl+Z dopo il primo clic di un muro annulla il lavoro fatto prima | `undo_tests::known_bug_undo_after_a_walls_first_click_keeps_earlier_work` | La stessa del precedente |
 | Dopo Ctrl+Z in una catena di muri, la catena riparte dalla fine del muro tolto, dove non c'è più niente | `undo_tests::known_bug_undo_in_a_wall_chain_resumes_from_the_previous_point` | Lo strumento ricorda solo l'ultimo punto (`pending`); Annulla toglie il muro ma non riporta indietro il punto |
 | Cancel nelle 4 finestre di impostazioni rimette anche le impostazioni cambiate altrove mentre era aperta | `undo_tests::known_bug_cancel_in_a_settings_window_keeps_settings_changed_elsewhere` | All'apertura viene fotografato **tutto** l'insieme delle impostazioni e Cancel lo rimette intero (`osnapui.rs`, `dialog_end`); per le finestre del progetto invece si tiene conto di ciò che ha cambiato la finestra stessa |
 
 Osservato durante l'analisi: l'elenco "uno strumento ha qualcosa in corso"
 usato da Esc e dal clic destro (`PlanState::has_input`) non comprende il
 percorso dello strumento Parti né la catena di muri disegnata nel 3D.
+
+## Annulla durante uno strumento a metà (C1, corretto)
+
+**Bug corretto.** Con 31 strumenti della pianta, Ctrl+Z dato a metà
+disegno (un contorno aperto, il primo punto di un muro, una quota a metà…)
+annullava il lavoro fatto **prima** dello strumento: solai, coperture,
+cavedi, stanze, controsoffitti, separatori, scale, ringhiere, fondazioni,
+estrusioni, sweep, vuoti, terreno, pavimentazioni, sezioni, prospetti,
+richiami, camere, quote, etichette, angoli, raggi, diametri, lunghezze
+d'arco, note, quote di livello, schizzi, guide, griglie, allineamenti, muri,
+travi. Causa: l'Annulla "dentro il comando" conosceva solo LINE/PLINE e i
+punti chiesti dai comandi.
+
+**Ora:** se uno strumento ha qualcosa non confermato, Ctrl+Z toglie
+l'ultima cosa non confermata (un vertice, un punto, la scelta fatta), un
+passo alla volta, e non tocca mai la cronologia del progetto; senza niente
+in corso, Ctrl+Z annulla l'ultimo passo come sempre. Esc e il clic destro
+non cambiano: tolgono tutto ciò che è in corso, poi lasciano lo strumento
+(`PlanState::step_back`); Ctrl+Z (`PlanState::take_back_input`) un passo
+alla volta e non lascia lo strumento.
+
+| Comportamento | Test |
+|---|---|
+| Per **ogni** strumento della pianta, con 1, 2 e 3 clic: a metà, Ctrl+Z non cambia niente di confermato (6 gruppi in parallelo) | `c1_undo_part_way_walls_slabs_roofs_stairs`, `c1_undo_part_way_parts_and_site`, `c1_undo_part_way_rooms_and_openings`, `c1_undo_part_way_views`, `c1_undo_part_way_annotation`, `c1_undo_part_way_drafting` |
+| Nessuno strumento resta fuori da quei test | `c1_every_plan_tool_is_in_a_group` |
+| Senza niente in corso, Ctrl+Z annulla l'ultimo passo come sempre | `c1_with_nothing_part_way_undo_takes_back_the_last_step_as_ever` |
+| Ctrl+Z toglie un vertice alla volta; Esc tutto il contorno, poi lascia lo strumento | `c1_esc_drops_the_whole_outline_and_ctrl_z_only_its_last_corner` |
+| Il contorno del solaio e il primo punto del muro (i due casi trovati in G4, test riattivati) | `fixed_c1_undo_while_drawing_a_slab_outline_keeps_earlier_work`, `fixed_c1_undo_after_a_walls_first_click_keeps_earlier_work` |
+
+Verificato: prima della correzione i test falliscono (31 strumenti
+elencati); dopo, passano. Con Ctrl+Z fatto agire come Esc (tutto il
+contorno) il test dei vertici fallisce. Non verificato: gli strumenti nel
+**riquadro 3D** (la catena di muri in 3D è trattata dallo stesso codice, ma
+non c'è ancora un test che la disegni) e in **sezione**; il Ripristina
+durante uno strumento a metà (da valutare a parte).
 
 ## Altri comportamenti dubbi emersi dai test
 

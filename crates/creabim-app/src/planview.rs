@@ -841,6 +841,68 @@ impl PlanState {
             || !self.details.path.is_empty()
     }
 
+    /// Ctrl+Z while a tool is part way: take back the last thing it has not
+    /// confirmed (a point, a corner, a pick), never anything in the
+    /// project. What was taken back, for the status bar; `None` when the
+    /// tool has nothing part way. Unlike Esc ([`Self::step_back`]), which
+    /// drops all of it, this goes one point at a time where the tool has
+    /// points, and never leaves the tool.
+    pub fn take_back_input(&mut self) -> Option<&'static str> {
+        if self.details.path.pop().is_some() {
+            if self.pline_arcs.len() > self.details.path.len().saturating_sub(1) {
+                self.pline_arcs.pop();
+            }
+            return Some("the last point");
+        }
+        if let Some((_, p)) = &mut self.cmd_pick {
+            if p.pop().is_some() {
+                return Some("the last point");
+            }
+        }
+        if let Some(o) = &mut self.outline {
+            if !o.back_off() {
+                self.outline = None;
+            }
+            return Some("the last corner");
+        }
+        if self.members.path.pop().is_some() {
+            return Some("the last point");
+        }
+        if self.parts.path.pop().is_some() {
+            return Some("the last point");
+        }
+        if self.dim.pop().is_some() {
+            return Some("the dimension's last point");
+        }
+        if self.wall_arc_end.take().is_some() {
+            return Some("the arc's end");
+        }
+        if self.pending.take().is_some() {
+            return Some("the first point");
+        }
+        if self.sketch.take().is_some() {
+            return Some("the sketch being drawn");
+        }
+        if self.anno.has_input() {
+            self.anno.clear();
+            return Some("the annotation being placed");
+        }
+        if self.tag_host.take().is_some() {
+            return Some("the element picked to tag");
+        }
+        if self.guide_edge.take().is_some() {
+            return Some("the edge picked");
+        }
+        if self.align.has_input() {
+            self.align.clear();
+            return Some("what was picked to align");
+        }
+        if self.armed.take().is_some() {
+            return Some("the move waiting for a view");
+        }
+        None
+    }
+
     /// Drop every snap reference, and the guides they make.
     pub fn clear_references(&mut self) -> usize {
         let n = self.refs.values().map(Vec::len).sum();
