@@ -2023,6 +2023,14 @@ pub struct Drag {
     owner: egui::Id,
 }
 
+impl Drag {
+    /// The drag stops, its preview taken away (Ctrl+Z, or the project
+    /// changing): only its own step, never another (V-01).
+    pub fn cancel(&mut self, doc: &mut Document) {
+        self.edit.cancel(doc);
+    }
+}
+
 /// The corners and holes picked in Edit mode, on the element being
 /// edited, and what a pane is doing with them: a box over the grips, the
 /// right-click menu of a corner, an edge or a hole. Shared by every pane.

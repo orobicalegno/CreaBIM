@@ -1408,3 +1408,291 @@ fn c2_the_walls_left_meet_as_they_did_before_the_last_one() {
         "the plan, layers and joins"
     );
 }
+
+// ---------------------------------------------------------------------
+// V-01: an edit not confirmed yet (a move following the pointer, a grip
+// dragged, a duplicate being placed) is told apart by its own step, never
+// by its name; Ctrl+Z takes back only that edit.
+// ---------------------------------------------------------------------
+
+/// Where model point `p` is on the screen of the plan the tests draw.
+fn on_screen(app: &CreaBimApp, p: DVec2) -> egui::Pos2 {
+    let view = app.active_view.unwrap();
+    let (center, scale) = app.plan.cameras[&view];
+    crate::planview::Xf {
+        rect: Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0)),
+        center,
+        scale,
+        rot: 0.0,
+    }
+    .to_screen(p)
+}
+
+/// The pointer to `at`, with nothing pressed.
+fn hover_plan(app: &mut CreaBimApp, ctx: &egui::Context, t: &mut f64, at: egui::Pos2) {
+    plan_frame(app, ctx, t, vec![egui::Event::PointerMoved(at)]);
+}
+
+fn escape_in_plan(app: &mut CreaBimApp, ctx: &egui::Context, t: &mut f64) {
+    let esc = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    };
+    plan_frame(app, ctx, t, vec![esc]);
+    plan_frame(app, ctx, t, vec![]);
+}
+
+/// The ids of the undo steps, oldest first.
+fn step_ids(app: &CreaBimApp) -> Vec<creabim_core::StepId> {
+    app.doc.undo_steps().iter().map(|s| s.id).collect()
+}
+
+/// The south wall of the ground floor, picked: the wall the moves below
+/// move (its doors and its joins to the walls at its ends go with it).
+fn pick_south_wall(app: &mut CreaBimApp) -> ElementId {
+    let w = app
+        .doc
+        .model()
+        .iter()
+        .find(|e| e.name == "GF South")
+        .map(|e| e.id)
+        .unwrap();
+    app.selection.only(w);
+    w
+}
+
+/// A move with the Move tool: base point, then where it goes.
+fn move_with_the_tool(
+    app: &mut CreaBimApp,
+    ctx: &egui::Context,
+    t: &mut f64,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    app.run_command(ctx, crate::commands::Command::Move, None);
+    click_plan(app, ctx, t, from);
+    hover_plan(app, ctx, t, to);
+    click_plan(app, ctx, t, to);
+}
+
+#[test]
+fn v01_ctrl_z_during_a_move_takes_back_only_the_move_in_progress() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Select);
+    pick_south_wall(&mut app);
+    // move A, confirmed
+    move_with_the_tool(
+        &mut app,
+        &ctx,
+        &mut t,
+        egui::Pos2::new(500.0, 400.0),
+        egui::Pos2::new(560.0, 400.0),
+    );
+    assert!(app.plan.modal.is_none(), "move A is finished");
+    let after_a = snap(&app);
+    let steps_a = step_ids(&app);
+    assert_ne!(after_a, before, "move A moved the wall");
+    // move B, the same wall, the same name, following the pointer
+    app.run_command(&ctx, crate::commands::Command::Move, None);
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 450.0));
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(520.0, 450.0));
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(525.0, 450.0));
+    assert_ne!(snap(&app), after_a, "move B follows the pointer");
+    // Ctrl+Z: move B goes, move A stays, nothing goes to Redo
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(app.doc.model(), &after_a, "Ctrl+Z during move B");
+    assert_eq!(step_ids(&app), steps_a, "move A's step is still the last");
+    assert!(
+        app.doc.redo_steps().is_empty(),
+        "the move in progress is not offered to Redo"
+    );
+    // the pointer goes on moving: nothing moves until a new base point
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(540.0, 450.0));
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(545.0, 450.0));
+    same(app.doc.model(), &after_a, "the pointer after Ctrl+Z");
+    // Ctrl+Z again: the Move tool ends, the project as it was
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    assert!(app.plan.modal.is_none(), "a second Ctrl+Z ends the move");
+    same(app.doc.model(), &after_a, "the second Ctrl+Z");
+    assert_eq!(step_ids(&app), steps_a, "and history untouched");
+    // then Ctrl+Z is the history's: move A, back to the start, walls joined
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(app.doc.model(), &before, "move A undone");
+    app.run_command(&ctx, crate::commands::Command::Redo, None);
+    same(app.doc.model(), &after_a, "and redone");
+}
+
+#[test]
+fn v01_esc_after_ctrl_z_during_a_move_keeps_the_confirmed_move() {
+    // the sequence found in the analysis: Ctrl+Z, the pointer, Esc
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Select);
+    pick_south_wall(&mut app);
+    move_with_the_tool(
+        &mut app,
+        &ctx,
+        &mut t,
+        egui::Pos2::new(500.0, 400.0),
+        egui::Pos2::new(560.0, 400.0),
+    );
+    let after_a = snap(&app);
+    let steps_a = step_ids(&app);
+    app.run_command(&ctx, crate::commands::Command::Move, None);
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 450.0));
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(525.0, 450.0));
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(535.0, 450.0));
+    escape_in_plan(&mut app, &ctx, &mut t);
+    if let Some(mut m) = app.plan.modal.take() {
+        m.discard(&mut app.doc);
+    }
+    same(
+        app.doc.model(),
+        &after_a,
+        "after Ctrl+Z, the pointer and Esc",
+    );
+    assert_eq!(step_ids(&app), steps_a, "move A's step kept");
+    while app.doc.undo_steps().len() > steps_a.len() - 1 {
+        app.doc.undo();
+    }
+    same(
+        app.doc.model(),
+        &before,
+        "undoing move A puts the wall back",
+    );
+}
+
+#[test]
+fn v01_ctrl_z_while_dragging_a_wall_takes_back_only_the_drag() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Select);
+    let w = pick_south_wall(&mut app);
+    move_with_the_tool(
+        &mut app,
+        &ctx,
+        &mut t,
+        egui::Pos2::new(500.0, 400.0),
+        egui::Pos2::new(560.0, 400.0),
+    );
+    let after_a = snap(&app);
+    let steps_a = step_ids(&app);
+    // the wall's middle, now; a drag of the whole wall is a "Move" too
+    let mid = match &app.doc.model().get(w).unwrap().kind {
+        ElementKind::Wall(wl) => wl.start + (wl.end - wl.start) * 0.3,
+        _ => unreachable!(),
+    };
+    let at = on_screen(&app, mid);
+    app.selection.only(w);
+    let press = |pressed, pos| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    hover_plan(&mut app, &ctx, &mut t, at);
+    plan_frame(&mut app, &ctx, &mut t, vec![press(true, at)]);
+    for dx in [10.0, 20.0, 30.0, 40.0] {
+        hover_plan(&mut app, &ctx, &mut t, at + egui::vec2(dx, 0.0));
+    }
+    assert!(app.plan.grip.is_some(), "the wall is being dragged");
+    assert_ne!(snap(&app), after_a, "the drag shows the wall moved");
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(app.doc.model(), &after_a, "Ctrl+Z during the drag");
+    assert_eq!(step_ids(&app), steps_a, "move A's step is still the last");
+    assert!(app.plan.grip.is_none(), "the drag ended");
+    // the button comes up: nothing more happens
+    hover_plan(&mut app, &ctx, &mut t, at + egui::vec2(50.0, 0.0));
+    plan_frame(
+        &mut app,
+        &ctx,
+        &mut t,
+        vec![press(false, at + egui::vec2(50.0, 0.0))],
+    );
+    plan_frame(&mut app, &ctx, &mut t, vec![]);
+    same(app.doc.model(), &after_a, "after the button comes up");
+    assert_eq!(step_ids(&app), steps_a, "history untouched");
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(app.doc.model(), &before, "then Ctrl+Z undoes move A");
+}
+
+#[test]
+fn v01_a_duplicate_cancelled_never_takes_an_earlier_duplicate_with_it() {
+    let mut app = house();
+    let w = pick_south_wall(&mut app);
+    let start = |doc: &mut creabim_core::Document| {
+        crate::planview::start_modal(
+            doc,
+            (crate::modal::Mode::Move, true),
+            &[w],
+            None,
+            crate::modal::Space::Model,
+            None,
+            egui::Pos2::new(500.0, 400.0),
+            crate::modal::Pivot::Median,
+            None,
+            crate::modal::Flow::Keys,
+            crate::modal::Target::Object,
+            None,
+        )
+        .map(|(m, _)| m)
+        .unwrap()
+    };
+    // duplicate A: its copy made, then the duplicate kept where it is
+    let a = start(&mut app.doc);
+    drop(a);
+    let after_a = snap(&app);
+    let steps_a = step_ids(&app);
+    assert!(
+        app.doc
+            .undo_label()
+            .is_some_and(|l| l.starts_with("Duplicate")),
+        "duplicate A is a step: {:?}",
+        app.doc.undo_label()
+    );
+    // duplicate B, the same wall, the same name; its step taken back
+    // meanwhile (by anything), then B cancelled
+    let mut b = start(&mut app.doc);
+    assert!(app.doc.undo());
+    b.cancel(&mut app.doc);
+    same(app.doc.model(), &after_a, "duplicate B cancelled");
+    assert_eq!(step_ids(&app), steps_a, "duplicate A's step kept");
+}
+
+/// V-01 with Rotate: centre, reference, new direction. Ctrl+Z steps back a
+/// click at a time and never takes the rotate confirmed before.
+#[test]
+fn v01_ctrl_z_during_a_rotate_steps_back_its_clicks_and_keeps_the_rotate_before() {
+    let (mut app, ctx, mut t, before) = drawing_with(crate::planview::Tool::Select);
+    pick_south_wall(&mut app);
+    let rotate = |app: &mut CreaBimApp, t: &mut f64, finish: bool| {
+        app.run_command(&ctx, crate::commands::Command::Rotate, None);
+        click_plan(app, &ctx, t, egui::Pos2::new(500.0, 400.0));
+        click_plan(app, &ctx, t, egui::Pos2::new(600.0, 400.0));
+        hover_plan(app, &ctx, t, egui::Pos2::new(600.0, 430.0));
+        hover_plan(app, &ctx, t, egui::Pos2::new(600.0, 440.0));
+        if finish {
+            click_plan(app, &ctx, t, egui::Pos2::new(600.0, 440.0));
+        }
+    };
+    rotate(&mut app, &mut t, true);
+    assert!(app.plan.modal.is_none(), "rotate A is finished");
+    let after_a = snap(&app);
+    let steps_a = step_ids(&app);
+    assert_ne!(after_a, before, "rotate A turned the wall");
+    rotate(&mut app, &mut t, false);
+    assert!(app.plan.modal.is_some(), "rotate B follows the pointer");
+    assert_ne!(snap(&app), after_a, "and shows the wall turned");
+    // three clicks of rotate B to take back, one Ctrl+Z each
+    for k in 0..3 {
+        app.run_command(&ctx, crate::commands::Command::Undo, None);
+        same(
+            app.doc.model(),
+            &after_a,
+            &format!("Ctrl+Z {} in rotate B", k + 1),
+        );
+        assert_eq!(step_ids(&app), steps_a, "rotate A's step kept ({})", k + 1);
+    }
+    assert!(app.plan.modal.is_none(), "rotate B over");
+    app.run_command(&ctx, crate::commands::Command::Undo, None);
+    same(app.doc.model(), &before, "then Ctrl+Z undoes rotate A");
+}

@@ -77,7 +77,7 @@ pub use detail::{
     DetailItem, DetailKind, DraftLayer, DraftLayers, DraftShape, DraftSymbol, Drafting,
     DrawingFrame, LineLook, LinePen, LineType, MembraneLook,
 };
-pub use document::{Document, Step, StepId};
+pub use document::{DocId, Document, Step, StepId};
 pub use editmesh::EditMesh;
 pub use element::{
     layer_edge_offsets, set_layer_edge, FrameAt, LayerEdge, LayerEnd, LayerFace, LocationLine,

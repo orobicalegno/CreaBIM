@@ -20,18 +20,27 @@ use crate::snaps::{Snap, SnapKind};
 use creabim_core::{
     pushpull::{self, FaceRef},
     transform::{self, Xform},
-    Axis, Document, Element, ElementId, ElementKind, ModelError, Transaction, Workplane,
+    Axis, DocId, Document, Element, ElementId, ElementKind, ModelError, StepId, Transaction,
+    Workplane,
 };
 use eframe::egui::{self, Color32, Pos2, Stroke};
 use glam::{DVec2, DVec3};
 
 /// An edit remade from the same starting elements every frame, so it can
 /// follow the pointer and still undo, or cancel, as one step.
+///
+/// Its preview is told apart by the step it committed and the project it
+/// belongs to, never by its name (V-01, V-10): cancelling it removes that
+/// step only while it is the last one, and the edit goes on only while the
+/// project still holds what it started from.
 #[derive(Debug, Default)]
 pub struct LiveEdit {
     originals: Vec<Element>,
     label: String,
-    applied: bool,
+    /// The project it works on, from its first change.
+    doc: Option<DocId>,
+    /// The step its preview is, while it shows.
+    step: Option<StepId>,
     /// Nothing else follows: a wall end dragged free of its joins.
     free: bool,
 }
@@ -41,7 +50,8 @@ impl LiveEdit {
         Self {
             originals,
             label: label.into(),
-            applied: false,
+            doc: None,
+            step: None,
             free: false,
         }
     }
@@ -61,9 +71,38 @@ impl LiveEdit {
     }
 
     /// Show `changed` (the originals edited, same ids) in place of the
-    /// previous frame's version.
+    /// previous frame's version. Refused, changing nothing, in another
+    /// project than the one it began in, or when what it started from is
+    /// no longer there (its preview taken back, or its elements changed
+    /// by something else).
     pub fn update(&mut self, doc: &mut Document, changed: Vec<Element>) -> Result<(), ModelError> {
-        self.cancel(doc);
+        let Some(first) = self.originals.first().map(|e| e.id) else {
+            return Ok(());
+        };
+        if self.doc.is_some_and(|d| d != doc.id()) {
+            return Err(ModelError::Invalid(
+                first,
+                "the edit belongs to another project".into(),
+            ));
+        }
+        self.doc = Some(doc.id());
+        if !self.cancel(doc) {
+            return Err(ModelError::Invalid(
+                first,
+                "the edit's preview was taken back meanwhile".into(),
+            ));
+        }
+        // what it starts from must still be there, as it was
+        if let Some(o) = self
+            .originals
+            .iter()
+            .find(|o| doc.model().get(o.id) != Some(*o))
+        {
+            return Err(ModelError::Invalid(
+                o.id,
+                format!("{} changed meanwhile", o.name),
+            ));
+        }
         let mut changed = changed;
         // walls joined to a moved wall stretch to stay joined
         let follow = if self.free {
@@ -84,20 +123,23 @@ impl LiveEdit {
             return Ok(());
         }
         doc.commit(tx)?;
-        self.applied = true;
+        self.step = doc.last_step_id();
         Ok(())
     }
 
-    /// Put everything back as it was.
-    pub fn cancel(&mut self, doc: &mut Document) {
-        if self.applied && doc.undo_label() == Some(self.label.as_str()) {
-            doc.discard_last();
-        }
-        self.applied = false;
+    /// Put everything back as it was: its own preview step taken away,
+    /// and nothing else. False when its preview was there but is not the
+    /// last step any more (taken back, or something came after it): then
+    /// nothing is touched.
+    pub fn cancel(&mut self, doc: &mut Document) -> bool {
+        let Some(step) = self.step.take() else {
+            return true;
+        };
+        self.doc == Some(doc.id()) && doc.discard_step(step)
     }
 
     pub fn applied(&self) -> bool {
-        self.applied
+        self.step.is_some()
     }
 }
 
@@ -331,7 +373,8 @@ pub fn unfocus_soon(ctx: &egui::Context) {
 type Change<'a> = dyn Fn(&creabim_core::Model, &Element) -> Option<Element> + 'a;
 
 /// Copies following the pointer, for Move with Ctrl: each click leaves one
-/// behind, as its own undo step.
+/// behind, as its own undo step. Its preview is told apart by its step, as
+/// [`LiveEdit`]'s.
 #[derive(Debug)]
 struct CopyPreview {
     label: String,
@@ -339,7 +382,8 @@ struct CopyPreview {
     copies: Vec<Element>,
     /// Which copies move (a door in a copied wall goes with its wall).
     moves: Vec<bool>,
-    applied: bool,
+    /// The project and the step of the copies shown, while they show.
+    step: Option<(DocId, StepId)>,
 }
 
 impl CopyPreview {
@@ -376,12 +420,14 @@ impl CopyPreview {
             label: format!("Copy {what}"),
             copies,
             moves,
-            applied: false,
+            step: None,
         })
     }
 
     fn update(&mut self, doc: &mut Document, f: &Change) -> Result<(), String> {
-        self.cancel(doc);
+        if !self.cancel(doc) {
+            return Err("the copies shown were taken back meanwhile".into());
+        }
         let mut tx = Transaction::new(self.label.clone());
         for (c, moves) in self.copies.iter().zip(&self.moves) {
             let c = if *moves {
@@ -392,15 +438,21 @@ impl CopyPreview {
             tx = tx.insert(c);
         }
         doc.commit(tx).map_err(|e| e.to_string())?;
-        self.applied = true;
+        self.step = doc.last_step_id().map(|s| (doc.id(), s));
         Ok(())
     }
 
-    fn cancel(&mut self, doc: &mut Document) {
-        if self.applied && doc.undo_label() == Some(self.label.as_str()) {
-            doc.discard_last();
+    /// Its own copies taken away, only while they are the last step.
+    fn cancel(&mut self, doc: &mut Document) -> bool {
+        match self.step.take() {
+            None => true,
+            Some((d, s)) => d == doc.id() && doc.discard_step(s),
         }
-        self.applied = false;
+    }
+
+    /// The copies shown stay, placed: true when there were some.
+    fn keep(&mut self) -> bool {
+        self.step.take().is_some()
     }
 }
 
@@ -453,6 +505,10 @@ pub struct Modal {
     edit: LiveEdit,
     /// Started by Shift+D: cancelling also takes the copies away.
     pub duplicated: bool,
+    /// The project it began in and the last step then: for a duplicate,
+    /// its own step (its copies), which Cancel takes back, and no other
+    /// step whatever its name (V-01).
+    begun_after: Option<(DocId, StepId)>,
     shown: String,
     /// Elements left out because they can't take this edit.
     skipped: usize,
@@ -630,6 +686,7 @@ impl Modal {
             typed: String::new(),
             edit,
             duplicated: false,
+            begun_after: doc.last_step_id().map(|s| (doc.id(), s)),
             shown: String::new(),
             skipped: 0,
             ask: None,
@@ -1369,7 +1426,7 @@ impl Modal {
     fn place(&mut self, doc: &mut Document) -> Outcome {
         if matches!(self.mode, Mode::Mirror | Mode::Offset) {
             let placed = match &mut self.copies {
-                Some(c) if self.copy => std::mem::replace(&mut c.applied, false),
+                Some(c) if self.copy => c.keep(),
                 _ => self.edit.applied(),
             };
             if !placed {
@@ -1386,8 +1443,7 @@ impl Modal {
         }
         if self.copy {
             if let Some(c) = &mut self.copies {
-                if c.applied {
-                    c.applied = false;
+                if c.keep() {
                     self.placed += 1;
                     // the next copy has ids of its own
                     self.copies = CopyPreview::new(doc, self.edit.originals());
@@ -1423,6 +1479,18 @@ impl Modal {
             self.cancel(doc);
             Outcome::Cancelled(format!("{} cancelled.", self.mode.verb()))
         }
+    }
+
+    /// Ctrl+Z while the edit goes on: as Esc, it takes back what is not
+    /// confirmed yet (a length being typed, the edit following the
+    /// pointer, the last click), never a step of the history (V-01).
+    /// `None` while the edit goes on.
+    pub fn take_back(&mut self, doc: &mut Document) -> Option<Outcome> {
+        if !self.typed.is_empty() {
+            self.typed.clear();
+            return None;
+        }
+        self.back(doc)
     }
 
     /// Esc or right-click: take back the last click, or stop. `None` while
@@ -1803,9 +1871,12 @@ impl Modal {
     /// next Duplicate stacks another one on it.
     pub fn cancel(&mut self, doc: &mut Document) {
         self.undo_edit(doc);
-        if self.duplicated && doc.undo_label().is_some_and(|l| l.starts_with("Duplicate")) {
-            doc.discard_last();
-            self.duplicated = false;
+        if self.duplicated {
+            if let Some((d, step)) = self.begun_after {
+                if d == doc.id() && doc.discard_step(step) {
+                    self.duplicated = false;
+                }
+            }
         }
     }
 
@@ -2626,6 +2697,109 @@ fn insert_copies(doc: &mut Document, copies: Vec<Element>) -> Result<Vec<Element
 mod tests {
     use super::*;
     use creabim_core::sample::sample_house;
+
+    /// A wall of the sample house and the house, as a document.
+    fn wall_doc() -> (Document, Element) {
+        let m = sample_house();
+        let w = m
+            .iter()
+            .find(|e| matches!(e.kind, ElementKind::Wall(_)))
+            .unwrap()
+            .clone();
+        (Document::from_model(m), w)
+    }
+
+    fn shifted(e: &Element, dx: f64) -> Element {
+        let mut e = e.clone();
+        if let ElementKind::Wall(w) = &mut e.kind {
+            w.start.x += dx;
+            w.end.x += dx;
+        }
+        e
+    }
+
+    /// V-01: a live edit never takes away a step it did not make, even one
+    /// with its own name: when its preview has been taken back meanwhile,
+    /// it stops and leaves the history alone.
+    #[test]
+    fn a_live_edit_never_discards_a_step_with_its_name_that_it_did_not_make() {
+        let (mut doc, w) = wall_doc();
+        let mut a = LiveEdit::new("Move Wall", vec![w.clone()]);
+        a.update(&mut doc, vec![shifted(&w, 1.0)]).unwrap();
+        drop(a);
+        let after_a = doc.model().clone();
+        let a_step = doc.last_step_id();
+        let w1 = doc.model().get(w.id).unwrap().clone();
+        let mut b = LiveEdit::new("Move Wall", vec![w1.clone()]);
+        b.update(&mut doc, vec![shifted(&w1, 0.5)]).unwrap();
+        // its preview taken back by something else
+        assert!(doc.undo());
+        assert!(b.update(&mut doc, vec![shifted(&w1, 0.7)]).is_err());
+        b.cancel(&mut doc);
+        assert_eq!(doc.model(), &after_a, "move A's result stays");
+        assert_eq!(doc.last_step_id(), a_step, "move A's step stays");
+    }
+
+    /// V-10: a live edit belongs to the project it began in: in another
+    /// one, a copy with the same elements, it changes nothing.
+    #[test]
+    fn a_live_edit_changes_nothing_in_another_project() {
+        let (mut a, w) = wall_doc();
+        let mut b = Document::from_model(a.model().clone());
+        b.commit(Transaction::new("Move Wall").replace(w.clone(), shifted(&w, 2.0)))
+            .unwrap();
+        let b_model = b.model().clone();
+        let b_step = b.last_step_id();
+        let mut edit = LiveEdit::new("Move Wall", vec![w.clone()]);
+        edit.update(&mut a, vec![shifted(&w, 1.0)]).unwrap();
+        assert!(edit.update(&mut b, vec![shifted(&w, 1.5)]).is_err());
+        assert!(!edit.cancel(&mut b) || b.last_step_id() == b_step);
+        assert_eq!(b.model(), &b_model, "the other project is untouched");
+        assert_eq!(b.last_step_id(), b_step, "and so is its history");
+    }
+
+    /// A live edit goes on only from what it started from: an element
+    /// changed meanwhile by something else is never overwritten.
+    #[test]
+    fn a_live_edit_checks_what_it_starts_from() {
+        let (mut doc, w) = wall_doc();
+        let mut edit = LiveEdit::new("Move Wall", vec![w.clone()]);
+        edit.update(&mut doc, vec![shifted(&w, 1.0)]).unwrap();
+        edit.cancel(&mut doc);
+        // something else changes the wall
+        let now = doc.model().get(w.id).unwrap().clone();
+        let mut thicker = now.clone();
+        if let ElementKind::Wall(x) = &mut thicker.kind {
+            x.thickness += 0.1;
+        }
+        doc.commit(Transaction::new("Thickness").replace(now, thicker.clone()))
+            .unwrap();
+        assert!(edit.update(&mut doc, vec![shifted(&w, 1.0)]).is_err());
+        assert_eq!(doc.model().get(w.id), Some(&thicker), "its change stays");
+        assert_eq!(doc.undo_label(), Some("Thickness"));
+    }
+
+    /// V-01: copies left behind by Move with Ctrl stay when the copies
+    /// following the pointer are cancelled, even with the same name.
+    #[test]
+    fn copies_left_behind_stay_when_the_next_copies_are_cancelled() {
+        let (mut doc, w) = wall_doc();
+        let f = |m: &creabim_core::Model, e: &Element| {
+            transform::transformed(m, e, &Xform::Move(DVec3::new(0.0, 3.0, 0.0)))
+        };
+        let mut first = CopyPreview::new(&doc, std::slice::from_ref(&w)).unwrap();
+        first.update(&mut doc, &f).unwrap();
+        assert!(first.keep(), "the first copy left behind");
+        let after = doc.model().clone();
+        let step = doc.last_step_id();
+        let mut next = CopyPreview::new(&doc, std::slice::from_ref(&w)).unwrap();
+        next.update(&mut doc, &f).unwrap();
+        assert!(doc.undo(), "its copies taken back by something else");
+        assert!(next.update(&mut doc, &f).is_err());
+        next.cancel(&mut doc);
+        assert_eq!(doc.model(), &after, "the copy left behind stays");
+        assert_eq!(doc.last_step_id(), step);
+    }
 
     #[test]
     fn typed_move_distances_follow_the_project_units() {

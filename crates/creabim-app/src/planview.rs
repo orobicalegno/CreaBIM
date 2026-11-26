@@ -5299,6 +5299,11 @@ pub fn start_modal(
     } else {
         ids.to_vec()
     };
+    // the duplicate's own step: what its Cancel takes back
+    let dup_step = duplicate
+        .then(|| doc.last_step_id())
+        .flatten()
+        .map(|s| (doc.id(), s));
     // a selected mass face is what G moves; the Move tool picks its face
     // itself when it works on faces
     let face = face.filter(|_| !duplicate && flow == Flow::Keys);
@@ -5316,8 +5321,8 @@ pub fn start_modal(
             Ok((m.with_flow(flow).with_works_on(works_on), targets))
         }
         Err(e) => {
-            if duplicate {
-                doc.discard_last();
+            if let Some((_, step)) = dup_step {
+                doc.discard_step(step);
             }
             Err(e)
         }

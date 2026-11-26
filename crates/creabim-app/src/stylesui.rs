@@ -44,6 +44,10 @@ pub(super) struct StylesUi {
     designer: crate::choices::Designer,
     /// While an option is previewed on the plan, the pack as it was.
     preview_base: Option<StylePack>,
+    /// The steps the preview made (each one's id as it now is): ending the
+    /// preview takes back those and no other step, whatever its name (as
+    /// for live edits, V-01).
+    preview_steps: Vec<creabim_core::StepId>,
 }
 
 /// The undo label of a previewed option, taken back when the pointer
@@ -979,11 +983,7 @@ impl CreaBimApp {
             h.default = in_model.default;
             // the option under the pointer, shown on the plan until it leaves
             if h != in_model {
-                if self.gstyles.preview_base.is_none() {
-                    self.gstyles.preview_base = Some(before.clone());
-                }
-                self.commit_pack(id, h, PREVIEW);
-                self.status = "Previewing on the drawings: click to keep it.".into();
+                self.preview_pack(id, h, &before);
             }
         } else {
             self.end_preview();
@@ -1013,13 +1013,28 @@ impl CreaBimApp {
         }
     }
 
+    /// Show option `h` on the drawings until the pointer leaves it, as
+    /// steps of its own (`before`: the pack as it was).
+    fn preview_pack(&mut self, id: Option<ElementId>, h: StylePack, before: &StylePack) {
+        if self.gstyles.preview_base.is_none() {
+            self.gstyles.preview_base = Some(before.clone());
+        }
+        let last = self.doc.last_step_id();
+        self.commit_pack(id, h, PREVIEW);
+        if let Some(step) = self.doc.last_step_id().filter(|s| Some(*s) != last) {
+            self.gstyles.preview_steps.push(step);
+        }
+        self.status = "Previewing on the drawings: click to keep it.".into();
+    }
+
     /// Take back an option previewed on the plan.
     fn end_preview(&mut self) {
+        let ours = std::mem::take(&mut self.gstyles.preview_steps);
         if self.gstyles.preview_base.take().is_some() {
             // a first preview adds the project's pack, and the next ones
-            // edit it: each its own step
-            while self.doc.undo_label() == Some(PREVIEW) {
-                self.doc.discard_last();
+            // edit it: each its own step, taken back while it is the last
+            while let Some(step) = self.doc.last_step_id().filter(|s| ours.contains(s)) {
+                self.doc.discard_step(step);
             }
             self.status.clear();
         }

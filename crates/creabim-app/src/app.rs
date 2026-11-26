@@ -1909,6 +1909,43 @@ impl CreaBimApp {
                 self.selection.clear();
                 self.face = None;
             }
+            // an edit following the pointer (Move, Rotate, Scale, Mirror,
+            // Offset, a duplicate, copies, push/pull): Undo takes back what
+            // it has not confirmed, as Esc, never a step of the history
+            // (V-01)
+            Command::Undo if self.plan.modal.is_some() => {
+                let out = self
+                    .plan
+                    .modal
+                    .as_mut()
+                    .and_then(|m| m.take_back(&mut self.doc));
+                match out {
+                    Some(
+                        crate::modal::Outcome::Done(s)
+                        | crate::modal::Outcome::Cancelled(s)
+                        | crate::modal::Outcome::Running(s),
+                    ) => {
+                        self.plan.modal = None;
+                        self.say(format!("Undo: {s}"));
+                    }
+                    None => self.say(
+                        "Undo: the edit in progress taken back; what is in the project stays. Ctrl+Z or Esc again stops it.",
+                    ),
+                }
+                self.drop_stale_selection();
+            }
+            // a grip or an element being dragged: Undo stops the drag, its
+            // preview taken away, and nothing else (V-01)
+            Command::Undo if self.plan.grip.is_some() || self.handle_drag.is_some() => {
+                if let Some(mut d) = self.plan.grip.take() {
+                    d.cancel(&mut self.doc);
+                }
+                if let Some(mut d) = self.handle_drag.take() {
+                    d.cancel(&mut self.doc);
+                }
+                self.say("Undo: the drag taken back; what is in the project stays.");
+                self.drop_stale_selection();
+            }
             // a wall or beam chain on, with nothing else part way: Undo
             // takes its last piece back and the chain goes on from where
             // that piece started (C2)

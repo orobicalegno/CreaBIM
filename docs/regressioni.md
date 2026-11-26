@@ -322,6 +322,48 @@ Indicazioni dell'utente per un intervento futuro, da fare con i suoi test:
 - **Catena di muri nel riquadro 3D**: Ctrl+Z toglie il punto in corso ma
   non riprende la catena come in pianta (C2 copre la pianta).
 
+## Modifiche dal vivo e Ctrl+Z (V-01, corretto)
+
+**Bug corretto.** Durante uno spostamento non ancora confermato, Ctrl+Z
+annullava il passo provvisorio; il fotogramma successivo, cercando il
+proprio passo **per nome**, toglieva per sempre il passo confermato prima
+con lo stesso nome (per esempio due "Move GF South" di fila): lo
+spostamento confermato spariva dalla cronologia e il modello restava in uno
+stato mai confermato. Presente dal CreaBIM originale.
+
+**Ora:**
+- ogni modifica dal vivo (Sposta, Ruota, Scala, Specchia, Offset, le copie
+  di Sposta con Ctrl, Spingi/Tira, le maniglie in pianta e in 3D, Duplica,
+  l'anteprima degli stili grafici) riconosce il proprio passo dal suo
+  identificativo e dal progetto (`DocId`) in cui è iniziata, mai dal nome;
+- toglie il proprio passo solo se è l'ultimo (`Document::discard_step`): un
+  passo fatto da altro non viene mai toccato;
+- prima di ogni sostituzione verifica che gli elementi di partenza siano
+  ancora com'erano; se no si ferma e non sovrascrive niente;
+- Ctrl+Z durante una modifica non confermata fa come Esc: toglie
+  l'ultima cosa non confermata (il valore digitato, la modifica che segue il
+  puntatore, l'ultimo clic) e non tocca la cronologia; durante il
+  trascinamento di una maniglia ferma il trascinamento.
+
+| Comportamento | Test |
+|---|---|
+| Sposta: Ctrl+Z toglie solo lo spostamento in corso; un secondo Ctrl+Z chiude lo strumento; poi la cronologia come sempre (contenuto completo, giunzioni dei muri, Annulla e Ripristina) | `undo_tests::v01_ctrl_z_during_a_move_takes_back_only_the_move_in_progress` |
+| La sequenza trovata nell'analisi (Ctrl+Z, puntatore, Esc) | `undo_tests::v01_esc_after_ctrl_z_during_a_move_keeps_the_confirmed_move` |
+| Ruota: un Ctrl+Z per clic, la rotazione confermata prima resta | `undo_tests::v01_ctrl_z_during_a_rotate_steps_back_its_clicks_and_keeps_the_rotate_before` |
+| Trascinamento di un muro (anch'esso "Move …"): Ctrl+Z ferma solo il trascinamento | `undo_tests::v01_ctrl_z_while_dragging_a_wall_takes_back_only_the_drag` |
+| Una Duplica annullata non toglie la Duplica precedente con lo stesso nome | `undo_tests::v01_a_duplicate_cancelled_never_takes_an_earlier_duplicate_with_it` |
+| Una modifica dal vivo non toglie un passo che non ha fatto, non agisce in un altro progetto, non sovrascrive elementi cambiati da altro | `modal::tests::a_live_edit_never_discards_a_step_with_its_name_that_it_did_not_make`, `modal::tests::a_live_edit_changes_nothing_in_another_project`, `modal::tests::a_live_edit_checks_what_it_starts_from` |
+| Le copie lasciate da Sposta con Ctrl restano se le copie successive vengono annullate | `modal::tests::copies_left_behind_stay_when_the_next_copies_are_cancelled` |
+| Un passo si toglie solo se è quello indicato ed è l'ultimo; ogni documento ha la sua identità | `creabim-core/tests/document.rs`: `discard_step_takes_only_the_step_named_by_its_id_and_only_on_top`, `each_document_has_an_identity_of_its_own` |
+
+Verificato: in una copia isolata i 5 test nuovi dell'app falliscono sul
+codice di prima; con la correzione ogni guasto simulato è scoperto
+(riconoscimento per nome: 2 test; nessun controllo dello stato di partenza:
+1 test; Ctrl+Z durante lo spostamento che va alla cronologia: 2 test). Non
+verificato: il trascinamento nel riquadro 3D e Spingi/Tira con un test
+dedicato (stesso codice, provato con le maniglie in pianta e con i test di
+unità); una vera GPU e il mouse fisico.
+
 ## Bug già corretti e protetti
 
 | Bug | Test |
@@ -342,8 +384,8 @@ determinante); **D** da definire. Origine: dove è nato, se individuato.
 
 | ID | Problema | Gravità | Certezza | Origine | Stato | Evidenza | Test | Commit di correzione |
 |---|---|---|---|---|---|---|---|---|
-| V-01 | Ctrl+Z durante uno spostamento non confermato cancella dalla cronologia lo spostamento confermato prima con lo stesso nome; modello in uno stato mai confermato | P1 | R | CreaBIM originale (bc1c2a6) | aperto, correzione autorizzata | prova Q8b; riprodotto su 0620165 e 26cc49c | – | – |
-| V-10 | Cambio di progetto durante uno spostamento: l'ultimo passo dell'altro progetto, se ha lo stesso nome, viene cancellato | P1 | R | 771a39c (19/11) | aperto, correzione autorizzata | prova Q9 (cambio simulato) | – | – |
+| V-01 | Ctrl+Z durante uno spostamento non confermato cancella dalla cronologia lo spostamento confermato prima con lo stesso nome; modello in uno stato mai confermato | P1 | R | CreaBIM originale (bc1c2a6) | **corretto** | prova Q8b; riprodotto su 0620165 e 26cc49c | `undo_tests::v01_*`, `modal::tests::a_live_edit_*`, `copies_left_behind_*`, `document.rs` `discard_step_*` | commit "V-01: …" |
+| V-10 | Cambio di progetto durante uno spostamento: l'ultimo passo dell'altro progetto, se ha lo stesso nome, viene cancellato | P1 | R | 771a39c (19/11) | aperto, correzione autorizzata (in parte già protetto da V-01: un passo si toglie solo dal suo progetto) | prova Q9 (cambio simulato) | – | – |
 | V-11 | Cambio di progetto: punto in attesa e catena passano al progetto successivo | P3 | C | 771a39c | aperto, correzione autorizzata | `openprojects.rs` `bring_in` | – | – |
 | V-02 | Cancel nelle Impostazioni rimette il valore memorizzato ma non l'effetto applicato (tema, maniglie, modifica, barra) | P2 | R | 7cb4176 (19/11) | aperto | prova Q1 | – | – |
 | V-03 | Canc e Annulla rimettono gli elementi in coda all'elenco (ordine cambiato) | P3 | R | CreaBIM originale | aperto | prova Q4b | – | – |
@@ -361,3 +403,4 @@ determinante); **D** da definire. Origine: dove è nato, se individuato.
 | T-01 | Indipendenza degli stili grafici non protetta da test | P2 | R | – | aperto | guasto simulato non rilevato | – | – |
 | T-02 | Import DXF (e9f8376) senza test | M | R | e9f8376 | aperto | prova Q10 passa | – | – |
 | V-04 | Ctrl+Y con un punto in attesa rifà il passo e lascia il punto: comportamento da decidere | – | D | – | da definire | prova Q2 | – | – |
+| V-15 | Dopo un errore interno recuperato (`app.rs`, `ui`), l'operazione in corso viene chiusa senza togliere la sua anteprima, che resta nel progetto come se fosse confermata | P3 | C | da cercare | aperto (trovato durante V-01, non corretto) | `plan.modal = None` senza `discard` | – | – |
