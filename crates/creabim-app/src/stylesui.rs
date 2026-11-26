@@ -1028,7 +1028,7 @@ impl CreaBimApp {
     }
 
     /// Take back an option previewed on the plan.
-    fn end_preview(&mut self) {
+    pub(super) fn end_preview(&mut self) {
         let ours = std::mem::take(&mut self.gstyles.preview_steps);
         if self.gstyles.preview_base.take().is_some() {
             // a first preview adds the project's pack, and the next ones
@@ -1810,5 +1810,44 @@ mod tests {
         );
         app.doc.undo();
         assert_eq!(app.doc.model(), &before);
+    }
+
+    /// A style option previewed when the project changes: the preview's
+    /// steps go with the preview, in its own project; the other project
+    /// keeps all of its own (V-01, V-10).
+    #[test]
+    fn a_preview_ends_in_its_own_project_when_the_project_changes() {
+        let mut app = crate::app::test_app();
+        app.multi = true;
+        // something confirmed first
+        let (id, mut pack) = app.edited_pack();
+        pack.pens[0].weights.cut = 0.6;
+        app.commit_pack(id, pack.clone(), "Pens");
+        let confirmed = app.doc.model().clone();
+        let confirmed_step = app.doc.last_step_id();
+        // an option under the pointer, shown on the drawings
+        let (id, before) = app.edited_pack();
+        let mut h = before.clone();
+        h.pens[0].weights.cut = 0.9;
+        app.preview_pack(id, h.clone(), &before);
+        h.pens[0].weights.cut = 0.95;
+        app.preview_pack(id, h, &before);
+        assert_ne!(app.doc.model(), &confirmed, "the preview shows");
+        // another project opened: the preview ends, here
+        app.load_model(creabim_core::starter::starter_house());
+        let other = app.doc.model().clone();
+        app.end_preview();
+        assert_eq!(app.doc.model(), &other, "the other project untouched");
+        app.switch_project(1);
+        assert_eq!(
+            app.doc.model(),
+            &confirmed,
+            "the preview gone, the rest kept"
+        );
+        assert_eq!(
+            app.doc.last_step_id(),
+            confirmed_step,
+            "the step before it kept"
+        );
     }
 }

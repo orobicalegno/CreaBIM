@@ -1410,9 +1410,10 @@ fn c2_the_walls_left_meet_as_they_did_before_the_last_one() {
 }
 
 // ---------------------------------------------------------------------
-// V-01: an edit not confirmed yet (a move following the pointer, a grip
-// dragged, a duplicate being placed) is told apart by its own step, never
-// by its name; Ctrl+Z takes back only that edit.
+// V-01, V-10, V-11: an edit not confirmed yet (a move following the
+// pointer, a grip dragged, a duplicate being placed) is told apart by its
+// own step, never by its name; Ctrl+Z takes back only that edit; another
+// project never takes what belongs to this one.
 // ---------------------------------------------------------------------
 
 /// Where model point `p` is on the screen of the plan the tests draw.
@@ -1656,6 +1657,216 @@ fn v01_a_duplicate_cancelled_never_takes_an_earlier_duplicate_with_it() {
     b.cancel(&mut app.doc);
     same(app.doc.model(), &after_a, "duplicate B cancelled");
     assert_eq!(step_ids(&app), steps_a, "duplicate A's step kept");
+}
+
+/// Two projects open: this one, and a copy of it saved under another name
+/// (same element ids, same names) where the south wall was moved.
+fn two_projects() -> (
+    CreaBimApp,
+    egui::Context,
+    f64,
+    Model,
+    Vec<creabim_core::StepId>,
+) {
+    let (mut app, ctx, mut t, _) = drawing_with(crate::planview::Tool::Select);
+    app.multi = true;
+    // the copy: the same model, opened as a second project
+    let copy = app.doc.model().clone();
+    app.load_model(copy);
+    let plan = app
+        .doc
+        .model()
+        .iter()
+        .find(|e| e.name == "Ground Floor plan")
+        .map(|e| e.id)
+        .unwrap();
+    app.active_view = Some(plan);
+    plan_frame(&mut app, &ctx, &mut t, vec![]);
+    pick_south_wall(&mut app);
+    move_with_the_tool(
+        &mut app,
+        &ctx,
+        &mut t,
+        egui::Pos2::new(500.0, 400.0),
+        egui::Pos2::new(560.0, 400.0),
+    );
+    assert!(
+        app.doc.undo_label().is_some_and(|l| l.starts_with("Move")),
+        "the copy has its move: {:?}",
+        app.doc.undo_label()
+    );
+    let copy_model = snap(&app);
+    let copy_steps = step_ids(&app);
+    // back to the first project
+    app.switch_project(1);
+    let plan = app
+        .doc
+        .model()
+        .iter()
+        .find(|e| e.name == "Ground Floor plan")
+        .map(|e| e.id)
+        .unwrap();
+    app.active_view = Some(plan);
+    plan_frame(&mut app, &ctx, &mut t, vec![]);
+    (app, ctx, t, copy_model, copy_steps)
+}
+
+/// A move started in the first project, following the pointer.
+fn move_in_progress(app: &mut CreaBimApp, ctx: &egui::Context, t: &mut f64) -> Model {
+    pick_south_wall(app);
+    let before = snap(app);
+    app.run_command(ctx, crate::commands::Command::Move, None);
+    click_plan(app, ctx, t, egui::Pos2::new(500.0, 450.0));
+    hover_plan(app, ctx, t, egui::Pos2::new(530.0, 450.0));
+    assert!(app.plan.modal.is_some(), "a move is in progress");
+    assert_ne!(snap(app), before, "and shows the wall moved");
+    before
+}
+
+/// After a switch to the copy: the copy is exactly as left, with its
+/// history, and nothing of the first project's move goes on in it.
+fn the_copy_is_untouched(
+    app: &mut CreaBimApp,
+    ctx: &egui::Context,
+    t: &mut f64,
+    copy_model: &Model,
+    copy_steps: &[creabim_core::StepId],
+    how: &str,
+) {
+    assert!(
+        app.plan.modal.is_none(),
+        "{how}: no move goes on in the copy"
+    );
+    for dx in [0.0, 15.0, 30.0] {
+        hover_plan(app, ctx, t, egui::Pos2::new(540.0 + dx, 450.0));
+    }
+    escape_in_plan(app, ctx, t);
+    same(app.doc.model(), copy_model, &format!("{how}: the copy"));
+    assert_eq!(step_ids(app), copy_steps, "{how}: the copy's history");
+}
+
+#[test]
+fn v10_switching_project_during_a_move_leaves_the_other_project_untouched() {
+    for how in ["Ctrl+Tab", "Window menu"] {
+        let (mut app, ctx, mut t, copy_model, copy_steps) = two_projects();
+        let first_before = move_in_progress(&mut app, &ctx, &mut t);
+        let first_steps = step_ids(&app);
+        if how == "Ctrl+Tab" {
+            app.next_project();
+        } else {
+            app.switch_project(1);
+        }
+        // the 3D is built again from the project now shown, not kept from
+        // the one before (data only: the drawing on screen is not checked)
+        assert!(
+            app.geometry_key.is_none(),
+            "{how}: no 3D kept from the other project"
+        );
+        assert!(app.scene.is_empty(), "{how}: its scene is built afresh");
+        the_copy_is_untouched(&mut app, &ctx, &mut t, &copy_model, &copy_steps, how);
+        // and back: the first project is as it was before the move began
+        app.switch_project(1);
+        assert!(app.plan.modal.is_none(), "{how}: the move did not survive");
+        same(
+            app.doc.model(),
+            &first_before,
+            &format!("{how}: the first project"),
+        );
+        assert!(
+            step_ids(&app).len() <= first_steps.len() && first_steps.starts_with(&step_ids(&app)),
+            "{how}: none of the first project's confirmed steps lost"
+        );
+    }
+}
+
+#[test]
+fn v10_closing_or_opening_a_project_during_a_move_ends_the_move() {
+    // closing: the next project comes in untouched
+    let (mut app, ctx, mut t, copy_model, copy_steps) = two_projects();
+    move_in_progress(&mut app, &ctx, &mut t);
+    assert!(app.close_project(), "the first project closes");
+    the_copy_is_untouched(&mut app, &ctx, &mut t, &copy_model, &copy_steps, "Close");
+    // opening another project (one project at a time): nothing of the move
+    let (mut app, ctx, mut t, _) = drawing_with(crate::planview::Tool::Select);
+    move_in_progress(&mut app, &ctx, &mut t);
+    app.load_model(creabim_core::starter::starter_house());
+    assert!(app.plan.modal.is_none(), "Open: the move ended");
+    let opened = snap(&app);
+    for dx in [0.0, 15.0] {
+        hover_plan(&mut app, &ctx, &mut t, egui::Pos2::new(540.0 + dx, 450.0));
+    }
+    same(app.doc.model(), &opened, "Open: the project opened");
+    assert!(app.doc.undo_steps().is_empty(), "Open: a fresh history");
+}
+
+#[test]
+fn v10_a_project_switch_during_a_drag_ends_the_drag() {
+    let (mut app, ctx, mut t, copy_model, copy_steps) = two_projects();
+    let w = pick_south_wall(&mut app);
+    let mid = match &app.doc.model().get(w).unwrap().kind {
+        ElementKind::Wall(wl) => wl.start + (wl.end - wl.start) * 0.3,
+        _ => unreachable!(),
+    };
+    let at = on_screen(&app, mid);
+    let before = snap(&app);
+    hover_plan(&mut app, &ctx, &mut t, at);
+    plan_frame(
+        &mut app,
+        &ctx,
+        &mut t,
+        vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        }],
+    );
+    for dx in [10.0, 20.0, 30.0] {
+        hover_plan(&mut app, &ctx, &mut t, at + egui::vec2(dx, 0.0));
+    }
+    assert!(app.plan.grip.is_some(), "the wall is being dragged");
+    app.next_project();
+    assert!(app.plan.grip.is_none(), "the drag ended with the switch");
+    the_copy_is_untouched(&mut app, &ctx, &mut t, &copy_model, &copy_steps, "drag");
+    app.switch_project(1);
+    same(
+        app.doc.model(),
+        &before,
+        "the first project, as before the drag",
+    );
+}
+
+#[test]
+fn v11_no_point_or_pick_goes_from_one_project_to_another() {
+    let (mut app, ctx, mut t, copy_model, copy_steps) = two_projects();
+    // a wall chain under way in the first project, a point waiting
+    let i = crate::planview::Tool::ALL
+        .iter()
+        .position(|x| *x == crate::planview::Tool::Wall)
+        .unwrap();
+    app.run_action(&ctx, &format!("tool:{i}"));
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(400.0, 380.0));
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(600.0, 380.0));
+    assert!(app.plan.pending.is_some() && !app.plan.chain_steps.is_empty());
+    app.next_project();
+    assert!(app.plan.pending.is_none(), "no point waiting in the copy");
+    assert!(app.plan.chain_steps.is_empty(), "no chain in the copy");
+    assert!(!app.plan.has_input(), "nothing part way in the copy");
+    assert!(
+        app.plan.cmd_pick.is_none(),
+        "no command's picks in the copy"
+    );
+    assert!(app.pending_3d.is_none(), "no 3D point in the copy");
+    // a click with the Wall tool only starts a wall: none is drawn
+    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(600.0, 560.0));
+    same(app.doc.model(), &copy_model, "the copy after one click");
+    assert_eq!(step_ids(&app), copy_steps, "the copy's history");
+    // a move armed in one project does not start in the other
+    app.switch_project(1);
+    pick_south_wall(&mut app);
+    app.run_command(&ctx, crate::commands::Command::Move, None);
+    app.next_project();
+    assert!(app.plan.armed.is_none(), "no armed move in the copy");
 }
 
 /// V-01 with Rotate: centre, reference, new direction. Ctrl+Z steps back a

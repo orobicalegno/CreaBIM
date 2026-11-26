@@ -36,9 +36,41 @@ pub(super) fn project_name(path: &str) -> String {
 }
 
 impl CreaBimApp {
+    /// Before the shown project changes (another one shown, opened, made or
+    /// closed): what is not confirmed ends here, in this project. An edit
+    /// following the pointer or a drag takes its preview back; points
+    /// clicked, a chain, a command's picks, a move armed and Edit mode
+    /// stop. Everything confirmed stays as it is, and nothing of this goes
+    /// on in the next project (V-10, V-11).
+    pub(super) fn end_unconfirmed(&mut self) {
+        if let Some(mut m) = self.plan.modal.take() {
+            m.discard(&mut self.doc);
+        }
+        if let Some(mut d) = self.plan.grip.take() {
+            d.cancel(&mut self.doc);
+        }
+        if let Some(mut d) = self.handle_drag.take() {
+            d.cancel(&mut self.doc);
+        }
+        self.plan.cancel();
+        self.plan.wall_arc_end = None;
+        self.plan.cmd_pick = None;
+        self.plan.armed = None;
+        self.plan.armed_follow = false;
+        self.plan.armed_grip = None;
+        self.plan.in_place = false;
+        self.plan.edit = None;
+        self.plan.grips.clear();
+        self.pending_3d = None;
+        self.cmd.running = None;
+        // a style option previewed on the drawings
+        self.end_preview();
+    }
+
     /// Take the shown project out, leaving the app's fields as they were
     /// (the caller loads or brings in another one at once).
     fn take_current(&mut self) -> OpenProject {
+        self.end_unconfirmed();
         OpenProject {
             doc: std::mem::take(&mut self.doc),
             selection: std::mem::take(&mut self.selection),
@@ -156,6 +188,7 @@ impl CreaBimApp {
             return false;
         }
         let was = project_name(&self.path);
+        self.end_unconfirmed();
         let next = self.others.remove(0);
         self.bring_in(next);
         self.status = format!("Closed {was}. Window: {}", project_name(&self.path));

@@ -364,6 +364,40 @@ verificato: il trascinamento nel riquadro 3D e Spingi/Tira con un test
 dedicato (stesso codice, provato con le maniglie in pianta e con i test di
 unità); una vera GPU e il mouse fisico.
 
+## Cambio di progetto con un'operazione in corso (V-10 e V-11, corretti)
+
+**Bug corretti.** Cambiando progetto (Ctrl+Tab, menu Finestra, apertura,
+chiusura) durante uno spostamento, l'operazione restava attiva sul nuovo
+progetto e al fotogramma successivo poteva togliere l'ultimo passo di
+quell'altro progetto, se aveva lo stesso nome (tipico in una copia "Salva
+con nome"): lavoro confermato perso (V-10). Il punto in attesa, la catena di
+muri, i punti di un comando passavano al progetto successivo (V-11).
+Introdotti da 771a39c (più progetti aperti).
+
+**Ora:** prima che il progetto mostrato cambi (`end_unconfirmed`, in
+`take_current`, `close_project` e `load_model`), ciò che non è confermato
+finisce nel progetto in cui è iniziato: la modifica dal vivo e il
+trascinamento tolgono la loro anteprima, si fermano punti in attesa, catene,
+punti dei comandi, comandi in corso, spostamenti pronti a partire, la
+modalità Modifica e l'anteprima degli stili grafici. Il lavoro confermato
+resta com'è in entrambi i progetti.
+
+| Comportamento | Test |
+|---|---|
+| Ctrl+Tab e menu Finestra durante uno spostamento: la copia resta identica con la sua cronologia; tornando indietro lo spostamento non c'è più, il lavoro confermato sì; la scena 3D si ricostruisce dal progetto mostrato | `undo_tests::v10_switching_project_during_a_move_leaves_the_other_project_untouched` |
+| Chiusura e apertura di un progetto durante uno spostamento | `undo_tests::v10_closing_or_opening_a_project_during_a_move_ends_the_move` |
+| Cambio di progetto durante il trascinamento di un muro | `undo_tests::v10_a_project_switch_during_a_drag_ends_the_drag` |
+| Nessun punto, catena, punto di comando o spostamento pronto passa da un progetto all'altro | `undo_tests::v11_no_point_or_pick_goes_from_one_project_to_another` |
+| L'anteprima di uno stile finisce nel suo progetto quando il progetto cambia | `stylesui::tests::a_preview_ends_in_its_own_project_when_the_project_changes` |
+
+Verificato: in una copia isolata i 4 test nuovi di V-10 e V-11 falliscono
+sul codice di prima (insieme ai 5 di V-01: 9 nuovi falliti, i 39 test
+esistenti di Annulla passati); con la correzione, togliendo la chiusura al
+cambio di progetto falliscono 5 test (i 4 dell'app e quello dell'anteprima
+degli stili). Non verificato: il menu Finestra e Ctrl+Tab cliccati davvero
+(i test chiamano le stesse funzioni); la scena 3D è controllata solo nei
+dati (viene ricostruita), non a schermo.
+
 ## Bug già corretti e protetti
 
 | Bug | Test |
@@ -385,8 +419,8 @@ determinante); **D** da definire. Origine: dove è nato, se individuato.
 | ID | Problema | Gravità | Certezza | Origine | Stato | Evidenza | Test | Commit di correzione |
 |---|---|---|---|---|---|---|---|---|
 | V-01 | Ctrl+Z durante uno spostamento non confermato cancella dalla cronologia lo spostamento confermato prima con lo stesso nome; modello in uno stato mai confermato | P1 | R | CreaBIM originale (bc1c2a6) | **corretto** | prova Q8b; riprodotto su 0620165 e 26cc49c | `undo_tests::v01_*`, `modal::tests::a_live_edit_*`, `copies_left_behind_*`, `document.rs` `discard_step_*` | commit "V-01: …" |
-| V-10 | Cambio di progetto durante uno spostamento: l'ultimo passo dell'altro progetto, se ha lo stesso nome, viene cancellato | P1 | R | 771a39c (19/11) | aperto, correzione autorizzata (in parte già protetto da V-01: un passo si toglie solo dal suo progetto) | prova Q9 (cambio simulato) | – | – |
-| V-11 | Cambio di progetto: punto in attesa e catena passano al progetto successivo | P3 | C | 771a39c | aperto, correzione autorizzata | `openprojects.rs` `bring_in` | – | – |
+| V-10 | Cambio di progetto durante uno spostamento: l'ultimo passo dell'altro progetto, se ha lo stesso nome, viene cancellato | P1 | R | 771a39c (19/11) | **corretto** | prova Q9 (cambio simulato) | `undo_tests::v10_*`, `stylesui::tests::a_preview_ends_*` | commit "V-10, V-11: …" |
+| V-11 | Cambio di progetto: punto in attesa e catena passano al progetto successivo | P3 | R | 771a39c | **corretto** | `openprojects.rs` `bring_in`; test v11 | `undo_tests::v11_no_point_or_pick_goes_from_one_project_to_another` | commit "V-10, V-11: …" |
 | V-02 | Cancel nelle Impostazioni rimette il valore memorizzato ma non l'effetto applicato (tema, maniglie, modifica, barra) | P2 | R | 7cb4176 (19/11) | aperto | prova Q1 | – | – |
 | V-03 | Canc e Annulla rimettono gli elementi in coda all'elenco (ordine cambiato) | P3 | R | CreaBIM originale | aperto | prova Q4b | – | – |
 | V-05 | Scheda grafica incompatibile: nessun messaggio né registro all'avvio | M | C | – | aperto (già noto) | `main.rs`, `actlog` | – | – |

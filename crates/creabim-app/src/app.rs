@@ -568,6 +568,8 @@ impl CreaBimApp {
     }
 
     fn load_model(&mut self, model: Model) {
+        // what is not confirmed ends in the project shown, not the next
+        self.end_unconfirmed();
         self.keep_open();
         self.doc = Document::from_model(with_plan_views(model));
         self.selection.clear();
