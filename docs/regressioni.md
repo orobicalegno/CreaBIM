@@ -329,3 +329,35 @@ Indicazioni dell'utente per un intervento futuro, da fare con i suoi test:
 | Annulla ripetuto da Invio o da un clic destro breve | `editui::tests::undo_never_repeats_on_enter_or_a_quick_right_click` |
 | Il Cancel di una finestra annullava anche il lavoro fatto altrove | `editui::tests::cancel_in_a_window_never_takes_back_work_done_elsewhere` |
 | Le pubblicazioni dell'anteprima cancellavano quella buona | `.github/scripts/test-publish-preview.sh` |
+
+## Analisi retrospettiva (25–26/11/2026): problemi da seguire
+
+Rapporto completo, evidenze, script e prove:
+[`docs/analisi-retrospettiva/`](analisi-retrospettiva/README.md). Ogni problema
+mantiene il suo identificativo fino alla correzione; quando viene corretto si
+aggiornano qui lo stato, il test e il commit.
+
+Certezza: **R** confermato riproducendolo; **C** dal codice (evidenza
+determinante); **D** da definire. Origine: dove è nato, se individuato.
+
+| ID | Problema | Gravità | Certezza | Origine | Stato | Evidenza | Test | Commit di correzione |
+|---|---|---|---|---|---|---|---|---|
+| V-01 | Ctrl+Z durante uno spostamento non confermato cancella dalla cronologia lo spostamento confermato prima con lo stesso nome; modello in uno stato mai confermato | P1 | R | CreaBIM originale (bc1c2a6) | aperto, correzione autorizzata | prova Q8b; riprodotto su 0620165 e 26cc49c | – | – |
+| V-10 | Cambio di progetto durante uno spostamento: l'ultimo passo dell'altro progetto, se ha lo stesso nome, viene cancellato | P1 | R | 771a39c (19/11) | aperto, correzione autorizzata | prova Q9 (cambio simulato) | – | – |
+| V-11 | Cambio di progetto: punto in attesa e catena passano al progetto successivo | P3 | C | 771a39c | aperto, correzione autorizzata | `openprojects.rs` `bring_in` | – | – |
+| V-02 | Cancel nelle Impostazioni rimette il valore memorizzato ma non l'effetto applicato (tema, maniglie, modifica, barra) | P2 | R | 7cb4176 (19/11) | aperto | prova Q1 | – | – |
+| V-03 | Canc e Annulla rimettono gli elementi in coda all'elenco (ordine cambiato) | P3 | R | CreaBIM originale | aperto | prova Q4b | – | – |
+| V-05 | Scheda grafica incompatibile: nessun messaggio né registro all'avvio | M | C | – | aperto (già noto) | `main.rs`, `actlog` | – | – |
+| V-06 | IFC esportato e reimportato: muri attaccati al tetto più alti | P2 | R | preesistente | aperto | prova IFC | – | – |
+| V-07 | Progetti con White model o Maquette dichiarati "danneggiati" dalle versioni precedenti | P2 | R | d92e600, 0bc2f49 | aperto, piano richiesto | CLI 0620165 e 57a6d13 | – | – |
+| V-08 | Cancel della finestra UCS: caselle dell'icona e cronologia UCS non rimesse | P3 | C | preesistente | aperto | `osnapui.rs` | – | – |
+| V-09 | Esportazione SVG non deterministica nell'ordine e nel verso dei segmenti | M | R | preesistente | aperto | 4 esportazioni della stessa vista | – | – |
+| V-12 | Esportazioni con 11% di segmenti di lunghezza zero e 22% duplicati | M | R | preesistente | aperto | 59 viste | – | – |
+| V-13 | IFC: GUID di progetto, sito ed edificio nuovi a ogni esportazione | P3 | R | preesistente | aperto | due esportazioni | – | – |
+| V-14 | Il test dei budget di tempo (disattivato) fallisce: prospetti Est e Ovest oltre 160 ms | P3 | R | preesistente | aperto | build ottimizzata | `creabim-geom/tests/perf.rs` (ignorato) | – |
+| S-01 | La finestra Informazioni mostra il commit di unione della PR | M | R | CI su `pull_request` | aperto | stringhe in `Volumen.exe` | – | – |
+| S-02 | Clic al centro della porta d'ingresso prende la linea di griglia | P2 | R | ordine di selezione attuale | aperto | prova di selezione | – | – |
+| S-03 | Finestre sopra il piano di taglio non selezionabili con un clic (prende il muro) | P2 | R | non identificata | aperto | prova di selezione | – | – |
+| T-01 | Indipendenza degli stili grafici non protetta da test | P2 | R | – | aperto | guasto simulato non rilevato | – | – |
+| T-02 | Import DXF (e9f8376) senza test | M | R | e9f8376 | aperto | prova Q10 passa | – | – |
+| V-04 | Ctrl+Y con un punto in attesa rifà il passo e lascia il punto: comportamento da decidere | – | D | – | da definire | prova Q2 | – | – |
