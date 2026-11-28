@@ -1938,6 +1938,7 @@ pub fn show(
     };
     // snaps: the selection and what joins it are left out while selecting,
     // since dragging them must not snap to themselves
+    let snap_exclusion = crate::app::Perf::new("snap exclusion");
     let moving = state
         .modal
         .as_ref()
@@ -1957,6 +1958,7 @@ pub fn show(
     if matches!(kind, PaneKind::Plan { .. } | PaneKind::Section { .. }) {
         refresh_snaps(state, doc.model(), view, plan, &exclude);
     }
+    drop(snap_exclusion);
     let pane_project = |p: DVec3| Some(xf.to_screen(p.truncate()));
     // a line starts from the tool's first click, or the sketch's last corner
     let sketch_last = state

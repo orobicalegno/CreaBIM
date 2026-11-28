@@ -20,6 +20,7 @@ mod centres;
 mod choices;
 mod commands;
 mod detailtool;
+mod diag;
 mod editmode;
 mod files;
 mod fillpreview;

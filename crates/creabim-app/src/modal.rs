@@ -76,6 +76,7 @@ impl LiveEdit {
     /// no longer there (its preview taken back, or its elements changed
     /// by something else).
     pub fn update(&mut self, doc: &mut Document, changed: Vec<Element>) -> Result<(), ModelError> {
+        let _timed = crate::app::Perf::new("edit: model update");
         let Some(first) = self.originals.first().map(|e| e.id) else {
             return Ok(());
         };

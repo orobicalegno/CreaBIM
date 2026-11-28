@@ -121,6 +121,7 @@ impl Builds {
         if self.running.contains_key(&key) {
             return;
         }
+        crate::diag::count("worker: drawing started");
         let revision = model.drawing_revision();
         let snapshot = self.snapshot(model);
         let tx = self.tx.clone();
@@ -155,6 +156,7 @@ impl Builds {
         if self.scene_running.is_some() {
             return;
         }
+        crate::diag::count("worker: scene started");
         let revision = model.revision();
         let snapshot = self.snapshot(model);
         let tx = self.tx.clone();

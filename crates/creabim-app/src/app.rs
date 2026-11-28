@@ -40,6 +40,8 @@ pub(crate) mod cmdline;
 mod cmdmore;
 #[path = "cropui.rs"]
 mod cropui;
+#[path = "diagui.rs"]
+mod diagui;
 #[path = "divideui.rs"]
 mod divideui;
 #[path = "drafting.rs"]
@@ -3784,6 +3786,7 @@ impl CreaBimApp {
                     };
                 }
             }
+            let _render = Perf::new("3d render");
             let tex = vp.render(
                 rs,
                 size,
@@ -11999,6 +12002,9 @@ impl Drop for Perf {
         // not only told): a line in the log, at most one a second for each
         // kind, and its count and worst in the timing table
         crate::actlog::slow(self.1, ms);
+        if crate::diag::enabled() {
+            crate::diag::section(self.1, ms);
+        }
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *ON.get_or_init(|| std::env::var_os("CREABIM_PERF").is_some()) {
             static MIN: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
@@ -12077,6 +12083,28 @@ impl eframe::App for CreaBimApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Help › Performance diagnostics: this frame's input, and eframe's
+        // CPU time of the frame before (nothing when diagnostics are off)
+        let diag_revision = crate::diag::enabled().then(|| {
+            let (events, moved, down) = ui.ctx().input(|i| {
+                (
+                    i.events.len() as u32,
+                    i.pointer.delta() != egui::Vec2::ZERO,
+                    i.pointer.any_down(),
+                )
+            });
+            crate::diag::frame_begin(events, moved, down, frame.info().cpu_usage);
+            self.doc.model().revision()
+        });
+        self.ui_frame(ui, frame);
+        if let Some(r) = diag_revision {
+            crate::diag::frame_end(self.diag_working(), self.doc.model().revision() != r);
+        }
+    }
+}
+
+impl CreaBimApp {
+    fn ui_frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // a bug in one command must not close Volumen and lose the work:
         // the frame is given up, the error said and logged (the panic
         // hook already wrote where it happened)
@@ -13972,6 +14000,7 @@ impl CreaBimApp {
         self.ground_spacing_window(&ctx);
         self.import_report_window(&ctx);
         self.help_window(&ctx);
+        self.diagnostics_window(&ctx);
         self.report_window(&ctx);
         self.in_dialog("dsettings", |s| s.drafting_settings_window(&ctx));
         self.in_dialog("layers", |s| s.layer_manager_window(&ctx));

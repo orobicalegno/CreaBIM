@@ -539,6 +539,7 @@ impl CreaBimApp {
                 };
             }
             "app.report" => self.report_problem(),
+            "app.diagnostics" => self.toggle_diagnostics(),
             "app.settings" => self.settings_open = true,
             "app.exit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             "units.kind" => {

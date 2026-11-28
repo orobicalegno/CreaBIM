@@ -708,3 +708,105 @@ fn benches_do_what_they_say() {
     let ids = add_lines(&mut b.app, 100);
     bench_move("verifica: Sposta 100 linee", b, &ids[..10], true);
 }
+
+/// What Help › Performance diagnostics costs: the same Move with the
+/// diagnostics off and on (each frame then recorded as the app does).
+#[test]
+#[ignore = "benchmark: run with --ignored in an optimised build"]
+fn bench_diagnostics_overhead() {
+    let _one = crate::diag::ONE.lock().unwrap_or_else(|e| e.into_inner());
+    for lines in [0usize, 1000] {
+        for on in [false, true] {
+            crate::diag::set_enabled(on);
+            let mut b = Bench::new(creabim_core::starter::starter_house());
+            let ids = if lines == 0 {
+                vec![
+                    b.app
+                        .doc
+                        .model()
+                        .iter()
+                        .find(|e| e.name == "GF South")
+                        .unwrap()
+                        .id,
+                ]
+            } else {
+                add_lines(&mut b.app, 10000)[..lines].to_vec()
+            };
+            b.select(&ids);
+            let ctx = b.ctx.clone();
+            b.app
+                .run_command(&ctx, crate::commands::Command::Move, None);
+            let base = egui::Pos2::new(600.0, 500.0);
+            b.click(base);
+            let pts = path(base, 300);
+            let reps = measure(&mut b, 60, |b, i| {
+                let r = b.app.doc.model().revision();
+                crate::diag::frame_begin(1, true, false, Some(0.01));
+                let c = b.hover(pts[i % pts.len()]);
+                crate::diag::frame_end(true, b.app.doc.model().revision() != r);
+                c
+            });
+            assert!(b.app.plan.modal.is_some(), "the move is running");
+            if on {
+                assert!(!crate::diag::recent(60.0).is_empty(), "frames recorded");
+            }
+            let what = if lines == 0 {
+                "1 muro".to_string()
+            } else {
+                format!("{lines} linee su 10.000")
+            };
+            report(
+                Report {
+                    scenario: &format!(
+                        "Diagnostica {}: Sposta {what}",
+                        if on { "attiva" } else { "spenta" }
+                    ),
+                    elements: b.elements(),
+                    selected: ids.len(),
+                    snaps: true,
+                },
+                &reps,
+            );
+        }
+    }
+    crate::diag::set_enabled(false);
+}
+
+/// The diagnostics' own cost per call, off and on: a timed section, and a
+/// frame's begin and end.
+#[test]
+#[ignore = "benchmark: run with --ignored in an optimised build"]
+fn bench_diagnostics_per_call() {
+    let _one = crate::diag::ONE.lock().unwrap_or_else(|e| e.into_inner());
+    for on in [false, true] {
+        crate::diag::set_enabled(on);
+        crate::diag::frame_begin(1, true, false, None);
+        let n = 1_000_000;
+        let a = Instant::now();
+        for _ in 0..n {
+            crate::diag::section(std::hint::black_box("snap exclusion"), 0.1);
+        }
+        let section_ns = a.elapsed().as_secs_f64() * 1e9 / n as f64;
+        crate::diag::frame_end(true, false);
+        let k = 10_000;
+        let a = Instant::now();
+        for _ in 0..k {
+            crate::diag::frame_begin(1, true, false, Some(0.01));
+            crate::diag::section("snap exclusion", 0.1);
+            crate::diag::frame_end(true, true);
+        }
+        let frame_us = a.elapsed().as_secs_f64() * 1e6 / k as f64;
+        // the panel: the last 5 s summed up, every frame it is drawn
+        let a = Instant::now();
+        for _ in 0..100 {
+            std::hint::black_box(crate::diag::summarize(&crate::diag::recent(5.0)));
+        }
+        let panel_ms = a.elapsed().as_secs_f64() * 1000.0 / 100.0;
+        let kept = crate::diag::recent(5.0).len();
+        println!(
+            "BENCH Diagnostica {}: una sezione {section_ns:.1} ns; un fotogramma (inizio, una sezione, fine) {frame_us:.2} µs; riepilogo del pannello su {kept} fotogrammi {panel_ms:.3} ms",
+            if on { "attiva" } else { "spenta" }
+        );
+    }
+    crate::diag::set_enabled(false);
+}

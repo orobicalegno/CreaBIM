@@ -10,6 +10,7 @@ Versione di riferimento prima della diagnostica: **6f6f94f**.
 | File | Cosa contiene |
 |---|---|
 | [analisi.md](analisi.md) | L'analisi completa del percorso mouse → modello → schermo, con le misure (le righe sbagliate sono segnate) |
+| [collaudo.md](collaudo.md) | La prova della fluidità sul proprio PC, passo per passo, con la diagnostica |
 | [misure-grezze/](misure-grezze/) | Le uscite dei banchi di prova e i contatori `Perf` raccolti |
 | [prove/banco-prova-analisi.rs](prove/banco-prova-analisi.rs) | Il banco usato per l'analisi (storico; quello permanente è in `crates/creabim-app/src/bench_tests.rs`) |
 | [prove/modifiche-diagnostiche-solo-copia-isolata.diff](prove/modifiche-diagnostiche-solo-copia-isolata.diff) | Le modifiche fatte **solo in una copia isolata** per isolare le cause; mai nel programma |
@@ -131,6 +132,71 @@ Misura di riferimento: [misure/20261128-base-6f6f94f-macchina-sviluppo.csv](misu
 È il codice di 6f6f94f con i banchi aggiunti, sulla macchina di sviluppo
 (4 thread virtuali, senza GPU). Va confrontata solo con misure fatte sulla
 stessa macchina.
+
+## Diagnostica nell'app
+
+Menu **Help › Performance diagnostics**. È spenta all'avvio. Si spegne
+chiudendo il pannello. Procedura per l'utente: [collaudo.md](collaudo.md).
+Codice: `crates/creabim-app/src/diag.rs` (misure e rapporto) e `diagui.rs`
+(pannello, progetti di prova).
+
+| Dato | Tipo |
+|---|---|
+| FPS e tempo tra fotogrammi durante l'interazione | misurato |
+| Tempo CPU per fotogramma, dalla lettura dell'input alla consegna alla GPU (latenza interna) | misurato da eframe |
+| Attesa dello schermo (VSync e coda) | stimato: intervallo meno CPU |
+| Sezioni: modifica provvisoria, esclusione e ricerca degli snap, pianta ricostruita, scena 3D, pannello proprietà, vista 2D | misurato (timer `Perf` già esistenti più tre nuovi) |
+| Lavori in sottofondo avviati (disegni, scene 3D) | contati |
+| Aggiornamenti del modello col mouse fermo | contati |
+| Tempo GPU | non disponibile |
+| Latenza fisica mouse → monitor | non misurabile dal programma |
+
+Regole del riepilogo:
+- **le pause non sono lentezza.** Quando nulla cambia, Volumen non
+  ridisegna, ed è corretto. Un intervallo entra nelle statistiche solo se
+  entrambi i fotogrammi fanno parte di un'interazione e se, tolto il lavoro
+  del primo, sono passati meno di 250 ms. Così un fotogramma lento di 2 s
+  conta, mentre una pausa di 2 s col mouse fermo no;
+- **solo il thread dell'interfaccia.** Le sezioni misurate su altri thread
+  (lavori in sottofondo, test in parallelo) non vengono attribuite al
+  fotogramma.
+
+**Rapporto.** *Record 30 s* registra 30 secondi. Alla fine il rapporto si
+salva da solo, senza finestre di dialogo, in
+`%APPDATA%\CreaBIM\diagnostics\Volumen-diagnostica-<data-ora UTC>-<commit>.txt`.
+Contiene:
+- versione e commit, sistema operativo, processore, scheda grafica, backend
+  e driver;
+- risoluzione e frequenza dello schermo (su Windows), finestra e scala;
+- presentazione (dal codice), impostazioni grafiche;
+- conteggio degli elementi per tipo, elementi selezionati, comando attivo;
+- statistiche, sezioni e tutti i fotogrammi in CSV.
+
+Non contiene nomi, testi né percorsi: lo verifica il test
+`diag::tests::the_report_names_no_project_and_no_path`.
+
+**Costo della diagnostica** (banchi `bench_diagnostics_*`, build
+ottimizzata, macchina di sviluppo):
+- spenta: 2–4 ns per sezione misurata, circa 0,01 µs per fotogramma;
+- accesa: 37–40 ns per sezione, 0,25–0,29 µs per fotogramma;
+- pannello aperto: riepilogo di 300 fotogrammi circa 0,04 ms (0,46 ms su
+  3.600);
+- Sposta, diagnostica spenta e accesa: differenze dentro il rumore della
+  macchina virtuale (1 muro 19,9 / 20,9 ms; 1.000 linee su 10.000 551 / 475
+  ms).
+
+**Test che la proteggono:**
+- `diag::tests::*`: statistiche, pause non contate, fotogrammi lenti
+  contati, registrazione, spenta = niente raccolto, privacy del rapporto,
+  date;
+- `diagui::tests::*`: progetti di prova nella pianta giusta e selezioni
+  esatte, pannello disegnato solo da accesa, voce del menu Help, rapporto
+  salvato senza finestra di dialogo.
+
+**Verificato nell'app vera** su Linux con Xvfb e renderer software
+(lavapipe), build di debug: menu, pannello, progetto di prova, Sposta
+1.000 linee registrato e rapporto salvato. **Non verificato** su Windows né
+su una vera GPU: lo farà la prova dell'utente.
 
 ## Interventi proposti (nessuno ancora autorizzato)
 
