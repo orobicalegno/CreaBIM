@@ -32,12 +32,38 @@ impl Step {
     }
 }
 
+/// Identity of one open document (one project), unique in the process:
+/// an edit in progress belongs to the document it started in, and never
+/// touches another one, even a copy with the same elements and the same
+/// step names (V-10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DocId(u64);
+
+impl DocId {
+    fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        DocId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// A model plus its edit history. All edits go through [`Document::commit`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Document {
+    id: DocId,
     model: Model,
     undo: Vec<Step>,
     redo: Vec<Step>,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            id: DocId::next(),
+            model: Model::default(),
+            undo: vec![],
+            redo: vec![],
+        }
+    }
 }
 
 impl Document {
@@ -70,6 +96,7 @@ impl Document {
             tx.apply(&mut scratch)?;
         }
         Ok(Self {
+            id: DocId::next(),
             model,
             undo: undo.into_iter().map(Step::new).collect(),
             redo: redo.into_iter().map(Step::new).collect(),
@@ -84,6 +111,16 @@ impl Document {
 
     pub fn model(&self) -> &Model {
         &self.model
+    }
+
+    /// This document's identity (see [`DocId`]).
+    pub fn id(&self) -> DocId {
+        self.id
+    }
+
+    /// The step the next undo takes back, if any.
+    pub fn last_step_id(&self) -> Option<StepId> {
+        self.undo.last().map(|s| s.id)
     }
 
     /// The undo stack, oldest first; the next step to undo is last.
@@ -245,6 +282,17 @@ impl Document {
             .expect("undoing a committed transaction cannot fail");
         self.redo.push(step);
         true
+    }
+
+    /// Take back step `step` for good, without offering it for redo, only
+    /// if it is the last step: an edit in progress removes its own preview
+    /// this way, and never a step made by anything else, whatever its name
+    /// (V-01). False, and nothing changes, when `step` is not the last.
+    pub fn discard_step(&mut self, step: StepId) -> bool {
+        if self.last_step_id() != Some(step) {
+            return false;
+        }
+        self.discard_last()
     }
 
     /// Take back the last edit for good, without offering it for redo: for

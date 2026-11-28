@@ -592,6 +592,7 @@ fn assembly(c: &mut Ctx, a: &f::Assembly, at: &Path) {
         description: a.description.clone().unwrap_or_default(),
         wrap_openings: Default::default(),
         wrap_returns: Default::default(),
+        wrap_ends: Default::default(),
     };
     c.insert(
         &a.id,
@@ -1671,6 +1672,8 @@ fn view(c: &mut Ctx, v: &f::View, at: &Path) {
             f::ViewStyle::HiddenLine => core::ViewStyle::HiddenLine,
             f::ViewStyle::Shaded => core::ViewStyle::Shaded,
             f::ViewStyle::Wireframe => core::ViewStyle::Wireframe,
+            f::ViewStyle::White => core::ViewStyle::White,
+            f::ViewStyle::Maquette => core::ViewStyle::Maquette,
         };
     }
     view.room_colours = v.room_colours;

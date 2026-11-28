@@ -220,20 +220,68 @@ pub(super) fn layer_table(
     let (core0, core1) = a.core();
     // walls: which layers turn into the reveals of doors and windows
     let wall = a.usage == AssemblyUse::Wall;
-    let wrapping = !a.wrap_openings.is_none();
+    let wrapping = !a.wrap_openings.is_none() || !a.wrap_ends.is_none();
     ui.label(
         egui::RichText::new(format!("{} face", a.usage.first_face()))
             .size(10.5)
             .color(weak),
     );
+    // the layer picked, to move up or down with the arrows by the table
+    // (MU: one arrow per row made you chase the layer as it moved)
+    let sel_key = egui::Id::new(("asm.layer.sel", id));
+    let mut picked: Option<usize> = ui.data(|d| d.get_temp::<usize>(sel_key)).filter(|i| *i < n);
+    crate::props::flow(ui, |ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let up = ui
+            .add_enabled(picked.is_some_and(|i| i > 0), GlyphButton(Glyph::Up))
+            .on_hover_text("Move the picked layer out (towards the first face)")
+            .on_disabled_hover_text("Click a layer's colour square to pick it");
+        if up.clicked() {
+            if let Some(i) = picked {
+                swap = Some((i - 1, i));
+                picked = Some(i - 1);
+            }
+        }
+        let down = ui
+            .add_enabled(picked.is_some_and(|i| i + 1 < n), GlyphButton(Glyph::Down))
+            .on_hover_text("Move the picked layer in (towards the last face)")
+            .on_disabled_hover_text("Click a layer's colour square to pick it");
+        if down.clicked() {
+            if let Some(i) = picked {
+                swap = Some((i, i + 1));
+                picked = Some(i + 1);
+            }
+        }
+        ui.label(
+            egui::RichText::new(match picked {
+                Some(i) => format!("Layer {} picked: the arrows move it", i + 1),
+                None => {
+                    "Click a layer's colour square to pick it, then move it with the arrows".into()
+                }
+            })
+            .size(10.5)
+            .color(weak),
+        );
+    });
     egui::Grid::new(("layers", id))
         .num_columns(if wall { 6 } else { 5 })
         .spacing([6.0, 4.0])
         .show(ui, |ui| {
             for (i, l) in edited.layers.iter_mut().enumerate() {
                 let (fill, _) = layer_fill(model, l);
-                let (r, _) = ui.allocate_exact_size(Vec2::new(10.0, 18.0), Sense::hover());
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(14.0, 18.0), Sense::click());
                 ui.painter().rect_filled(r, 2.0, fill);
+                if picked == Some(i) {
+                    ui.painter().rect_stroke(
+                        r.expand(1.5),
+                        3.0,
+                        egui::Stroke::new(2.0, crate::theme::interaction()),
+                        egui::StrokeKind::Outside,
+                    );
+                }
+                if resp.on_hover_text("Pick this layer, to move it with the arrows above").clicked() {
+                    picked = if picked == Some(i) { None } else { Some(i) };
+                }
                 if (core0..=core1).contains(&i) {
                     ui.painter().line_segment(
                         [r.left_top(), r.left_bottom()],
@@ -326,20 +374,6 @@ pub(super) fn layer_table(
                 crate::props::flow(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if ui
-                        .add_enabled(i > 0, GlyphButton(Glyph::Up))
-                        .on_hover_text("Move the layer out")
-                        .clicked()
-                    {
-                        swap = Some((i - 1, i));
-                    }
-                    if ui
-                        .add_enabled(i + 1 < n, GlyphButton(Glyph::Down))
-                        .on_hover_text("Move the layer in")
-                        .clicked()
-                    {
-                        swap = Some((i, i + 1));
-                    }
-                    if ui
                         .add_enabled(n > 1, GlyphButton(Glyph::Remove))
                         .on_hover_text("Remove the layer")
                         .clicked()
@@ -362,7 +396,14 @@ pub(super) fn layer_table(
     if let Some(i) = remove {
         edited.layers.remove(i);
         label = "Remove layer";
+        picked = None;
     }
+    ui.data_mut(|d| match picked {
+        Some(i) => {
+            d.insert_temp(sel_key, i);
+        }
+        None => d.remove::<usize>(sel_key),
+    });
     if wall {
         crate::props::flow(ui, |ui| {
             ui.label("Wrap at openings");
@@ -382,6 +423,22 @@ pub(super) fn layer_table(
                 })
                 .response
                 .on_hover_text("At doors and windows, the layers ticked Wraps turn into the reveals from these faces of the wall and run to the frame or subframe. A door or window can go its own way in its Properties.");
+        });
+        crate::props::flow(ui, |ui| {
+            ui.label("Wrap at free ends");
+            egui::ComboBox::from_id_salt(("wrap_ends", id))
+                .icon(crate::props::combo_icon)
+                .width(if compact { 110.0 } else { 140.0 })
+                .selected_text(edited.wrap_ends.label())
+                .show_ui(ui, |ui| {
+                    for w in WrapSides::ALL {
+                        if ui.selectable_value(&mut edited.wrap_ends, w, w.label()).changed() {
+                            label = "Wrap layers at free ends";
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Where the wall ends meeting no other wall, the layers ticked Wraps on these faces turn round its end and close it, as Revit's Wrapping at Ends: the exterior insulation and render cover the end of the block.");
         });
         if wrapping {
             crate::props::flow(ui, |ui| {
@@ -601,9 +658,17 @@ impl CreaBimApp {
 
     /// The assembly editor window, when open.
     pub(super) fn assemblies_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("asm") {
+            self.dialog_end("asm", keep);
+            self.asm.open = false;
+        }
         if !self.asm.open {
+            self.dialog_end("asm", true);
             return;
         }
+        self.dialog_begin("asm");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let mut asks = vec![];
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
@@ -614,7 +679,13 @@ impl CreaBimApp {
             .default_size([760.0, (area.height() - 40.0).clamp(360.0, 600.0)])
             .min_width(620.0)
             .collapsible(false)
-            .show(ctx, |ui| self.assemblies_body(ui, &mut asks));
+            .show(ctx, |ui| {
+                self.assemblies_body(ui, &mut asks);
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
+            });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("asm", keep));
+        }
         self.asm.open = open;
         for ask in asks {
             self.run_asm(ask);

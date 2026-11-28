@@ -318,6 +318,27 @@ pub struct DetailItem {
     /// it (unlike a filled region, it hides nothing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<Hatch>,
+    /// Its pen is its own; else it takes its layer's (ByLayer), when the
+    /// layer has one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_pen: bool,
+    /// Its hatch (a filled region's, a fill's) drawn this many times its
+    /// size and turned this many degrees, as AutoCAD's hatch scale and
+    /// angle.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub hatch_scale: f64,
+    #[serde(default, skip_serializing_if = "is_zero_f")]
+    pub hatch_angle: f64,
+}
+
+fn one() -> f64 {
+    1.0
+}
+fn is_one(v: &f64) -> bool {
+    *v == 1.0
+}
+fn is_zero_f(v: &f64) -> bool {
+    *v == 0.0
 }
 
 /// How a line is broken along its length.
@@ -329,14 +350,41 @@ pub enum LineType {
     Dotted,
     /// A long dash and a dot: centre lines and axes.
     DashDot,
+    /// Short dashes, close: hidden edges (AutoCAD's HIDDEN).
+    Hidden,
+    /// Long and short dashes: centre lines (CENTER).
+    Center,
+    /// A long dash and two short ones (PHANTOM).
+    Phantom,
+    /// Two dashes and a dot (BORDER).
+    Border,
+    /// A dash and two dots (DIVIDE).
+    Divide,
+    /// Long dashes, wide gaps (DASHED2X).
+    DashedWide,
+    /// Dots close together (DOT2).
+    DotsClose,
+    /// A zigzag along the line (ZIGZAG).
+    Zigzag,
+    /// Loops along the line: soft insulation (BATTING).
+    Batting,
 }
 
 impl LineType {
-    pub const ALL: [LineType; 4] = [
+    pub const ALL: [LineType; 13] = [
         LineType::Continuous,
         LineType::Dashed,
         LineType::Dotted,
         LineType::DashDot,
+        LineType::Hidden,
+        LineType::Center,
+        LineType::Phantom,
+        LineType::Border,
+        LineType::Divide,
+        LineType::DashedWide,
+        LineType::DotsClose,
+        LineType::Zigzag,
+        LineType::Batting,
     ];
 
     pub fn label(self) -> &'static str {
@@ -345,17 +393,33 @@ impl LineType {
             LineType::Dashed => "Dashed",
             LineType::Dotted => "Dotted",
             LineType::DashDot => "Dash-dot",
+            LineType::Hidden => "Hidden",
+            LineType::Center => "Center",
+            LineType::Phantom => "Phantom",
+            LineType::Border => "Border",
+            LineType::Divide => "Divide",
+            LineType::DashedWide => "Dashed wide",
+            LineType::DotsClose => "Dots close",
+            LineType::Zigzag => "Zigzag",
+            LineType::Batting => "Batting (insulation)",
         }
     }
 
     /// Its dashes and gaps in turn, in paper millimetres; none when it
-    /// isn't broken.
+    /// isn't broken (a zigzag and batting are drawn as their shape).
     pub fn pattern(self) -> Option<&'static [f64]> {
         match self {
-            LineType::Continuous => None,
+            LineType::Continuous | LineType::Zigzag | LineType::Batting => None,
             LineType::Dashed => Some(&[3.0, 1.5]),
             LineType::Dotted => Some(&[0.3, 1.2]),
             LineType::DashDot => Some(&[6.0, 1.5, 0.3, 1.5]),
+            LineType::Hidden => Some(&[1.6, 0.8]),
+            LineType::Center => Some(&[8.0, 1.5, 1.5, 1.5]),
+            LineType::Phantom => Some(&[9.0, 1.5, 1.5, 1.5, 1.5, 1.5]),
+            LineType::Border => Some(&[3.0, 1.5, 3.0, 1.5, 0.3, 1.5]),
+            LineType::Divide => Some(&[4.0, 1.5, 0.3, 1.5, 0.3, 1.5]),
+            LineType::DashedWide => Some(&[6.0, 3.0]),
+            LineType::DotsClose => Some(&[0.3, 0.6]),
         }
     }
 }
@@ -520,6 +584,14 @@ pub struct DraftLayer {
     /// own, a line type other than Continuous).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// Its linework can't be selected or changed, though it shows and
+    /// snaps (AutoCAD's lock).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+    /// The pen its linework draws with unless a line has its own: thin,
+    /// medium or thick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pen: Option<LinePen>,
 }
 
 impl DraftLayer {
@@ -531,6 +603,8 @@ impl DraftLayer {
             linetype: LineType::Continuous,
             hidden: false,
             parent: None,
+            locked: false,
+            pen: None,
         }
     }
 }
@@ -570,6 +644,8 @@ impl DraftLayers {
         let first = (*chain.first()?).clone();
         Some(DraftLayer {
             hidden: chain.iter().any(|l| l.hidden),
+            locked: chain.iter().any(|l| l.locked),
+            pen: chain.iter().find_map(|l| l.pen),
             color: chain.iter().find_map(|l| l.color),
             linetype: chain
                 .iter()
@@ -714,6 +790,65 @@ pub fn rename_layer(model: &Model, old: &str, new: &str) -> Transaction {
     tx
 }
 
+/// How many pieces of linework each drafting layer holds.
+pub fn layer_counts(model: &Model) -> std::collections::HashMap<String, usize> {
+    let mut out = std::collections::HashMap::new();
+    for e in model.iter() {
+        if let ElementKind::Detail(d) = &e.kind {
+            if let Some(l) = &d.layer {
+                *out.entry(l.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+    out
+}
+
+/// The edit that deletes drafting layer `name` and its linework (its
+/// sub-layers move up), as one undo step.
+pub fn delete_layer(model: &Model, name: &str) -> Transaction {
+    let mut table = layers(model);
+    table.remove(name);
+    let mut tx = set_layers(model, table);
+    tx.label = "Delete drafting layer".into();
+    for e in model.iter() {
+        if let ElementKind::Detail(d) = &e.kind {
+            if d.layer.as_deref() == Some(name) {
+                tx = tx.remove_cascade(model, e.id);
+            }
+        }
+    }
+    tx
+}
+
+/// The edit that merges drafting layer `from` into `into`: its linework
+/// moves onto `into`, its sub-layers go under `into`, and it goes.
+pub fn merge_layers(model: &Model, from: &str, into: &str) -> Transaction {
+    let mut table = layers(model);
+    if from == into || table.get(into).is_none() {
+        return Transaction::new("Merge drafting layers");
+    }
+    for l in &mut table.layers {
+        if l.parent.as_deref() == Some(from) {
+            l.parent = Some(into.to_string());
+        }
+    }
+    table.layers.retain(|l| l.name != from);
+    let mut tx = set_layers(model, table);
+    tx.label = "Merge drafting layers".into();
+    for e in model.iter() {
+        if let ElementKind::Detail(d) = &e.kind {
+            if d.layer.as_deref() == Some(from) {
+                let mut after = e.clone();
+                if let ElementKind::Detail(d) = &mut after.kind {
+                    d.layer = Some(into.to_string());
+                }
+                tx = tx.replace(e.clone(), after);
+            }
+        }
+    }
+    tx
+}
+
 /// The edit that gives `model` these drafting layers, as one undo step.
 pub fn set_layers(model: &Model, layers: DraftLayers) -> Transaction {
     let tx = Transaction::new("Drafting layers");
@@ -780,6 +915,9 @@ impl DetailItem {
             linetype: None,
             layer: None,
             fill: None,
+            own_pen: false,
+            hatch_scale: 1.0,
+            hatch_angle: 0.0,
         }
     }
 
@@ -793,6 +931,11 @@ impl DetailItem {
         if layer.is_some_and(|l| l.hidden) {
             return None;
         }
+        // its layer's pen, unless it has its own (ByLayer)
+        let pen = match (self.own_pen, layer.and_then(|l| l.pen)) {
+            (false, Some(p)) => p,
+            _ => pen,
+        };
         // the dashed pen is a light line, dashed
         let (weight, by_pen) = match pen {
             LinePen::Dashed => (LinePen::Light, LineType::Dashed),

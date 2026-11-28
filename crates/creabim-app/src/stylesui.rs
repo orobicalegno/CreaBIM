@@ -24,6 +24,14 @@ pub(super) enum Page {
     Marks,
 }
 
+impl StylesUi {
+    /// Open the window on its Patterns page.
+    pub(super) fn open_patterns(&mut self) {
+        self.open = true;
+        self.page = Page::Patterns;
+    }
+}
+
 /// The window's own state, for the session.
 #[derive(Default)]
 pub(super) struct StylesUi {
@@ -36,6 +44,10 @@ pub(super) struct StylesUi {
     designer: crate::choices::Designer,
     /// While an option is previewed on the plan, the pack as it was.
     preview_base: Option<StylePack>,
+    /// The steps the preview made (each one's id as it now is): ending the
+    /// preview takes back those and no other step, whatever its name (as
+    /// for live edits, V-01).
+    preview_steps: Vec<creabim_core::StepId>,
 }
 
 /// The undo label of a previewed option, taken back when the pointer
@@ -446,46 +458,96 @@ pub(super) fn look_ui(
             label = Some("Depth cues");
         }
     });
-    let mut sun = c.shadows.is_some();
+    // the sun and the shading of corners: the white model starts from its
+    // own, and an edit makes them the view's
+    let style = v.style;
+    let plan = matches!(v.kind, ViewKind::Plan { .. });
+    let three_d = matches!(v.kind, ViewKind::Axonometric { .. });
+    let c = &mut v.look.cues;
+    let own = creabim_core::styles::own_sun(style, plan).unwrap_or(if plan {
+        creabim_core::styles::WHITE_PLAN_SUN
+    } else {
+        creabim_core::styles::WHITE_SUN
+    });
+    let shown = c.shadows_for(style, plan);
+    let mut sun = shown.is_some();
     if crate::props::check(ui, "Shadows", &mut sun, "Sun")
-        .on_hover_text("Shadows cast on the ground, in plans from above")
+        .on_hover_text("Soft sun shadows: on the floors in plans, from the walls, furniture and all that stands below the cut; on the model and the ground in sections, elevations and 3D views drawn shaded or as a white model. Printed and in PDFs too")
         .changed()
     {
-        c.shadows = sun.then_some(Shadows {
-            direction: -50.0,
-            length: 0.6,
-            opacity: 0.35,
-        });
+        c.shadows = if sun {
+            Some(c.shadows.filter(|s| s.opacity > 0.0).unwrap_or(own))
+        } else if style.is_model() {
+            // the white model's own sun, turned off
+            Some(Shadows { opacity: 0.0, ..own })
+        } else {
+            None
+        };
         label = Some("Depth cues");
     }
-    if let Some(s) = &mut c.shadows {
+    if let Some(mut s) = shown {
+        let before = s;
+        if three_d && c.shadows.is_none() {
+            ui.label(
+                egui::RichText::new("The sun turns with the view; set it here to fix it.")
+                    .weak()
+                    .small(),
+            );
+        }
         crate::props::row(ui, "Toward", |ui| {
-            label = label.or(crate::props::fill(
+            crate::props::fill(
                 ui,
                 egui::DragValue::new(&mut s.direction)
                     .speed(1.0)
                     .suffix("°"),
             )
-            .changed()
-            .then_some("Depth cues"));
+            .on_hover_text("Where the shadows fall, degrees anticlockwise from the drawing's right")
         });
-        crate::props::row(ui, "Length", |ui| {
-            label = label.or(crate::props::fill(
+        // the sun's height, from how long a shadow is per metre
+        let mut height = (1.0 / s.length.max(0.01)).atan().to_degrees();
+        crate::props::row(ui, "Sun height", |ui| {
+            if crate::props::fill(
                 ui,
-                egui::DragValue::new(&mut s.length)
-                    .speed(0.05)
-                    .range(0.0..=5.0),
+                egui::DragValue::new(&mut height)
+                    .speed(0.5)
+                    .range(5.0..=89.0)
+                    .suffix("°"),
             )
+            .on_hover_text("How high the sun stands: higher, shorter shadows")
             .changed()
-            .then_some("Depth cues"));
+            {
+                s.length = 1.0 / height.to_radians().tan();
+            }
         });
         crate::props::row(ui, "Strength", |ui| {
             ui.spacing_mut().slider_width = (ui.available_width() - 56.0).max(40.0);
-            label = label.or(ui
-                .add(egui::Slider::new(&mut s.opacity, 0.05..=1.0))
-                .changed()
-                .then_some("Depth cues"));
+            ui.add(egui::Slider::new(&mut s.opacity, 0.05..=1.0))
+                .on_hover_text("How dark the shadows are")
         });
+        if s != before {
+            c.shadows = Some(s);
+            label = Some("Depth cues");
+        }
+    }
+    let mut occ = c.occlusion_for(style);
+    crate::props::row(ui, "Occlusion", |ui| {
+        ui.spacing_mut().slider_width = (ui.available_width() - 56.0).max(40.0);
+        if ui
+            .add(egui::Slider::new(&mut occ, 0.0..=1.0).max_decimals(2))
+            .on_hover_text("Ambient occlusion: how much corners, recesses, the underside of eaves and the ground at a wall's foot are shaded. Shaded and white model views")
+            .changed()
+        {
+            c.occlusion = Some(occ);
+            label = Some("Depth cues");
+        }
+    });
+    let mut joints = c.joints_for(style);
+    if crate::props::check(ui, "Joints", &mut joints, "Between like faces")
+        .on_hover_text("Draw the line where two faces of one material carry on in one plane, as a wall on the wall below. The white model and the maquette leave them out")
+        .changed()
+    {
+        c.joints = Some(joints);
+        label = Some("Depth cues");
     }
     // overrides by category: a sub-section, as Blender's (MU22)
     let oid = egui::Id::new("props.view.overrides.open");
@@ -773,9 +835,17 @@ impl CreaBimApp {
 
     /// The Graphic styles window, when open.
     pub(super) fn graphic_styles_window(&mut self, ctx: &egui::Context) {
+        // Save or Cancel pressed last frame: kept, or put back
+        if let Some(keep) = self.take_dialog_close("gstyles") {
+            self.dialog_end("gstyles", keep);
+            self.gstyles.open = false;
+        }
         if !self.gstyles.open {
+            self.dialog_end("gstyles", true);
             return;
         }
+        self.dialog_begin("gstyles");
+        let mut dlg_footer: Option<bool> = None;
         let mut open = true;
         let (id, in_model) = self.edited_pack();
         // while an option is previewed, the window shows the pack as it was
@@ -899,7 +969,11 @@ impl CreaBimApp {
                         }
                     }
                 });
+                dlg_footer = Self::dialog_footer(ui).or(dlg_footer);
             });
+        if let Some(keep) = dlg_footer {
+            self.dialog_close.push(("gstyles", keep));
+        }
         self.gstyles.open = open;
         if pack != before {
             self.end_preview();
@@ -909,11 +983,7 @@ impl CreaBimApp {
             h.default = in_model.default;
             // the option under the pointer, shown on the plan until it leaves
             if h != in_model {
-                if self.gstyles.preview_base.is_none() {
-                    self.gstyles.preview_base = Some(before.clone());
-                }
-                self.commit_pack(id, h, PREVIEW);
-                self.status = "Previewing on the drawings: click to keep it.".into();
+                self.preview_pack(id, h, &before);
             }
         } else {
             self.end_preview();
@@ -943,13 +1013,28 @@ impl CreaBimApp {
         }
     }
 
+    /// Show option `h` on the drawings until the pointer leaves it, as
+    /// steps of its own (`before`: the pack as it was).
+    fn preview_pack(&mut self, id: Option<ElementId>, h: StylePack, before: &StylePack) {
+        if self.gstyles.preview_base.is_none() {
+            self.gstyles.preview_base = Some(before.clone());
+        }
+        let last = self.doc.last_step_id();
+        self.commit_pack(id, h, PREVIEW);
+        if let Some(step) = self.doc.last_step_id().filter(|s| Some(*s) != last) {
+            self.gstyles.preview_steps.push(step);
+        }
+        self.status = "Previewing on the drawings: click to keep it.".into();
+    }
+
     /// Take back an option previewed on the plan.
-    fn end_preview(&mut self) {
+    pub(super) fn end_preview(&mut self) {
+        let ours = std::mem::take(&mut self.gstyles.preview_steps);
         if self.gstyles.preview_base.take().is_some() {
             // a first preview adds the project's pack, and the next ones
-            // edit it: each its own step
-            while self.doc.undo_label() == Some(PREVIEW) {
-                self.doc.discard_last();
+            // edit it: each its own step, taken back while it is the last
+            while let Some(step) = self.doc.last_step_id().filter(|s| ours.contains(s)) {
+                self.doc.discard_step(step);
             }
             self.status.clear();
         }
@@ -1192,7 +1277,13 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
         }
         ui.menu_button("Copy a built-in", |ui| {
             for h in creabim_core::Hatch::ALL {
-                if ui.button(h.label()).clicked() {
+                let clicked = ui
+                    .horizontal(|ui| {
+                        crate::app::materials::hatch_swatch(ui, h, 18.0);
+                        ui.button(h.label()).clicked()
+                    })
+                    .inner;
+                if clicked {
                     let mut p = styles::builtin_pattern(h);
                     if pack.patterns.iter().any(|x| x.name == p.name) {
                         p.name = format!("{} copy", p.name);
@@ -1215,22 +1306,87 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
         return changed;
     }
     *pick = (*pick).min(pack.patterns.len() - 1);
+    let fam_id = egui::Id::new("pattern.family");
+    let mut family: usize = ui.data(|d| d.get_temp(fam_id)).unwrap_or(0);
+    let zoom_id = egui::Id::new("pattern.zoom");
+    let mut zoom: f64 = ui.data(|d| d.get_temp(zoom_id)).unwrap_or(50.0);
     ui.columns(2, |cols| {
-        for (i, p) in pack.patterns.iter().enumerate() {
-            cols[0].horizontal(|ui| {
-                pattern_preview(ui, p, 100.0);
-                if ui.selectable_label(*pick == i, &p.name).clicked() {
-                    *pick = i;
-                }
+        // the project's patterns as tiles, picked by eye
+        egui::ScrollArea::vertical()
+            .id_salt("pattern.tiles")
+            .max_height(520.0)
+            .show(&mut cols[0], |ui| {
+                egui::Grid::new("pattern.grid").spacing([8.0, 8.0]).show(ui, |ui| {
+                    for (i, p) in pack.patterns.iter().enumerate() {
+                        let r = ui
+                            .vertical(|ui| {
+                                ui.set_width(76.0);
+                                let pr = big_preview(ui, p, 64.0, 100.0, None, *pick == i);
+                                let name = ui.add(
+                                    egui::Label::new(egui::RichText::new(&p.name).small())
+                                        .truncate()
+                                        .sense(egui::Sense::click()),
+                                );
+                                pr.clicked() || name.clicked()
+                            })
+                            .inner;
+                        if r {
+                            *pick = i;
+                            family = 0;
+                        }
+                        if i % 3 == 2 {
+                            ui.end_row();
+                        }
+                    }
+                });
             });
-        }
-        let ui = &mut cols[1];
         let mut delete = false;
+        egui::ScrollArea::vertical()
+            .id_salt("pattern.editor")
+            .max_height(520.0)
+            .show(&mut cols[1], |ui| {
         let p = &mut pack.patterns[*pick];
+        family = family.min(p.lines.len().saturating_sub(1));
         crate::props::flow(ui, |ui| {
             ui.label("Name");
             changed |= ui.text_edit_singleline(&mut p.name).changed();
             delete = ui.small_button("Delete").clicked();
+        });
+        // the big live picture: drag across it to turn the picked family,
+        // with Shift to space it closer or wider
+        let r = big_preview(ui, p, 230.0, zoom, Some(family), false);
+        if r.dragged() {
+            if let Some(l) = p.lines.get_mut(family) {
+                let d = r.drag_delta();
+                if ui.input(|i| i.modifiers.shift) {
+                    l.spacing = (l.spacing * (1.0 - d.y as f64 * 0.01)).clamp(0.001, 100.0);
+                } else {
+                    l.angle = ((l.angle - d.x as f64 * 0.5) % 360.0 + 360.0) % 360.0;
+                }
+                changed = true;
+            }
+        }
+        r.on_hover_text("Drag sideways to turn the picked line family; Shift + drag up or down to space it closer or wider");
+        crate::props::flow(ui, |ui| {
+            ui.label("Seen at 1:");
+            ui.add(egui::Slider::new(&mut zoom, 10.0..=500.0).logarithmic(true));
+        });
+        crate::props::flow(ui, |ui| {
+            ui.label("Whole pattern");
+            if ui.small_button("×½").on_hover_text("Everything half the size").clicked() {
+                scale_pattern(p, 0.5);
+                changed = true;
+            }
+            if ui.small_button("×2").on_hover_text("Everything twice the size").clicked() {
+                scale_pattern(p, 2.0);
+                changed = true;
+            }
+            if ui.small_button("⟲ 90°").on_hover_text("Turn every line family a quarter").clicked() {
+                for l in &mut p.lines {
+                    l.angle = (l.angle + 90.0) % 360.0;
+                }
+                changed = true;
+            }
         });
         crate::props::flow(ui, |ui| {
             ui.label("Sizes");
@@ -1250,61 +1406,102 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
                 "A fill behind the lines; none is white",
             );
         });
+        ui.separator();
         let mut remove = None;
         for (j, l) in p.lines.iter_mut().enumerate() {
             ui.push_id(("line", j), |ui| {
-                crate::props::flow(ui, |ui| {
-                    ui.label("Angle");
-                    changed |= ui
-                        .add(egui::DragValue::new(&mut l.angle).speed(1.0).suffix("°"))
-                        .changed();
-                    ui.label("Spacing");
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut l.spacing)
-                                .speed(0.01)
-                                .range(0.001..=100.0),
-                        )
-                        .changed();
-                    ui.label("Offset");
-                    changed |= ui
-                        .add(egui::DragValue::new(&mut l.offset).speed(0.01))
-                        .changed();
-                    ui.label("Stagger");
-                    changed |= ui
-                        .add(egui::DragValue::new(&mut l.shift).speed(0.01))
-                        .changed();
-                    let mut dashes = l
-                        .dashes
-                        .iter()
-                        .map(|d| d.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    ui.label("Dashes");
-                    if ui
-                        .add(
-                            egui::TextEdit::singleline(&mut dashes)
-                                .vertical_align(egui::Align::Center)
-                                .desired_width(80.0),
-                        )
-                        .on_hover_text("Dash, gap, dash, gap…, spaced; 0 is a dot. Empty is solid.")
-                        .changed()
-                    {
-                        l.dashes = dashes
-                            .split_whitespace()
-                            .filter_map(|t| t.parse::<f64>().ok())
-                            .filter(|d| *d >= 0.0)
-                            .collect();
-                        changed = true;
-                    }
-                    if ui
-                        .small_button("x")
-                        .on_hover_text("Take this line family away")
-                        .clicked()
-                    {
-                        remove = Some(j);
-                    }
-                });
+                let picked = j == family;
+                egui::Frame::group(ui.style())
+                    .stroke(if picked {
+                        egui::Stroke::new(1.5, crate::theme::interaction())
+                    } else {
+                        ui.visuals().widgets.noninteractive.bg_stroke
+                    })
+                    .show(ui, |ui| {
+                        crate::props::flow(ui, |ui| {
+                            if ui
+                                .selectable_label(picked, format!("Lines {}", j + 1))
+                                .on_hover_text("Pick this family: it shows in colour, and dragging the picture changes it")
+                                .clicked()
+                            {
+                                family = j;
+                            }
+                            ui.label("Angle");
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut l.angle).speed(1.0).suffix("°"))
+                                .changed();
+                            for a in [0.0, 45.0, 90.0, 135.0] {
+                                if ui.small_button(format!("{a}°")).clicked() {
+                                    l.angle = a;
+                                    changed = true;
+                                }
+                            }
+                        });
+                        crate::props::flow(ui, |ui| {
+                            ui.label("Spacing");
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut l.spacing, 0.01..=20.0)
+                                        .logarithmic(true),
+                                )
+                                .changed();
+                            ui.label("Offset");
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut l.offset).speed(0.01))
+                                .changed();
+                            ui.label("Stagger");
+                            changed |= ui
+                                .add(egui::DragValue::new(&mut l.shift).speed(0.01))
+                                .changed();
+                        });
+                        crate::props::flow(ui, |ui| {
+                            ui.label("Line");
+                            let s = l.spacing;
+                            for (name, d) in [
+                                ("Solid", vec![]),
+                                ("Dashed", vec![s, s * 0.5]),
+                                ("Dotted", vec![0.0, s * 0.5]),
+                                ("Dash-dot", vec![s, s * 0.4, 0.0, s * 0.4]),
+                            ] {
+                                if ui
+                                    .selectable_label(l.dashes == d, name)
+                                    .clicked()
+                                {
+                                    l.dashes = d;
+                                    changed = true;
+                                }
+                            }
+                            let mut dashes = l
+                                .dashes
+                                .iter()
+                                .map(|d| format!("{d:.3}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut dashes)
+                                        .vertical_align(egui::Align::Center)
+                                        .desired_width(90.0),
+                                )
+                                .on_hover_text("Dash, gap, dash, gap…, spaced; 0 is a dot. Empty is solid.")
+                                .changed()
+                            {
+                                l.dashes = dashes
+                                    .split_whitespace()
+                                    .filter_map(|t| t.parse::<f64>().ok())
+                                    .filter(|d| *d >= 0.0)
+                                    .collect();
+                                changed = true;
+                            }
+                            if ui
+                                .small_button("x")
+                                .on_hover_text("Take this line family away")
+                                .clicked()
+                            {
+                                remove = Some(j);
+                            }
+                        });
+                    });
             });
         }
         if let Some(j) = remove {
@@ -1325,16 +1522,114 @@ fn patterns_page(ui: &mut egui::Ui, pack: &mut StylePack, pick: &mut usize) -> b
                 dashes: vec![],
                 along_longest: false,
             });
+            family = p.lines.len() - 1;
             changed = true;
         }
-        pattern_preview(ui, p, 50.0);
+            });
         if delete {
             pack.patterns.remove(*pick);
             *pick = 0;
             changed = true;
         }
     });
+    ui.data_mut(|d| {
+        d.insert_temp(fam_id, family);
+        d.insert_temp(zoom_id, zoom);
+    });
     changed
+}
+
+/// Every size of a pattern's lines times `k`: spacing, offset, stagger
+/// and dashes.
+fn scale_pattern(p: &mut HatchPattern, k: f64) {
+    for l in &mut p.lines {
+        l.spacing *= k;
+        l.offset *= k;
+        l.shift *= k;
+        l.phase *= k;
+        for d in &mut l.dashes {
+            *d *= k;
+        }
+    }
+}
+
+/// A pattern's picture, `size` points square, as it draws at 1:`scale`;
+/// the line family `highlight` in the accent colour. Clickable.
+fn big_preview(
+    ui: &mut egui::Ui,
+    p: &HatchPattern,
+    size: f32,
+    scale: f64,
+    highlight: Option<usize>,
+    picked: bool,
+) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    let fill = p.fill.map_or([1.0; 3], |c| c.0);
+    painter.rect_filled(
+        rect,
+        3.0,
+        egui::Color32::from_rgb(
+            (fill[0] * 255.0) as u8,
+            (fill[1] * 255.0) as u8,
+            (fill[2] * 255.0) as u8,
+        ),
+    );
+    // the square is size/3 mm of paper (64 points: about 21 mm)
+    let k = 1000.0 / scale;
+    let side = (size as f64 / 3.0) / k;
+    let poly = [
+        DVec2::ZERO,
+        DVec2::new(side, 0.0),
+        DVec2::new(side, side),
+        DVec2::new(0.0, side),
+    ];
+    let to = |q: DVec2| {
+        egui::pos2(
+            rect.min.x + (q.x / side) as f32 * size,
+            rect.max.y - (q.y / side) as f32 * size,
+        )
+    };
+    for (j, l) in p.lines.iter().enumerate() {
+        let mut one = p.clone();
+        one.lines = vec![l.clone()];
+        one.tile = None;
+        let lit = highlight == Some(j);
+        let stroke = if lit {
+            egui::Stroke::new(1.4, crate::theme::interaction())
+        } else {
+            egui::Stroke::new(1.0, egui::Color32::from_gray(50))
+        };
+        for (a, b) in creabim_geom::looks::pattern_lines(&one, &poly, k) {
+            let (a, b) = (to(a), to(b));
+            if a.distance(b) < 0.8 {
+                painter.circle_filled(a, 0.8, stroke.color);
+            } else {
+                painter.line_segment([a, b], stroke);
+            }
+        }
+    }
+    // tiles, as the small preview draws them
+    if p.tile.is_some() {
+        let mut tiles = p.clone();
+        tiles.lines.clear();
+        let stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(50));
+        for (a, b) in creabim_geom::looks::pattern_lines(&tiles, &poly, k) {
+            painter.line_segment([to(a), to(b)], stroke);
+        }
+    }
+    painter.rect_stroke(
+        rect,
+        3.0,
+        if picked {
+            egui::Stroke::new(2.0, crate::theme::interaction())
+        } else {
+            egui::Stroke::new(1.0, egui::Color32::from_gray(150))
+        },
+        egui::StrokeKind::Inside,
+    );
+    resp
 }
 
 /// The pack's view templates. True when one changed.
@@ -1455,7 +1750,7 @@ fn templates_page(
                 .changed();
         });
         let mut sun = cues.shadows.is_some();
-        if crate::props::switch(ui, &mut sun, "Sun shadows in plans from above").changed() {
+        if crate::props::switch(ui, &mut sun, "Sun shadows in plans").changed() {
             cues.shadows = sun.then_some(Shadows {
                 direction: -50.0,
                 length: 0.6,
@@ -1515,5 +1810,44 @@ mod tests {
         );
         app.doc.undo();
         assert_eq!(app.doc.model(), &before);
+    }
+
+    /// A style option previewed when the project changes: the preview's
+    /// steps go with the preview, in its own project; the other project
+    /// keeps all of its own (V-01, V-10).
+    #[test]
+    fn a_preview_ends_in_its_own_project_when_the_project_changes() {
+        let mut app = crate::app::test_app();
+        app.multi = true;
+        // something confirmed first
+        let (id, mut pack) = app.edited_pack();
+        pack.pens[0].weights.cut = 0.6;
+        app.commit_pack(id, pack.clone(), "Pens");
+        let confirmed = app.doc.model().clone();
+        let confirmed_step = app.doc.last_step_id();
+        // an option under the pointer, shown on the drawings
+        let (id, before) = app.edited_pack();
+        let mut h = before.clone();
+        h.pens[0].weights.cut = 0.9;
+        app.preview_pack(id, h.clone(), &before);
+        h.pens[0].weights.cut = 0.95;
+        app.preview_pack(id, h, &before);
+        assert_ne!(app.doc.model(), &confirmed, "the preview shows");
+        // another project opened: the preview ends, here
+        app.load_model(creabim_core::starter::starter_house());
+        let other = app.doc.model().clone();
+        app.end_preview();
+        assert_eq!(app.doc.model(), &other, "the other project untouched");
+        app.switch_project(1);
+        assert_eq!(
+            app.doc.model(),
+            &confirmed,
+            "the preview gone, the rest kept"
+        );
+        assert_eq!(
+            app.doc.last_step_id(),
+            confirmed_step,
+            "the step before it kept"
+        );
     }
 }

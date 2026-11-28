@@ -31,7 +31,7 @@ install -d "$stage/usr/bin" "$stage/usr/share/applications" \
     "$stage/usr/share/icons/hicolor/512x512/apps" "$stage/usr/share/doc/volumen"
 install -m 0755 "$target_dir/creabim-app" "$stage/usr/bin/volumen"
 install -m 0755 "$target_dir/creabim" "$stage/usr/bin/volumen-cli"
-install -m 0644 crates/creabim-app/assets/logo/png/creabim-app-icon-512.png \
+install -m 0644 crates/creabim-app/assets/logo/png/volumen-app-icon-512.png \
     "$stage/usr/share/icons/hicolor/512x512/apps/volumen.png"
 install -m 0644 LICENSE "$stage/usr/share/doc/volumen/copyright"
 install -m 0644 README.md "$stage/usr/share/doc/volumen/README.md"

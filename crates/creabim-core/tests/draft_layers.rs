@@ -34,6 +34,8 @@ fn layers_are_kept_in_the_project_and_renamed_with_their_linework() {
             linetype: LineType::DashDot,
             hidden: false,
             parent: None,
+            locked: false,
+            pen: None,
         }],
     };
     let tx = set_layers(doc.model(), table.clone());

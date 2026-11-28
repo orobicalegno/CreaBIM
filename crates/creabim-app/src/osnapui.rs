@@ -5,11 +5,267 @@
 
 use super::*;
 
+/// What a window changed, for its Cancel: the undo steps it made, and the
+/// settings it set itself (C3), each with its value before the window's
+/// first change and the value the window left.
+pub(super) struct DialogSnap {
+    /// The settings when the window opened (its first frame).
+    at_open: serde_json::Value,
+    /// Each setting the window changed (a path into [`settings_now`]):
+    /// its value before the window's first change, and the window's last.
+    settings: Vec<(Vec<String>, serde_json::Value, serde_json::Value)>,
+    /// The undo steps the window itself made: Cancel takes back these, and
+    /// never what was done elsewhere while it stood open.
+    own: std::collections::HashSet<creabim_core::StepId>,
+}
+
+/// The settings a window's Cancel may put back, as one value: the app's
+/// settings, the snaps, the polar angle and the UCS.
+fn settings_now(app: &CreaBimApp) -> serde_json::Value {
+    serde_json::json!({
+        "settings": serde_json::to_value(&app.shell.settings).unwrap_or_default(),
+        "snap": serde_json::to_value(app.plan.snap).unwrap_or_default(),
+        "guide_step": app.plan.guide_step,
+        "ucs": {
+            "x": app.plan.ucs.origin.x,
+            "y": app.plan.ucs.origin.y,
+            "angle": app.plan.ucs.angle,
+        },
+    })
+}
+
+/// Every setting that differs between `a` and `b`, at its deepest level:
+/// its path, and its values in `a` and `b`.
+fn changed(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    path: &mut Vec<String>,
+    out: &mut Vec<(Vec<String>, serde_json::Value, serde_json::Value)>,
+) {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+            for k in keys {
+                path.push(k.clone());
+                changed(
+                    x.get(k).unwrap_or(&Value::Null),
+                    y.get(k).unwrap_or(&Value::Null),
+                    path,
+                    out,
+                );
+                path.pop();
+            }
+        }
+        _ if a != b => out.push((path.clone(), a.clone(), b.clone())),
+        _ => {}
+    }
+}
+
+fn at<'a>(v: &'a serde_json::Value, path: &[String]) -> &'a serde_json::Value {
+    path.iter()
+        .try_fold(v, |v, k| v.get(k))
+        .unwrap_or(&serde_json::Value::Null)
+}
+
+fn set_at(v: &mut serde_json::Value, path: &[String], to: serde_json::Value) {
+    let Some((last, up)) = path.split_last() else {
+        *v = to;
+        return;
+    };
+    let mut v = v;
+    for k in up {
+        let Some(next) = v.get_mut(k) else { return };
+        v = next;
+    }
+    if let Some(o) = v.as_object_mut() {
+        if to.is_null() {
+            o.remove(last);
+        } else {
+            o.insert(last.clone(), to);
+        }
+    }
+}
+
+impl CreaBimApp {
+    /// A window opens: what it may change is noted, for Cancel.
+    pub(super) fn dialog_begin(&mut self, key: &'static str) {
+        if self.dialogs.contains_key(key) {
+            return;
+        }
+        let at_open = settings_now(self);
+        self.dialogs.insert(
+            key,
+            DialogSnap {
+                at_open,
+                settings: vec![],
+                own: Default::default(),
+            },
+        );
+    }
+
+    /// Run window `key` for a frame, noting as its own the undo steps it
+    /// makes and the settings it changes while it runs: what changes
+    /// elsewhere (a menu, a key, another window) happens outside and is
+    /// never counted as the window's.
+    pub(super) fn in_dialog(&mut self, key: &'static str, window: impl FnOnce(&mut Self)) {
+        let before = self.doc.undo_steps().last().map(|s| s.id);
+        let settings_before = self.dialogs.contains_key(key).then(|| settings_now(self));
+        window(self);
+        if !self.dialogs.contains_key(key) {
+            return;
+        }
+        let settings_after = settings_now(self);
+        let Some(snap) = self.dialogs.get_mut(key) else {
+            return;
+        };
+        // opened in this frame: from what it found
+        let from = settings_before.as_ref().unwrap_or(&snap.at_open);
+        let mut now = vec![];
+        changed(from, &settings_after, &mut vec![], &mut now);
+        for (path, was, is) in now {
+            match snap.settings.iter_mut().find(|(p, _, _)| *p == path) {
+                Some(own) => own.2 = is,
+                None => snap.settings.push((path, was, is)),
+            }
+        }
+        let steps = self.doc.undo_steps();
+        let start = before
+            .and_then(|b| steps.iter().rposition(|s| s.id == b))
+            .map_or(0, |i| i + 1);
+        // a step the window amended keeps its id: it counts as the
+        // window's only if the window made it
+        snap.own.extend(steps[start..].iter().map(|s| s.id));
+    }
+
+    /// Put back the settings window `s` changed, each as it was before the
+    /// window changed it, unless it was changed again elsewhere since (the
+    /// later change stays). How many stayed so.
+    fn put_back_settings(&mut self, s: &DialogSnap) -> usize {
+        let now = settings_now(self);
+        let mut back = now.clone();
+        let mut kept = 0;
+        for (path, was, last) in &s.settings {
+            if at(&now, path) == last {
+                set_at(&mut back, path, was.clone());
+            } else {
+                kept += 1;
+            }
+        }
+        if back == now {
+            return kept;
+        }
+        if back["settings"] != now["settings"] {
+            match serde_json::from_value(back["settings"].clone()) {
+                Ok(v) => {
+                    self.shell.settings = v;
+                    self.shell.settings.store();
+                }
+                Err(e) => self.say(format!("Cancel could not put the settings back: {e}")),
+            }
+        }
+        if back["snap"] != now["snap"] {
+            if let Ok(v) = serde_json::from_value(back["snap"].clone()) {
+                self.plan.snap = v;
+            }
+        }
+        if let Some(g) = back["guide_step"].as_f64() {
+            self.plan.guide_step = g;
+        }
+        let ucs = |k: &str| back["ucs"][k].as_f64();
+        if let (Some(x), Some(y), Some(a)) = (ucs("x"), ucs("y"), ucs("angle")) {
+            self.plan.ucs.origin = glam::DVec2::new(x, y);
+            self.plan.ucs.angle = a;
+        }
+        kept
+    }
+
+    /// Save or Cancel pressed in window `key`'s last frame.
+    pub(super) fn take_dialog_close(&mut self, key: &str) -> Option<bool> {
+        let i = self.dialog_close.iter().position(|(k, _)| *k == key)?;
+        Some(self.dialog_close.remove(i).1)
+    }
+
+    /// Save and Cancel at a window's foot: Some(true) to keep what changed,
+    /// Some(false) to put it back.
+    pub(super) fn dialog_footer(ui: &mut egui::Ui) -> Option<bool> {
+        let mut out = None;
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui
+                .button("Save")
+                .on_hover_text("Keep what you changed")
+                .clicked()
+            {
+                out = Some(true);
+            }
+            if ui
+                .button("Cancel")
+                .on_hover_text("Put everything back as it was when the window opened")
+                .clicked()
+            {
+                out = Some(false);
+            }
+        });
+        out
+    }
+
+    /// A window closes: kept, or put back as it was (its changes to the
+    /// project undone).
+    pub(super) fn dialog_end(&mut self, key: &'static str, keep: bool) {
+        let Some(s) = self.dialogs.remove(key) else {
+            return;
+        };
+        if keep {
+            return;
+        }
+        let kept = self.put_back_settings(&s);
+        // the window's own changes, from the newest, as long as they are
+        // the newest: what was done elsewhere meanwhile is never undone
+        let mut undone = 0;
+        while self
+            .doc
+            .undo_steps()
+            .last()
+            .is_some_and(|t| s.own.contains(&t.id))
+            && self.doc.undo()
+        {
+            undone += 1;
+        }
+        let left = self
+            .doc
+            .undo_steps()
+            .iter()
+            .filter(|t| s.own.contains(&t.id))
+            .count();
+        self.plan.forget_snaps();
+        self.snaps_3d = None;
+        self.geometry_key = None;
+        let mut status = if left > 0 {
+            format!(
+                "Cancelled the window's last {undone} change(s). {left} earlier one(s) stay: other work came after them, and Cancel never takes that back (Ctrl+Z steps back through everything)."
+            )
+        } else if undone > 0 {
+            "Cancelled: the window's changes put back. Work done elsewhere meanwhile stays.".into()
+        } else {
+            "Cancelled. Nothing the window changed was left to put back.".into()
+        };
+        if kept > 0 {
+            status.push_str(&format!(
+                " {kept} setting(s) the window changed stay as they were changed elsewhere afterwards."
+            ));
+        }
+        self.status = status;
+    }
+}
+
 impl CreaBimApp {
     pub(super) fn drafting_settings_window(&mut self, ctx: &egui::Context) {
         if !self.shell.drafting_settings {
             return;
         }
+        self.dialog_begin("dsettings");
+        let mut footer = None;
         let mut open = true;
         let mut s = self.plan.snap;
         let mut angle = self.plan.guide_step;
@@ -134,6 +390,7 @@ impl CreaBimApp {
                     }
                 });
                     });
+                footer = Self::dialog_footer(ui);
             });
         if s != self.plan.snap {
             self.plan.snap = s;
@@ -148,7 +405,15 @@ impl CreaBimApp {
             st.snap_tooltip = tip;
             st.store();
         }
-        if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        // closed by its cross or Esc: as Cancel
+        let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open || esc => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("dsettings", k);
             self.shell.drafting_settings = false;
         }
     }
@@ -161,8 +426,11 @@ impl CreaBimApp {
         if !self.shell.layer_manager {
             return;
         }
+        self.dialog_begin("layers");
+        let mut footer = None;
         let mut open = true;
         let table = creabim_core::detail::layers(self.doc.model());
+        let counts = creabim_core::detail::layer_counts(self.doc.model());
         let mut edit = None;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         egui::Window::new("Drafting layers")
@@ -175,7 +443,7 @@ impl CreaBimApp {
                 egui::ScrollArea::vertical()
                     .max_height((area.height() - 90.0).max(160.0))
                     .show(ui, |ui| {
-                        crate::detailtool::layer_tree(ui, &table, &mut edit);
+                        crate::detailtool::layer_tree(ui, &table, &counts, &mut edit);
                     });
                 ui.label(
                     egui::RichText::new(
@@ -184,6 +452,7 @@ impl CreaBimApp {
                     .weak()
                     .small(),
                 );
+                footer = Self::dialog_footer(ui);
             });
         let tx = match edit {
             Some(crate::detailtool::LayerEdit::Set(t)) => {
@@ -191,6 +460,12 @@ impl CreaBimApp {
             }
             Some(crate::detailtool::LayerEdit::Rename { old, new }) => Some(
                 creabim_core::detail::rename_layer(self.doc.model(), &old, &new),
+            ),
+            Some(crate::detailtool::LayerEdit::Delete(name)) => {
+                Some(creabim_core::detail::delete_layer(self.doc.model(), &name))
+            }
+            Some(crate::detailtool::LayerEdit::Merge { from, into }) => Some(
+                creabim_core::detail::merge_layers(self.doc.model(), &from, &into),
             ),
             _ => None,
         };
@@ -200,7 +475,13 @@ impl CreaBimApp {
                 Err(e) => self.status = format!("Couldn't do that: {e}"),
             }
         }
-        if !open {
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("layers", k);
             self.shell.layer_manager = false;
         }
     }
@@ -213,6 +494,8 @@ impl CreaBimApp {
         if !self.shell.ucs_manager {
             return;
         }
+        self.dialog_begin("ucs");
+        let mut footer = None;
         let mut open = true;
         let area = self.mat.area.unwrap_or_else(|| ctx.content_rect());
         let saved: Vec<creabim_core::NamedUcs> = self
@@ -298,6 +581,7 @@ impl CreaBimApp {
                     ui.checkbox(&mut self.plan.ucs_icon, "UCS icon");
                     ui.checkbox(&mut self.plan.ucs_icon_origin, "at its origin");
                 });
+                footer = Self::dialog_footer(ui);
             });
         ctx.data_mut(|d| d.insert_temp(name_id, name.clone()));
         if let Some(u) = pick {
@@ -314,7 +598,13 @@ impl CreaBimApp {
         if plan {
             self.cmd_word(super::cmdline::WordFor::Plan, "");
         }
-        if !open {
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if let Some(k) = keep {
+            self.dialog_end("ucs", k);
             self.shell.ucs_manager = false;
         }
     }

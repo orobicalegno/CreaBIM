@@ -18,9 +18,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Rust (the version fixed in rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
       - uses: Swatinem/rust-cache@v2
       - name: Webview libraries
         if: runner.os == 'Linux'
@@ -37,6 +36,10 @@ jobs:
       - name: Format
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
+      - name: Preview publishing script
+        # the preview is never deleted, and a failed upload leaves the last good one
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/test-publish-preview.sh
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
@@ -47,7 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (the version fixed in rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
@@ -110,7 +114,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (the version fixed in rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p creabim-app -p creabim-cli
       - run: |
@@ -129,7 +134,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (the version fixed in rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
       - uses: Swatinem/rust-cache@v2
       - name: Webview libraries and rpmbuild
         run: |
@@ -155,3 +161,44 @@ jobs:
           path: |
             Volumen-*.rpm
             Volumen-linux-x64.tar.gz
+
+  preview-release:
+    # the Volumen builds of a PR, as a pre-release anyone can download with
+    # no GitHub account: one rolling "volumen-anteprima", updated in place
+    # only once every check has passed; a failed build, check or upload
+    # leaves the last good preview downloadable
+    name: Public preview download
+    needs: [test, ifc, windows-build, linux-build]
+    if: >-
+      success() &&
+      github.event_name == 'pull_request' &&
+      startsWith(github.head_ref, 'volumen-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    # one publish at a time, none cut short: a newer one waits its turn
+    concurrency:
+      group: volumen-preview
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Package
+        run: |
+          cd dist
+          (cd volumen-windows && zip -q ../Volumen-windows-x64.zip Volumen.exe volumen-cli.exe)
+          mv volumen-linux/* .
+          rm -rf volumen-windows volumen-linux sample-exports
+          sha256sum * > SHA256SUMS.txt
+          ls -l
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash .github/scripts/publish-preview.sh dist "${{ github.event.pull_request.head.sha }}" "${{ github.event.pull_request.number }}"

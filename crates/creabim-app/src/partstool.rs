@@ -790,6 +790,23 @@ fn part_fields(ui: &mut egui::Ui, model: &Model, p: &mut Part) -> &'static str {
                     }
                     weak(ui, format!("A path through {} points.", points.len()));
                 }
+                Path::Roof(g) => {
+                    let name = model.get(g.roof).map_or("?", |e| e.name.as_str());
+                    weak(
+                        ui,
+                        format!(
+                            "A gutter along {} eave{} of {name}: it follows the roof.",
+                            g.edges.len(),
+                            if g.edges.len() == 1 { "" } else { "s" }
+                        ),
+                    );
+                    if num(ui, "Out from the eaves", &mut g.out, -2.0, 2.0) {
+                        label = "Gutter position";
+                    }
+                    if num(ui, "Below the roof's edge", &mut g.down, -2.0, 2.0) {
+                        label = "Gutter position";
+                    }
+                }
             }
         }
     }

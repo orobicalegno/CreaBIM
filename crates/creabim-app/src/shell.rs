@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 /// Height of the top bar (menus, tools and the tool options strip) and the
 /// status bar, in points.
 pub(super) const TOP_H: f32 = 105.0;
+/// The top bands without the tool options strip (Select, with nothing to set).
+pub(super) const TOP_H_SHORT: f32 = 75.0;
 pub(super) const STATUS_H: f32 = 26.0;
 /// Size of the 3D view's navigation buttons.
 const NAV_W: f32 = 420.0;
@@ -142,6 +144,8 @@ pub(super) fn view_style_icon(s: ViewStyle) -> &'static str {
         ViewStyle::HiddenLine => "render-hidden-line",
         ViewStyle::Shaded => "render-edges",
         ViewStyle::Wireframe => "render-wireframe",
+        ViewStyle::White => "render-hidden-line",
+        ViewStyle::Maquette => "render-hidden-line",
     }
 }
 
@@ -424,7 +428,40 @@ impl CreaBimApp {
     }
 
     /// The items of a menu or dropdown, by its key.
+    /// A menu's items, each command in one menu only: entries that came
+    /// into two or three menus over time are kept where they belong (Levels
+    /// in Create, Types in Materials, styles and marks in Annotation,
+    /// selecting in Select, sheets and schedules in View).
     pub(super) fn menu_items(&self, key: &str) -> Vec<Item> {
+        let mut items = self.menu_items_all(key);
+        let drop: &[&str] = match key {
+            "menu:File" => &["levels", "styles", "marks", "new.sheet", "new.schedule"],
+            "menu:View" => &["levels"],
+            "menu:Create" => &["types.browser"],
+            "menu:Edit" => &["cmd:SelectAll", "cmd:SelectNone", "similar"],
+            "menu:Window" => &["open"],
+            _ => &[],
+        };
+        if !drop.is_empty() {
+            prune(&mut items, drop);
+        }
+        // in View's submenus: what View has at its top already
+        if key == "menu:View" {
+            for it in items.iter_mut() {
+                if let Item::Sub {
+                    label, items: sub, ..
+                } = it
+                {
+                    if label == "3D view visibility" {
+                        prune(sub, &["xray", "plan3d", "ground.grid"]);
+                    }
+                }
+            }
+        }
+        items
+    }
+
+    fn menu_items_all(&self, key: &str) -> Vec<Item> {
         if let Some(items) = self.area_menu(key) {
             return items;
         }
@@ -485,8 +522,40 @@ impl CreaBimApp {
             "menu:View" => self.view_menu(),
             "menu:Materials" => self.materials_menu(),
             "menu:Help" => self.help_menu(),
+            "menu:Window" => self.window_menu(),
             "menu:Create" => self.create_menu(),
-            "menu:Disegna" => self.draw_menu(),
+            "menu:Disegna" => self.draw_menu_part(0),
+            "menu:Modifica" => self.draw_menu_part(1),
+            "menu:Strumenti" => self.draw_menu_part(2),
+            "menu:Select" => self.select_bar_menu(),
+            "menu:Annotation" => self.annotation_menu(),
+            // the current layer, picked from the Home tab
+            "layers.current" => {
+                let table = creabim_core::detail::layers(self.doc.model());
+                let cur = self.plan.details.layer.clone();
+                let mut items =
+                    vec![Item::new("detail.layer:0", "0 (no layer)").checked(cur.is_none())];
+                for (i, depth) in table.tree() {
+                    let l = &table.layers[i];
+                    let mut tags = String::new();
+                    if l.hidden {
+                        tags.push_str("  · off");
+                    }
+                    if l.locked {
+                        tags.push_str("  · locked");
+                    }
+                    items.push(
+                        Item::new(
+                            format!("detail.layer:{}", i + 1),
+                            format!("{}{}{}", "    ".repeat(depth), l.name, tags),
+                        )
+                        .checked(cur.as_deref() == Some(l.name.as_str())),
+                    );
+                }
+                items.push(Item::Separator);
+                items.push(Item::new("layers.manager", "Layer properties…").icon("layers"));
+                items
+            }
             "tab:schedules" => schedule_items(),
             "tab:ifc" => vec![
                 Item::new("open", "Open an IFC file…").icon("folder-open"),
@@ -633,6 +702,12 @@ impl CreaBimApp {
                         );
                     }
                     items.push(Item::Separator);
+                    // AutoCAD's Add Selected: draw another like it
+                    items.push(
+                        Item::new("addselected", "Add selected (create one like it)")
+                            .icon("plus")
+                            .hint("Starts the command that draws this kind of object, with its type, layer and line type"),
+                    );
                     items.extend(self.wall_menu_items());
                     items.extend(self.join_menu_items());
                     items.extend(self.level_menu_items());
@@ -843,8 +918,11 @@ impl CreaBimApp {
             Item::new("open", "Open…")
                 .key("Ctrl+O")
                 .icon("folder-open")
-                .hint("Open a .creabim, .ifc or .ifcx file. Other files (.blend, .FCStd) are linked into this project."),
+                .hint("Open a .creabim, .ifc or .ifcx file; a .dxf goes under the plan shown. Other files (.blend, .FCStd) are linked into this project."),
             Item::sub("Open recent", recent).icon("folder"),
+            Item::new("import.dxf", "Import DXF…")
+                .icon("underlay")
+                .hint("A CAD drawing (DXF) under the plan shown, to trace over; EXPLODE turns it into drafting lines. A DWG: save it as DXF first."),
         ];
         if self.shell.web.is_none() {
             items.push(
@@ -998,6 +1076,29 @@ impl CreaBimApp {
     /// palette, with the views and sheets the File menu can also make.
     /// Disegna: AutoCAD's drawing and editing commands, in Italian, each
     /// with its alias; they run on the command line.
+    /// The AutoCAD menus, each its own: Disegna (0), Modifica (1) and
+    /// Strumenti (2), split from one list at their headers.
+    fn draw_menu_part(&self, part: usize) -> Vec<Item> {
+        let all = self.draw_menu();
+        let mut parts: Vec<Vec<Item>> = vec![vec![]];
+        for it in all {
+            match &it {
+                Item::Header(h) if h == "Modifica" || h == "Strumenti" => parts.push(vec![]),
+                _ => {}
+            }
+            parts.last_mut().expect("one").push(it);
+        }
+        let mut out = parts.into_iter().nth(part).unwrap_or_default();
+        // no header of its own on top, nor a separator at the end
+        if matches!(out.first(), Some(Item::Header(_))) {
+            out.remove(0);
+        }
+        while matches!(out.last(), Some(Item::Separator)) {
+            out.pop();
+        }
+        out
+    }
+
     fn draw_menu(&self) -> Vec<Item> {
         let c = |cmd: &str, label: &str, key: &'static str, icon: &'static str| {
             Item::new(format!("cmdline:{cmd}"), label)
@@ -1047,6 +1148,7 @@ impl CreaBimApp {
             .icon("ruler"),
             c("BLOCK", "Crea blocco", "B", "box"),
             c("NORTH", "Nord", "", "north-arrow"),
+            c("NORTHDIR", "Direzione del nord", "", "north-arrow"),
             Item::Separator,
             Item::Header("Modifica".into()),
             c("ERASE", "Cancella", "E", "trash-2"),
@@ -1086,6 +1188,7 @@ impl CreaBimApp {
                 "Zoom",
                 vec![
                     c("ZOOM E", "Estensioni", "Z E", "maximize-2"),
+                    c("ZOOM A", "Tutto", "Z A", "maximize-2"),
                     c("ZOOM W", "Finestra", "Z W", "zoom-in"),
                     c("ZOOM P", "Precedente", "Z P", "zoom-out"),
                 ],
@@ -1119,15 +1222,111 @@ impl CreaBimApp {
         ]
     }
 
+    /// The tools of the Create menu's groups, as the View and Annotation
+    /// menus take theirs (views, annotation) from it.
+    fn tool_group_items(&self, group: u8) -> Vec<Item> {
+        Tool::ALL
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| tool_group(**t) == group)
+            .map(|(i, t)| {
+                Item::new(format!("tool:{i}"), t.label())
+                    .icon(tool_icon(*t))
+                    .hint(t.hint())
+            })
+            .collect()
+    }
+
+    /// Annotation: dimensions, tags, notes, details and their styles.
+    fn annotation_menu(&self) -> Vec<Item> {
+        let mut items = vec![Item::Header("Annotation".into())];
+        items.extend(self.tool_group_items(3));
+        items.push(Item::Separator);
+        items.push(Item::new("tag.all", "Tag all").icon("tags").hint(
+            "Tag every door, window, fixture and room in the view that has no tag yet (Shift+T)",
+        ));
+        items.push(Item::new("styles", "Annotation styles…").icon("anno-styles"));
+        items.push(Item::new("marks", "Mark numbering…").icon("hash"));
+        items.push(Item::new("view.north", "North arrow").icon("north-arrow"));
+        items
+    }
+
+    /// Select, as its own menu: all, none, invert, the box's shape and how
+    /// it combines, by type, similar.
+    /// The open projects, to pick the one shown (phase E).
+    fn window_menu(&self) -> Vec<Item> {
+        let mut items = vec![Item::Header("Open projects".into())];
+        for (i, (name, unsaved)) in self.open_projects().into_iter().enumerate() {
+            let label = if unsaved { format!("{name} *") } else { name };
+            items.push(
+                Item::new(format!("window:{i}"), label)
+                    .icon("file-text")
+                    .checked(i == 0),
+            );
+        }
+        items.push(Item::Separator);
+        items.push(
+            Item::new("window.next", "Next project")
+                .icon("arrow-right")
+                .key("Ctrl+Tab")
+                .hint("Show the next open project"),
+        );
+        items.push(Item::new("new.empty", "New project").icon("file-plus"));
+        items.push(Item::new("open", "Open…").icon("folder-open").key("Ctrl+O"));
+        items.push(Item::Separator);
+        items.push(
+            Item::new("window.close", "Close this project")
+                .icon("x")
+                .hint("Close the project shown; the others stay open"),
+        );
+        if self.unsaved() {
+            items.push(
+                Item::new("window.close:discard", "Close without saving")
+                    .icon("trash-2")
+                    .hint("Close the project shown and lose its unsaved changes"),
+            );
+        }
+        items
+    }
+
+    fn select_bar_menu(&self) -> Vec<Item> {
+        use crate::boxsel::Combine as C;
+        let mut items = self.select_menu_items();
+        let how = crate::boxsel::combine();
+        items.push(Item::Separator);
+        items.push(Item::Header("A box or a click".into()));
+        for (i, (c, label, icon)) in [
+            (C::New, "New selection", "sel-new"),
+            (C::Add, "Add to it (Shift)", "sel-add"),
+            (C::Subtract, "Take from it (Ctrl)", "sel-sub"),
+            (C::Invert, "Invert what it takes", "sel-invert"),
+            (C::Intersect, "Keep what both hold", "sel-intersect"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            items.push(
+                Item::new(format!("sel.combine:{i}"), label)
+                    .icon(icon)
+                    .checked(how == c)
+                    .keep_open(),
+            );
+        }
+        if self.plan.edit.is_some() {
+            let k = crate::handles::pick();
+            items.push(Item::Separator);
+            items.push(Item::Header("In Edit mode".into()));
+            items.push(Item::new("sel.pick:1", "Points").key("1").checked(k == 1));
+            items.push(Item::new("sel.pick:2", "Edges").key("2").checked(k == 2));
+            items.push(Item::new("sel.pick:3", "Faces").key("3").checked(k == 3));
+        }
+        items
+    }
+
     fn create_menu(&self) -> Vec<Item> {
         let mut items = vec![];
-        for (group, title) in [
-            (1, "Building elements"),
-            (2, "Views"),
-            (5, "Site"),
-            (3, "Annotation"),
-            (4, "Sketching"),
-        ] {
+        // views are in View, annotation in Annotation
+        for (group, title) in [(1, "Building elements"), (5, "Site"), (4, "Sketching")] {
             items.push(Item::Header(title.into()));
             for (i, t) in Tool::ALL.iter().enumerate() {
                 if tool_group(*t) == group {
@@ -1194,10 +1393,6 @@ impl CreaBimApp {
                         .hint("Entourage from the catalogue: a car, people, for scale"),
                 );
             }
-            if group == 2 {
-                items.push(Item::new("new.sheet", "Sheet").icon("file-text"));
-                items.push(Item::sub("Schedule", schedule_items()).icon("table-2"));
-            }
         }
         items
     }
@@ -1263,7 +1458,7 @@ impl CreaBimApp {
                         &format!("{name} › {label} › "),
                         &mut out,
                     ),
-                    Entry::Tool(_) | Entry::Sep => {}
+                    Entry::Tool(_) | Entry::Sep | Entry::LayerCombo => {}
                 }
             }
         }
@@ -1383,6 +1578,9 @@ impl CreaBimApp {
             Item::new("nav.ortho", "Orthographic")
                 .checked(self.camera.ortho)
                 .hint("Parallel projection, without perspective"),
+            Item::new("nav.verticals", "Correct verticals")
+                .checked(self.camera.verticals)
+                .hint("Two-point perspective (keystone correction, as a shift lens): vertical edges stay vertical when the camera looks up or down"),
             Item::new("nav.camera", "Save as a camera")
                 .icon("camera")
                 .hint("A perspective view seen as the 3D window sees it now, kept under 3D views and shown in plans"),
@@ -1408,7 +1606,13 @@ impl CreaBimApp {
                 .key("Ctrl+Shift+T")
                 .icon("palette"),
         );
-        vec![
+        // the views to make, moved here from Create
+        let mut make = vec![Item::Header("New view".into())];
+        make.extend(self.tool_group_items(2));
+        make.push(Item::new("new.sheet", "Sheet").icon("file-text"));
+        make.push(Item::sub("Schedule", schedule_items()).icon("table-2"));
+        make.push(Item::Separator);
+        let rest = vec![
             Item::Header("2D view".into()),
             place(PlanPlacement::Docked, 0, "Docked beside 3D"),
             place(PlanPlacement::Window, 1, "In its own window"),
@@ -1479,7 +1683,9 @@ impl CreaBimApp {
             Item::new("ui.classic", "Classic panels")
                 .checked(self.shell.classic)
                 .hint("The plain built-in panels instead of the new interface"),
-        ]
+        ];
+        make.extend(rest);
+        make
     }
 
     /// The Step choices: Off, three in the project's units, and Custom.
@@ -1573,6 +1779,23 @@ impl CreaBimApp {
             return;
         }
         match head {
+            "window" => {
+                if let Some(i) = index {
+                    self.switch_project(i);
+                }
+            }
+            "window.next" => self.next_project(),
+            "addselected" => self.add_selected(ctx),
+            "window.close" => {
+                if self.unsaved() && arg != "discard" {
+                    self.status = format!(
+                        "{} has unsaved changes: save it (Ctrl+S), or Window › Close without saving.",
+                        crate::app::openprojects::project_name(&self.path)
+                    );
+                } else if !self.close_project() {
+                    self.status = "It is the only open project: open or make another first, or quit.".into();
+                }
+            }
             "cmd" => {
                 if let Some(c) = Command::ALL.into_iter().find(|c| format!("{c:?}") == arg) {
                     self.run_command(ctx, c, None);
@@ -1794,6 +2017,9 @@ impl CreaBimApp {
                 }
             }
             "layers.manager" => self.shell.layer_manager = !self.shell.layer_manager,
+            "layer.fromsel" | "layer.tocurrent" | "layer.off" | "layer.lock" | "layer.allon" => {
+                self.layer_quick(head);
+            }
             "osnap.once" => {
                 let kinds = crate::snaps::SnapSettings::SWITCH_KINDS;
                 let kind = match arg {
@@ -1871,43 +2097,43 @@ impl CreaBimApp {
                 }
             }
             "new.layered" => {
-                self.path = new_path("Layered walls");
                 self.load_model(creabim_core::sample::layered_house());
+                self.path = new_path("Layered walls");
                 self.status = "Loaded the layered sample house.".into();
             }
             "new.typed" => {
-                self.path = new_path("Wall types");
                 self.load_model(creabim_core::sample::typed_house());
+                self.path = new_path("Wall types");
                 self.status =
                     "Loaded the typed sample house: see Materials › Types… for its types.".into();
             }
             "new.furnished" => {
-                self.path = new_path("Furnished house");
                 self.load_model(creabim_core::sample::furnished_house());
+                self.path = new_path("Furnished house");
                 self.status =
                     "Loaded the furnished sample house: see Create › Catalogue… to place more."
                         .into();
             }
             "new.garden" => {
-                self.path = new_path("House in its garden");
                 self.load_model(creabim_core::garden::garden_house());
+                self.path = new_path("House in its garden");
                 self.status =
                     "Loaded the garden sample: see Create › Site and Create › Building elements."
                         .into();
             }
             "new.sample" => {
-                self.path = new_path("Starter house");
                 self.load_model(creabim_core::starter::starter_house());
+                self.path = new_path("Starter house");
                 self.status = STARTER_LOADED.into();
             }
             "new.simple" => {
-                self.path = new_path("Simple house");
                 self.load_model(sample_house());
+                self.path = new_path("Simple house");
                 self.status = "Loaded the simple sample house.".into();
             }
             "new.buried" => {
-                self.path = new_path("Beam in a wall");
                 self.load_model(creabim_core::sample::sample_with_buried_beam().0);
+                self.path = new_path("Beam in a wall");
                 self.status = "Loaded the sample house with a beam inside its south wall. Hover it in Section A and press Tab to reach the beam.".into();
             }
             "new.empty" => {
@@ -1955,6 +2181,7 @@ impl CreaBimApp {
             "units" => self.levels.units_open = true,
             "marks" => self.marks.open = true,
             "graphicstyles" => self.gstyles.open = true,
+            "hatches" => self.gstyles.open_patterns(),
             "underlay" => {
                 if let Some((view, level)) = self.active_plan() {
                     let u = match arg {
@@ -1975,6 +2202,7 @@ impl CreaBimApp {
                 }
             }
             "open" => self.open_dialog(),
+            "import.dxf" => self.import_dxf_dialog(),
             "open.path" => {
                 let path = self.path.clone();
                 self.open_path(&path);
@@ -2028,6 +2256,111 @@ impl CreaBimApp {
                 };
             }
             "xray" => self.set_xray(!self.shell.settings.xray),
+            "shadows3d" => {
+                // a saved 3D view in the focused area draws on its own: its
+                // look's shadows are what the command turns
+                if let Some(before) = self.focused_3d_view().cloned() {
+                    let mut after = before.clone();
+                    let mut on = false;
+                    if let ElementKind::View(v) = &mut after.kind {
+                        v.look.cues.shadows = match v.look.cues.shadows {
+                            Some(_) => None,
+                            None => Some(creabim_core::styles::Shadows {
+                                direction: -50.0,
+                                length: 0.6,
+                                opacity: 0.35,
+                            }),
+                        };
+                        on = v.look.cues.shadows.is_some();
+                        if on && v.style != creabim_core::ViewStyle::Shaded {
+                            v.style = creabim_core::ViewStyle::Shaded;
+                        }
+                    }
+                    let name = before.name.clone();
+                    match self
+                        .doc
+                        .commit(Transaction::new("Sun shadows").replace(before, after))
+                    {
+                        Ok(_) => {
+                            self.status = if on {
+                                format!("Sun shadows on in {name}, shaded. Its Properties set where they fall.")
+                            } else {
+                                format!("Sun shadows off in {name}.")
+                            }
+                        }
+                        Err(e) => self.status = format!("Couldn't change the shadows: {e}"),
+                    }
+                    return;
+                }
+                let s = &mut self.shell.settings;
+                s.shadows_3d = !s.shadows_3d;
+                s.store();
+                let lit = self.viewport.as_ref().is_none_or(|v| v.lit());
+                self.status = if !lit {
+                    "This graphics card can't draw the 3D view's shadows (Help > activity log says why). Saved 3D views and sheets still take them: their Properties, Shadows.".into()
+                } else if s.shadows_3d {
+                    "Sun shadows on. Render > Sun position moves the sun.".into()
+                } else {
+                    "Sun shadows off.".into()
+                };
+            }
+            "joints3d" => {
+                let s = &mut self.shell.settings;
+                s.joints_3d = !s.joints_3d;
+                s.store();
+                self.geometry_key = None;
+                self.status = if s.joints_3d {
+                    "Joints between like faces drawn.".into()
+                } else {
+                    "Joints between like faces left out: a wall on a wall of one material reads as one.".into()
+                };
+            }
+            "occlusion3d" => {
+                let s = &mut self.shell.settings;
+                s.occlusion_3d = !s.occlusion_3d;
+                s.store();
+                self.status = if s.occlusion_3d {
+                    "Ambient occlusion on: corners and the ground under overhangs shaded.".into()
+                } else {
+                    "Ambient occlusion off.".into()
+                };
+            }
+            "sun" => {
+                let at = match arg {
+                    "morning" => Some((100.0, 25.0)),
+                    "noon" => Some((180.0, 60.0)),
+                    "afternoon" => Some((225.0, 40.0)),
+                    "evening" => Some((265.0, 18.0)),
+                    _ => None,
+                };
+                match at {
+                    Some((az, alt)) => {
+                        let s = &mut self.shell.settings;
+                        (s.sun_azimuth, s.sun_altitude) = (az, alt);
+                        s.sun_follows_view = false;
+                        if !s.shadows_3d && !s.render_3d.is_model() {
+                            s.shadows_3d = true;
+                        }
+                        s.store();
+                        self.status = format!("The sun {az:.0}° from true north, {alt:.0}° high.");
+                    }
+                    None if arg == "follow" => {
+                        let s = &mut self.shell.settings;
+                        s.sun_follows_view = !s.sun_follows_view;
+                        s.store();
+                        self.status = if s.sun_follows_view {
+                            "The sun turns with the view: the shadow always falls to the left and away.".into()
+                        } else {
+                            "The real sun, from the project's true north.".into()
+                        };
+                    }
+                    None => self.sun_dialog = true,
+                }
+            }
+            "export3d" => {
+                self.export_3d = Some(index.unwrap_or(4000) as u32);
+                self.status = "Making the image…".into();
+            }
             "render3d" => {
                 if let Some(m) = index.and_then(|i| RenderMode::ALL.get(i)) {
                     let s = &mut self.shell.settings;
@@ -2100,6 +2433,16 @@ impl CreaBimApp {
             }
             "nav.orbitsel" => self.orbit_selection = !self.orbit_selection,
             "nav.ortho" => self.camera.ortho = !self.camera.ortho,
+            "nav.verticals" => {
+                self.camera.verticals = !self.camera.verticals;
+                self.shell.settings.correct_verticals = self.camera.verticals;
+                self.shell.settings.store();
+                self.status = if self.camera.verticals {
+                    "Verticals corrected: vertical edges stay vertical in perspective (two-point perspective).".into()
+                } else {
+                    "Verticals as the camera sees them (three-point perspective).".into()
+                };
+            }
             "nav.walk" => self.toggle_walk(),
             "nav.camera" => self.camera_from_3d(),
             "nav.zoomin" => self.camera.zoom(2.0),
@@ -2750,7 +3093,81 @@ impl CreaBimApp {
                     .icon(m.icon())
                     .hint(m.hint())
             })
+            .chain(self.light_items())
             .collect()
+    }
+
+    /// The saved 3D view the focused area shows in 2D, drawn on its own
+    /// (not by the 3D view's renderer).
+    fn focused_3d_view(&self) -> Option<&creabim_core::Element> {
+        let id = match self.areas.root.areas().get(self.areas.focus)? {
+            crate::areas::Shows::View(v) => *v,
+            _ => return None,
+        };
+        self.doc.model().get(id).filter(|e| {
+            matches!(&e.kind, ElementKind::View(v) if matches!(
+                v.kind,
+                ViewKind::Axonometric { .. } | ViewKind::Perspective { .. }
+            ))
+        })
+    }
+
+    /// The sun and sky of the 3D view, and its image at print size.
+    fn light_items(&self) -> Vec<Item> {
+        let s = &self.shell.settings;
+        let shadows_on = match self.focused_3d_view().map(|e| &e.kind) {
+            Some(ElementKind::View(v)) => v.look.cues.shadows.is_some(),
+            _ => s.shadows_3d,
+        };
+        let sun = |key: &str, label: &str, az: f64, alt: f64| {
+            Item::new(format!("sun:{key}"), label)
+                .checked(
+                    !s.sun_follows_view
+                        && (s.sun_azimuth - az).abs() < 0.5
+                        && (s.sun_altitude - alt).abs() < 0.5,
+                )
+                .hint(format!("The sun {az:.0}° from true north, {alt:.0}° high"))
+        };
+        vec![
+            Item::Separator,
+            Item::new("shadows3d", "Sun shadows")
+                .checked(shadows_on)
+                .icon("sun")
+                .hint("The sun casts shadows on the model and the ground, from the project's true north"),
+            Item::new("joints3d", "Joints between like faces")
+                .checked(s.joints_3d)
+                .hint("In the white model and the maquette: draw the line where two faces of one material carry on in one plane, as a wall on the wall below"),
+            Item::new("occlusion3d", "Ambient occlusion")
+                .checked(s.occlusion_3d)
+                .icon("moon")
+                .hint("Corners, recesses and the ground under overhangs shaded by the sky"),
+            Item::sub(
+                "Sun position",
+                vec![
+                    Item::new("sun:follow", "Turn with the view")
+                        .checked(s.sun_follows_view)
+                        .hint("The sun keeps to the same side of the view as you orbit, so the shadow always shows"),
+                    sun("morning", "Morning (east, low)", 100.0, 25.0),
+                    sun("noon", "Midday (south, high)", 180.0, 60.0),
+                    sun("afternoon", "Afternoon (south-west)", 225.0, 40.0),
+                    sun("evening", "Evening (west, low)", 265.0, 18.0),
+                    Item::new("sun:dialog", "Sun and shadows…")
+                        .hint("Where the sun stands, and how strong the shadows and the shading of corners are"),
+                ],
+            )
+            .icon("sun"),
+            Item::sub(
+                "Save image",
+                [2000u32, 4000, 8000]
+                    .into_iter()
+                    .map(|w| {
+                        Item::new(format!("export3d:{w}"), format!("{w} pixels wide…"))
+                            .hint("The 3D view as it is now, as a PNG image at high resolution")
+                    })
+                    .collect(),
+            )
+            .icon("image"),
+        ]
     }
 
     /// How the active section, elevation or 3D view can draw.
@@ -3277,6 +3694,13 @@ impl CreaBimApp {
                     })
                     .collect()));
             }
+            // a filled region by a click inside a closed outline, too
+            if matches!(self.plan.details.kind, DetailKind::Region { .. }) {
+                options.push(json!({
+                    "kind": "button", "id": "cmdline:HATCH", "icon": "hash", "label": "Pick inside",
+                    "hint": "Fill the area round a point you click: closed linework or a room. Its hatch is the one chosen here",
+                }));
+            }
             options.push(json!({
                 "kind": "button", "id": "detail.makesymbol", "icon": "copy", "label": "Make symbol",
                 "hint": "Make a symbol of the linework selected, to place again and again",
@@ -3586,13 +4010,8 @@ impl CreaBimApp {
                     ),
                 ]));
             }
-            sel_opts.push(json!({
-                "kind": "menu", "key": "select.menu", "label": "", "value": "Select",
-                "hint": "All, none, invert, similar, linked, random",
-            }));
-            sel_opts.push(json!({"kind": "sep"}));
-            sel_opts.extend(options);
-            options = sel_opts;
+            // the box's shape and the rest are in the Select menu now
+            let _ = sel_opts;
             hint = self.selection_hint();
         }
         let head = json!({
@@ -3747,10 +4166,8 @@ impl CreaBimApp {
         if !by_kind.is_empty() {
             items.push(Item::sub("All by type", by_kind).icon("layers"));
         }
-        let similar = self.similar_items();
-        if !similar.is_empty() {
-            items.push(Item::sub("Select similar", similar).icon("copy"));
-        }
+        // (Select similar is a submenu of its own already)
+        items.extend(self.similar_items());
         items
     }
 
@@ -3864,6 +4281,23 @@ impl CreaBimApp {
                     "open": self.popup_key().as_deref() == Some(key),
                 }),
                 Entry::Sep => json!({"kind": "sep"}),
+                Entry::LayerCombo => {
+                    let table = creabim_core::detail::layers(self.doc.model());
+                    let cur = self.plan.details.layer.clone();
+                    let colour = cur
+                        .as_deref()
+                        .and_then(|n| table.effective(n))
+                        .and_then(|l| l.color)
+                        .map(|[r, g, b]| format!("rgb({r},{g},{b})"))
+                        .unwrap_or_else(|| "#000".into());
+                    json!({
+                        "kind": "combo", "key": "layers.current",
+                        "value": cur.unwrap_or_else(|| "0 (no layer)".into()),
+                        "color": colour,
+                        "hint": "The current drafting layer: what you draw goes on it. Click to pick another",
+                        "open": self.popup_key().as_deref() == Some("layers.current"),
+                    })
+                }
             });
         }
         let tabs: Vec<Value> = crate::tooltabs::TABS
@@ -3872,10 +4306,12 @@ impl CreaBimApp {
             .map(|(i, t)| json!({"id": format!("tab:{i}"), "label": t, "on": i == tab}))
             .collect();
         let (tool_head, tool_options, options, more) = self.option_strip(ctx);
+        let strip = self.strip_shown(ctx);
         json!({
+            "strip": strip,
             "theme": self.theme(),
             "popup": self.popup_key(),
-            "menus": (["File", "Edit", "View", "Create", "Disegna", "Materials", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
+            "menus": (["File", "Edit", "View", "Select", "Create", "Annotation", "Disegna", "Modifica", "Strumenti", "Materials", "Window", "Help"].map(|m| json!({"name": m, "key": format!("menu:{m}")}))),
             "quick": quick,
             // the selection count is in the status bar, where it belongs
             "doc": {
@@ -3897,6 +4333,24 @@ impl CreaBimApp {
             "options": options,
             "more": more,
         })
+    }
+
+    /// Is the tool options strip shown? Not for Select with nothing in it
+    /// to set: a line that only said how to select.
+    pub(super) fn strip_shown(&self, ctx: &egui::Context) -> bool {
+        if self.plan.tool != crate::planview::Tool::Select || self.plan.modal.is_some() {
+            return true;
+        }
+        let (_, tool_options, options, _) = self.option_strip(ctx);
+        !tool_options.is_empty() || !options.is_empty()
+    }
+
+    pub(super) fn top_h(&self, ctx: &egui::Context) -> f32 {
+        if self.shell.web.is_some() && !self.strip_shown(ctx) {
+            TOP_H_SHORT
+        } else {
+            TOP_H
+        }
     }
 
     /// The tool options strip: the tool's head and options, the view's
@@ -3945,7 +4399,7 @@ impl CreaBimApp {
             if let Some(v) = self.active_view.and_then(|id| self.view(id)) {
                 if matches!(
                     v.kind,
-                    ViewKind::Section { .. } | ViewKind::Axonometric { .. }
+                    ViewKind::Plan { .. } | ViewKind::Section { .. } | ViewKind::Axonometric { .. }
                 ) {
                     if matches!(v.kind, ViewKind::Section { .. }) {
                         options.push(json!({
@@ -3957,7 +4411,7 @@ impl CreaBimApp {
                     options.push(json!({
                         "kind": "menu", "key": "viewstyle", "label": "Style",
                         "value": v.style.label(), "icon": view_style_icon(v.style),
-                        "hint": "How this view draws, on its sheets too: hidden line, shaded with edges, or wireframe (every edge, the hidden ones too)",
+                        "hint": "How this view draws, on its sheets too: hidden line, shaded with edges, wireframe (every edge, the hidden ones too) or white model (white surfaces, dark cuts, soft sun shadows)",
                     }));
                 }
                 options.push(json!({
@@ -4254,7 +4708,29 @@ impl CreaBimApp {
                     let z = |e: &Element| model.level(e.id).map_or(0.0, |l| l.elevation);
                     items.sort_by(|a, b| z(b).total_cmp(&z(a)));
                 }
+                // a group of thousands (an exploded DXF's lines) lists its
+                // first few hundred and the selected ones: the whole list
+                // was built and sent to the page on every frame
+                const ROWS: usize = 300;
+                let more = items.len().saturating_sub(ROWS);
+                if more > 0 {
+                    let mut kept: Vec<&Element> = items[..ROWS].to_vec();
+                    kept.extend(
+                        items[ROWS..]
+                            .iter()
+                            .filter(|e| self.selection.contains(e.id))
+                            .take(ROWS),
+                    );
+                    items = kept;
+                }
                 let mut rows: Vec<Value> = items.iter().map(|e| row(e, opens)).collect();
+                if more > 0 {
+                    rows.push(json!({
+                        "id": "", "name": format!("… and {more} more"), "icon": "ellipsis",
+                        "sel": false, "active": false,
+                        "hint": "Too many to list: pick them in the view, or use Select › Select similar",
+                    }));
+                }
                 // a 3D view's crop boxes say whose they are
                 for (r, e) in rows.iter_mut().zip(&items) {
                     if let ElementKind::CropBox(c) = &e.kind {
@@ -4914,7 +5390,7 @@ impl CreaBimApp {
         let ppp = ctx.pixels_per_point();
         let none = egui::Frame::NONE;
         let top = egui::Panel::top("web_top")
-            .exact_size(TOP_H)
+            .exact_size(self.top_h(&ctx))
             .resizable(false)
             .show_separator_line(false)
             .frame(none)
@@ -5106,7 +5582,8 @@ impl CreaBimApp {
             // the Create menu lists every tool: its sections side by side
             let columns = match p.key.as_str() {
                 "menu:Create" => 3,
-                "menu:Disegna" => 3,
+                "menu:Disegna" => 2,
+                "menu:Modifica" => 2,
                 _ => 1,
             };
             (
@@ -5239,7 +5716,7 @@ impl CreaBimApp {
     pub(super) fn classic_menu(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
         egui::MenuBar::new().ui(ui, |ui| {
-            for m in ["File", "Edit", "View", "Materials", "Help"] {
+            for m in ["File", "Edit", "View", "Materials", "Window", "Help"] {
                 let items = self.menu_items(&format!("menu:{m}"));
                 ui.menu_button(m, |ui| {
                     if let Some(id) = ui_model::show(ui, &items) {
@@ -5506,5 +5983,39 @@ pub(crate) fn window(title: impl Into<egui::WidgetText>) -> egui::Window<'static
     match NATIVE.with(|n| n.get()) {
         Some(r) if r.width() > 200.0 && r.height() > 150.0 => w.constrain_to(r),
         _ => w,
+    }
+}
+
+/// Take out of `items` (and their submenus) the actions whose id is, or
+/// starts with, one of `ids` followed by `:` (a family, like
+/// `new.schedule:3`); a submenu left empty goes too.
+fn prune(items: &mut Vec<Item>, ids: &[&str]) {
+    let gone = |id: &str| {
+        ids.iter()
+            .any(|d| id == *d || id.strip_prefix(*d).is_some_and(|r| r.starts_with(':')))
+    };
+    items.retain_mut(|it| match it {
+        Item::Action { id, .. } => !gone(id),
+        Item::Sub { items: sub, .. } => {
+            prune(sub, ids);
+            sub.iter()
+                .any(|x| matches!(x, Item::Action { .. } | Item::Sub { .. }))
+        }
+        _ => true,
+    });
+    // no separator left at either end, nor two together
+    while matches!(items.first(), Some(Item::Separator)) {
+        items.remove(0);
+    }
+    while matches!(items.last(), Some(Item::Separator)) {
+        items.pop();
+    }
+    let mut i = 1;
+    while i < items.len() {
+        if matches!(items[i], Item::Separator) && matches!(items[i - 1], Item::Separator) {
+            items.remove(i);
+        } else {
+            i += 1;
+        }
     }
 }

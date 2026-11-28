@@ -1,0 +1,965 @@
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 2.3 ms
+planview::show: 8.3 ms
+show_plan: after: 0.2 ms
+show_plan: 25.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.4 ms
+show_plan: after: 0.0 ms
+show_plan: 0.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 36.9 ms
+show_plan: after: 0.0 ms
+show_plan: 37.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.1 ms
+show_plan: after: 0.0 ms
+show_plan: 1.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.1 ms
+show_plan: after: 0.0 ms
+show_plan: 1.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 2.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 0.6 ms
+show_plan: after: 0.0 ms
+show_plan: 0.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.1 ms
+show_plan: after: 0.0 ms
+show_plan: 1.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.0 ms
+show_plan: after: 0.0 ms
+show_plan: 1.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.4 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 19.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 18.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.4 ms
+drawing_live: 16.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 18.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.0 ms
+drawing_live: 16.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 18.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 18.9 ms
+drawing_live: 18.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 21.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 19.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 19.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.6 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 19.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.9 ms
+drawing_live: 16.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 18.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 19.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.4 ms
+show_plan: after: 0.1 ms
+show_plan: 19.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.2 ms
+drawing_live: 16.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 18.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.2 ms
+drawing_live: 16.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 18.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.3 ms
+drawing_live: 16.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 19.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 18.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.7 ms
+drawing_live: 15.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 18.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.7 ms
+drawing_live: 15.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 18.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 21.7 ms
+drawing_live: 21.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 24.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.3 ms
+drawing_live: 13.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.2 ms
+drawing_live: 13.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 15.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.1 ms
+drawing_live: 13.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.7 ms
+show_plan: after: 0.0 ms
+show_plan: 14.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.1 ms
+drawing_live: 14.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 16.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 16.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.8 ms
+drawing_live: 13.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.0 ms
+show_plan: after: 0.0 ms
+show_plan: 15.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 18.7 ms
+drawing_live: 18.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 21.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 18.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.9 ms
+drawing_live: 13.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 16.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.0 ms
+drawing_live: 14.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 1.8 ms
+show_plan: after: 0.0 ms
+show_plan: 15.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 15.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.7 ms
+drawing_live: 14.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.0 ms
+show_plan: after: 0.0 ms
+show_plan: 16.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.0 ms
+drawing_live: 14.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 16.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.0 ms
+drawing_live: 14.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 16.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.2 ms
+drawing_live: 19.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 21.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.8 ms
+drawing_live: 14.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 17.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.8 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 16.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.9 ms
+drawing_live: 13.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 16.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.4 ms
+drawing_live: 13.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.4 ms
+drawing_live: 13.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 15.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.4 ms
+drawing_live: 13.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.8 ms
+show_plan: after: 0.0 ms
+show_plan: 15.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.3 ms
+drawing_live: 13.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 15.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 1.8 ms
+show_plan: after: 0.0 ms
+show_plan: 15.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 15.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.3 ms
+drawing_live: 13.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.9 ms
+show_plan: after: 0.0 ms
+show_plan: 15.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 15.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.2 ms
+drawing_live: 13.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.9 ms
+drawing_live: 12.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.8 ms
+show_plan: after: 0.0 ms
+show_plan: 14.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.0 ms
+drawing_live: 13.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 20.0 ms
+drawing_live: 20.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+planview::show: 4.8 ms
+show_plan: after: 0.0 ms
+show_plan: 24.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.9 ms
+drawing_live: 24.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 27.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.5 ms
+drawing_live: 23.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 26.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.5 ms
+drawing_live: 23.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 26.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.5 ms
+drawing_live: 23.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 26.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.5 ms
+drawing_live: 23.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 26.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.8 ms
+drawing_live: 23.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 27.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 20.4 ms
+drawing_live: 20.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 22.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 18.6 ms
+drawing_live: 18.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 21.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 23.4 ms
+drawing_live: 23.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 26.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 22.6 ms
+drawing_live: 22.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 3.0 ms
+show_plan: after: 0.0 ms
+show_plan: 25.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 21.5 ms
+drawing_live: 21.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 24.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.9 ms
+drawing_live: 20.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 22.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.9 ms
+drawing_live: 19.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 22.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.2 ms
+drawing_live: 19.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 21.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 20.2 ms
+drawing_live: 20.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.3 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 23.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.2 ms
+drawing_live: 14.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.8 ms
+show_plan: after: 0.0 ms
+show_plan: 16.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.8 ms
+drawing_live: 15.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.5 ms
+show_plan: after: 0.0 ms
+show_plan: 17.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.7 ms
+drawing_live: 12.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.9 ms
+drawing_live: 12.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.7 ms
+show_plan: after: 0.0 ms
+show_plan: 14.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.7 ms
+drawing_live: 12.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.6 ms
+drawing_live: 12.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.6 ms
+drawing_live: 12.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.1 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 12.6 ms
+drawing_live: 12.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.5 ms
+show_plan: after: 0.0 ms
+show_plan: 14.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.4 ms
+drawing_live: 14.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 16.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.1 ms
+drawing_live: 13.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.2 ms
+planview::show: 1.6 ms
+show_plan: after: 0.0 ms
+show_plan: 14.8 ms

@@ -1992,20 +1992,44 @@ pub enum ViewStyle {
     /// Every edge, the hidden ones too: to see what is inside and behind,
     /// like a shaft running through the floors.
     Wireframe,
+    /// An architect's white model: surfaces white, glass grey, what is cut
+    /// solid dark, no colours, and the sun's soft shadows.
+    White,
+    /// A study model of card and wood: a bright white, the wood in its own
+    /// grain, strong soft light and no hard lines.
+    Maquette,
 }
 
 impl ViewStyle {
-    pub const ALL: [ViewStyle; 3] = [
+    pub const ALL: [ViewStyle; 5] = [
         ViewStyle::HiddenLine,
         ViewStyle::Shaded,
         ViewStyle::Wireframe,
+        ViewStyle::White,
+        ViewStyle::Maquette,
     ];
+
+    /// Surfaces drawn as an image under the lines (shaded or white).
+    pub fn shades(self) -> bool {
+        matches!(
+            self,
+            ViewStyle::Shaded | ViewStyle::White | ViewStyle::Maquette
+        )
+    }
+
+    /// The model styles (white model, maquette): no colours, the sun's
+    /// shadows and the shading of corners of their own.
+    pub fn is_model(self) -> bool {
+        matches!(self, ViewStyle::White | ViewStyle::Maquette)
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             ViewStyle::HiddenLine => "Hidden line",
             ViewStyle::Shaded => "Shaded with edges",
             ViewStyle::Wireframe => "Wireframe",
+            ViewStyle::White => "White model",
+            ViewStyle::Maquette => "Maquette",
         }
     }
 }

@@ -544,7 +544,10 @@ pub fn clean_up_pieces(model: &Model, items: &mut Vec<PlanItem>, layers: Vec<Cut
             let mut thin: Vec<(f64, f64, bool)> = Vec::new();
             for (j, other) in polys.iter().enumerate() {
                 let same = keys[i] == keys[j];
-                if i == j || (!same && other.id != piece.id) {
+                // two layers of joined walls meeting inside the mass: a
+                // thin line between them too, as between one wall's layers
+                let layered = piece.layer.is_some() && other.layer.is_some();
+                if i == j || (!same && other.id != piece.id && !layered) {
                     continue;
                 }
                 for (p, q) in edges(&other.points) {
@@ -1198,6 +1201,29 @@ pub fn plan_view_with(
                         jambs.push([before, None]);
                     }
                 }
+                // a free end (meeting no wall) wraps as its assembly says:
+                // its first piece starts, its last ends, as at a jamb
+                let end_wrap = layered
+                    .map(|(_, asm)| creabim_core::assembly::end_wrap(asm, w))
+                    .unwrap_or_default();
+                if !end_wrap.is_empty() && !w.is_arc() {
+                    let free = creabim_core::joins::free_ends(model, e.id);
+                    let len = w.length();
+                    if free[0] {
+                        if let Some(k) = pieces.iter().position(|p| p.0 <= 1e-9) {
+                            if jambs[k][0].is_none() {
+                                jambs[k][0] = Some(&end_wrap);
+                            }
+                        }
+                    }
+                    if free[1] {
+                        if let Some(k) = pieces.iter().position(|p| p.1 >= len - 1e-9) {
+                            if jambs[k][1].is_none() {
+                                jambs[k][1] = Some(&end_wrap);
+                            }
+                        }
+                    }
+                }
                 if let Some((_, asm)) = creabim_core::assembly_of(model, e) {
                     // each layer between its own ends: a core runs on at a T
                     for band in creabim_core::assembly::wall_bands(asm, w) {
@@ -1205,7 +1231,16 @@ pub fn plan_view_with(
                             if w.is_arc() {
                                 w.place(u, s)
                             } else {
-                                w.start + d * ends.place_layer(w, u, s, band.core, band.ext) + n * s
+                                w.start
+                                    + d * ends.place_band(
+                                        w,
+                                        u,
+                                        s,
+                                        band.core,
+                                        band.priority,
+                                        band.ext,
+                                    )
+                                    + n * s
                             }
                         };
                         let mut piece = |a: f64, b: f64, s0: f64, s1: f64| {

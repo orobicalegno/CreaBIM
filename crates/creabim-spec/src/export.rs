@@ -449,7 +449,7 @@ pub fn export(model: &Model) -> Exported {
                 }),
                 material: ids.of(r.material),
             }),
-            ElementKind::Part(p) => spec.parts.push(part(e, &id, p, &ids)),
+            ElementKind::Part(p) => spec.parts.push(part(model, e, &id, p, &ids)),
             ElementKind::Site(s) => spec.site.push(site_element(e, &id, s, &ids)),
             ElementKind::Object(o) => {
                 let key = catalogue_key(model, e).unwrap_or_default();
@@ -812,7 +812,7 @@ fn opening(e: &Element, id: &str, o: &core::Opening, ids: &Ids) -> f::Opening {
     }
 }
 
-fn part(e: &Element, id: &str, p: &parts::Part, ids: &Ids) -> f::Part {
+fn part(model: &Model, e: &Element, id: &str, p: &parts::Part, ids: &Ids) -> f::Part {
     let mut out = f::Part {
         id: id.into(),
         name: name(e, id),
@@ -877,6 +877,15 @@ fn part(e: &Element, id: &str, p: &parts::Part, ids: &Ids) -> f::Part {
                     };
                     out.offset = *offset;
                     out.extend = (*extend != [0.0; 2]).then(|| glam::DVec2::from_array(*extend));
+                }
+                // a gutter: written as the path it runs along now, above
+                // its level
+                parts::Path::Roof(_) => {
+                    if let Some((pts, closed)) = p.path(model) {
+                        let z = core::members::elevation(model, p.level);
+                        out.path = pts.iter().map(|q| *q - glam::DVec3::Z * z).collect();
+                        out.closed = closed;
+                    }
                 }
             }
         }
@@ -1066,6 +1075,8 @@ fn view(e: &Element, id: &str, v: &core::View, ids: &Ids) -> f::View {
             core::ViewStyle::HiddenLine => f::ViewStyle::HiddenLine,
             core::ViewStyle::Shaded => f::ViewStyle::Shaded,
             core::ViewStyle::Wireframe => f::ViewStyle::Wireframe,
+            core::ViewStyle::White => f::ViewStyle::White,
+            core::ViewStyle::Maquette => f::ViewStyle::Maquette,
         });
     }
     out

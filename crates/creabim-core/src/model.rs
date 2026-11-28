@@ -83,6 +83,12 @@ impl Model {
         self.elements.is_empty()
     }
 
+    /// Where `id` stands in the order the elements were made: later ones
+    /// higher (a change keeps an element's place).
+    pub fn order_of(&self, id: ElementId) -> Option<usize> {
+        self.elements.get_index_of(&id)
+    }
+
     pub fn get(&self, id: ElementId) -> Option<&Element> {
         self.elements.get(&id)
     }

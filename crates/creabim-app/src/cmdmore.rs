@@ -128,6 +128,12 @@ impl CreaBimApp {
                 "Enter delta length (negative shortens):",
                 Wants::Number(NumberFor::LengthenDelta),
             ),
+            "GUTTER" => self.cmd_pick_start(
+                name,
+                "Click near each eave of a roof the gutter runs along; Enter places it:",
+                0,
+                Finish::Gutter,
+            ),
             "STRETCH" => self.cmd_pick_start(
                 name,
                 "Specify crossing window corners, then base point and second point:",
@@ -175,11 +181,19 @@ impl CreaBimApp {
                 Finish::Ucs,
             ),
             "UCSMAN" => self.shell.ucs_manager = true,
+            "NORTHDIR" => {
+                let now = self.doc.model().project_info().map_or(0.0, |(_, p)| p.true_north);
+                self.ask(
+                    name,
+                    format!("Enter the angle of true north from the drawing's up, anticlockwise <{now}°>, or Enter to pick two points along it:"),
+                    Wants::Number(NumberFor::NorthAngle),
+                );
+            }
             "PLAN" => self.ask(name, "Enter an option [Current ucs/World/name of a saved UCS] <Current>:", Wants::Word(super::cmdline::WordFor::Plan)),
             "UCSICON" => self.ask(name, "Enter an option [ON/OFF/ORigin/Noorigin] <ON>:", Wants::Word(super::cmdline::WordFor::UcsIcon)),
             "ZOOM" => self.ask(
                 name,
-                "[Extents/Window/Previous] <Extents>:",
+                "[All/Extents/Window/Previous] <Extents>:",
                 Wants::Points {
                     n: 0,
                     then: Finish::ZoomWindow,
@@ -324,6 +338,10 @@ impl CreaBimApp {
                 self.plan.cmd_pick = None;
                 self.zoom_extents();
             }
+            ("ZOOM", "A" | "ALL" | "TUTTO") => {
+                self.end_pick();
+                self.zoom_all();
+            }
             ("ZOOM", "W" | "WINDOW" | "FINESTRA") => {
                 self.cmd_pick_start(
                     "ZOOM",
@@ -337,7 +355,7 @@ impl CreaBimApp {
                 self.plan.cmd_pick = None;
                 match self.cmd.zoomed.pop() {
                     Some((v, cam)) => {
-                        self.plan.cameras.insert(v, cam);
+                        self.set_camera(v, cam);
                         self.say("ZOOM Previous.");
                     }
                     None => self.say("No previous view."),
@@ -346,6 +364,38 @@ impl CreaBimApp {
             _ => return false,
         }
         true
+    }
+
+    /// Show `cam` in every area that shows `v`.
+    fn set_camera(&mut self, v: ElementId, cam: (DVec2, f32)) {
+        self.plan.cameras.insert(v, cam);
+        for (k, c) in self.plan.area_cameras.iter_mut() {
+            if k.1 == v {
+                *c = cam;
+            }
+        }
+    }
+
+    /// ZOOM All: everything in the view and the origin, with room round it.
+    fn zoom_all(&mut self) {
+        let Some(v) = self.cmd_view() else { return };
+        let Some(d) = self.drawing_live(v) else {
+            return;
+        };
+        let mut lo = DVec2::ZERO;
+        let mut hi = DVec2::ZERO;
+        for it in &d.items {
+            if let Some((a, b)) = it.bounds() {
+                lo = lo.min(a);
+                hi = hi.max(b);
+            }
+        }
+        self.remember_zoom(v);
+        let size = ((hi - lo) * 1.2).max(DVec2::splat(1.0));
+        let pane = self.rect_2d.map_or(egui::vec2(800.0, 600.0), |r| r.size());
+        let scale = (pane.x as f64 / size.x).min(pane.y as f64 / size.y);
+        self.set_camera(v, ((lo + hi) / 2.0, scale as f32));
+        self.say("ZOOM All.");
     }
 
     fn remember_zoom(&mut self, v: ElementId) {
@@ -360,8 +410,10 @@ impl CreaBimApp {
     fn zoom_extents(&mut self) {
         let Some(v) = self.cmd_view() else { return };
         self.remember_zoom(v);
-        // the view fits its drawing again when its camera is gone
+        // the view fits its drawing again when its camera is gone: in
+        // every area that shows it (a docked area keeps its own camera)
         self.plan.cameras.remove(&v);
+        self.plan.area_cameras.retain(|(_, view), _| *view != v);
         self.say("ZOOM Extents.");
     }
 
@@ -432,6 +484,18 @@ impl CreaBimApp {
                 );
                 self.say(format!("{name}: {n} points placed (Center snaps to them)."));
             }
+            NumberFor::NorthAngle => match v {
+                Some(a) => {
+                    self.cmd.running = None;
+                    self.set_true_north(a);
+                }
+                None => self.cmd_pick_start(
+                    name,
+                    "Specify a point, then a point towards north:",
+                    2,
+                    Finish::NorthPoints,
+                ),
+            },
             NumberFor::UcsZ => {
                 self.cmd.running = None;
                 let a = v.unwrap_or(90.0);
@@ -480,8 +544,185 @@ impl CreaBimApp {
         }
     }
 
+    /// EXPLODE on the selection: a placed symbol back into its linework; a
+    /// polyline, rectangle or polygon into its lines; a DXF reference into
+    /// linework, its layers becoming drafting layers.
+    pub(super) fn explode_selection(&mut self) {
+        let model = self.doc.model();
+        let mut tx = Transaction::new("Explode");
+        let (mut parts, mut layers_new) = (0usize, Vec::<String>::new());
+        // the DXF's layer colours, for the layers made from them
+        let mut layer_rgb: std::collections::HashMap<String, [u8; 3]> = Default::default();
+        let mut table = creabim_core::detail::layers(model);
+        let mut touched = false;
+        for id in self.selection.all() {
+            let Some(e) = model.get(id) else { continue };
+            match &e.kind {
+                ElementKind::Detail(d) if matches!(d.kind, DetailKind::Symbol { .. }) => {
+                    if let Some(t) = creabim_core::detail::explode(model, id) {
+                        parts += t.ops.len().saturating_sub(1);
+                        tx.ops.extend(t.ops);
+                        touched = true;
+                    }
+                }
+                ElementKind::Detail(d) => {
+                    let Some((mut path, closed)) = d.draft_path() else {
+                        continue;
+                    };
+                    let shape = d.kind.as_draft().map(|k| k.0);
+                    // circles, ellipses, arcs and splines stay whole
+                    if !matches!(
+                        shape,
+                        Some(
+                            DraftShape::Line
+                                | DraftShape::Closed
+                                | DraftShape::Rectangle
+                                | DraftShape::Polygon { .. }
+                        )
+                    ) {
+                        continue;
+                    }
+                    if closed && !path.is_empty() {
+                        path.push(path[0]);
+                    }
+                    if path.len() < 3 {
+                        continue;
+                    }
+                    for w in path.windows(2) {
+                        let mut piece = d.clone();
+                        piece.kind = DetailKind::Draft {
+                            shape: DraftShape::Line,
+                            pen: d
+                                .kind
+                                .as_draft()
+                                .map_or(creabim_core::LinePen::Medium, |k| k.1),
+                        };
+                        piece.points = vec![w[0], w[1]];
+                        piece.fill = None;
+                        tx = tx.insert(Element::new("Line", ElementKind::Detail(piece)));
+                        parts += 1;
+                    }
+                    tx = tx.remove_cascade(model, id);
+                    touched = true;
+                }
+                ElementKind::Reference(r) => {
+                    let creabim_core::RefSource::Dxf { path } = &r.source else {
+                        continue;
+                    };
+                    let Some(view) = self
+                        .cmd_view()
+                        .filter(|v| r.shown_in.contains(v))
+                        .or_else(|| r.shown_in.first().copied())
+                    else {
+                        continue;
+                    };
+                    let items = match std::fs::read(path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|b| {
+                            let text = creabim_exchange::titleblock::dxf_text(&b);
+                            creabim_exchange::titleblock::dxf_items_coloured(&text)
+                        }) {
+                        Ok((items, rgb)) => {
+                            for (k, v) in rgb {
+                                layer_rgb.entry(k.trim().to_string()).or_insert(v);
+                            }
+                            items
+                        }
+                        Err(err) => {
+                            self.say(format!("EXPLODE: couldn't read {path}: {err}"));
+                            return;
+                        }
+                    };
+                    for (it, layer, rgb) in items {
+                        // the drawing's texts come as notes where they stood
+                        if let creabim_core::titleblock::TitleItem::Text { at, text, .. } = &it {
+                            if !text.trim().is_empty() {
+                                let mut n = creabim_core::Note::new(
+                                    view,
+                                    r.place(*at / 1000.0),
+                                    text.clone(),
+                                );
+                                n.color = rgb.map(|c| c.map(|v| v as f32 / 255.0));
+                                tx = tx.insert(Element::new("Note", ElementKind::Note(n)));
+                                parts += 1;
+                            }
+                            continue;
+                        }
+                        let creabim_core::titleblock::TitleItem::Line { points, .. } = it else {
+                            continue;
+                        };
+                        if points.len() < 2 {
+                            continue;
+                        }
+                        // the reference's own place, turn and size; mm to m
+                        let pts: Vec<DVec2> = points.iter().map(|p| r.place(*p / 1000.0)).collect();
+                        let closed = pts.len() > 3 && pts[0].distance(*pts.last().unwrap()) < 1e-9;
+                        let (shape, pts) = if closed {
+                            (DraftShape::Closed, pts[..pts.len() - 1].to_vec())
+                        } else {
+                            (DraftShape::Line, pts)
+                        };
+                        let mut d = self.new_piece(view, shape, pts);
+                        let name = if layer.trim().is_empty() {
+                            "0".to_string()
+                        } else {
+                            layer.trim().to_string()
+                        };
+                        if table.get(&name).is_none() && !layers_new.contains(&name) {
+                            layers_new.push(name.clone());
+                        }
+                        // its own colour where it isn't its layer's
+                        if rgb.is_some() && rgb != layer_rgb.get(&name).copied() {
+                            d.color = rgb;
+                        }
+                        d.layer = Some(name);
+                        d.linetype = None;
+                        tx = tx.insert(Element::new("Line", ElementKind::Detail(d)));
+                        parts += 1;
+                    }
+                    tx = tx.remove_cascade(model, id);
+                    touched = true;
+                }
+                _ => {}
+            }
+        }
+        if !touched {
+            self.say("EXPLODE: nothing that explodes is selected (symbols, polylines, rectangles, polygons, DXF references).");
+            return;
+        }
+        if !layers_new.is_empty() {
+            for n in &layers_new {
+                let mut l = creabim_core::DraftLayer::named(n);
+                if let Some(c) = layer_rgb.get(n) {
+                    l.color = Some(*c);
+                }
+                table.layers.push(l);
+            }
+            tx.ops
+                .extend(creabim_core::detail::set_layers(self.doc.model(), table).ops);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => {
+                self.selection.clear();
+                self.say(format!(
+                    "EXPLODE: {parts} pieces{}. Ctrl+Z puts it back.",
+                    if layers_new.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {} drafting layers from the DXF", layers_new.len())
+                    }
+                ));
+            }
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
+        }
+    }
+
     /// JOIN and the like, on the selection.
     pub(super) fn cmd_selected(&mut self, what: &'static str) {
+        if what == "EXPLODE" {
+            self.explode_selection();
+            return;
+        }
         if what != "JOIN" {
             return;
         }
@@ -673,6 +914,84 @@ impl CreaBimApp {
 
     /// HATCH by a point inside: the smallest closed linework, or room,
     /// around `p`, filled with a region of the Detail tool's hatch.
+    /// The smallest area round `p` closed by the view's lines (what is
+    /// drawn, linework, a DXF's lines), looked for close by first.
+    fn boundary_round(&mut self, view: ElementId, p: DVec2) -> Option<Vec<DVec2>> {
+        let mut segs: Vec<(DVec2, DVec2)> = vec![];
+        if let Some(drawing) = self.drawing_live(view) {
+            use creabim_geom::{plan::Pen, PlanItem};
+            for it in &drawing.items {
+                match it {
+                    PlanItem::Line { pen, a, b, .. } if !matches!(pen, Pen::Guide | Pen::Grid) => {
+                        segs.push((*a, *b))
+                    }
+                    PlanItem::Polygon { points, .. } => {
+                        for i in 0..points.len() {
+                            segs.push((points[i], points[(i + 1) % points.len()]));
+                        }
+                    }
+                    PlanItem::Arc {
+                        center,
+                        radius,
+                        start,
+                        end,
+                        ..
+                    } => {
+                        let mut sweep = end - start;
+                        if sweep <= 0.0 {
+                            sweep += std::f64::consts::TAU;
+                        }
+                        let n = ((sweep / 0.1).ceil() as usize).clamp(4, 128);
+                        let at = |k: usize| {
+                            *center
+                                + DVec2::from_angle(start + sweep * k as f64 / n as f64) * *radius
+                        };
+                        for k in 0..n {
+                            segs.push((at(k), at(k + 1)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (id, r) in creabim_core::reference::in_view(self.doc.model(), view) {
+            if r.hidden {
+                continue;
+            }
+            if let crate::trace::Shown::Lines(lines) =
+                self.plan.ref_cache.get(self.doc.model(), id, r)
+            {
+                for l in lines.iter() {
+                    for w in l.windows(2) {
+                        segs.push((r.place(w[0]), r.place(w[1])));
+                    }
+                }
+            }
+        }
+        // close by first: an area found well inside the box is the one
+        for reach in [8.0, 40.0, 200.0, 2000.0] {
+            let near: Vec<(DVec2, DVec2)> = segs
+                .iter()
+                .copied()
+                .filter(|(a, b)| {
+                    a.x.min(b.x) < p.x + reach
+                        && a.x.max(b.x) > p.x - reach
+                        && a.y.min(b.y) < p.y + reach
+                        && a.y.max(b.y) > p.y - reach
+                })
+                .collect();
+            if let Some(f) = crate::boundary::around(&near, p) {
+                let inside_box = f
+                    .iter()
+                    .all(|q| (*q - p).abs().max_element() < reach * 0.98);
+                if inside_box {
+                    return Some(f);
+                }
+            }
+        }
+        None
+    }
+
     fn hatch_at(&mut self, view: ElementId, p: DVec2) {
         let inside = |poly: &[DVec2]| {
             let mut c = false;
@@ -713,8 +1032,13 @@ impl CreaBimApp {
                 }
             }
         }
+        // else the area closed round it by any lines, AutoCAD's way: lines
+        // in many pieces, crossing, walls, a DXF's lines
+        if best.is_none() {
+            best = self.boundary_round(view, p).map(|o| (0.0, o));
+        }
         let Some((_, outline)) = best else {
-            self.say("HATCH: no closed boundary round that point (closed linework or a room). Type S to draw its corners.");
+            self.say("HATCH: no closed area round that point: the lines round it leave a gap. Type S to draw its corners.");
             return;
         };
         let hatch = match self.plan.details.kind {
@@ -755,6 +1079,7 @@ impl CreaBimApp {
                 },
                 None => self.say("BREAKATPOINT: pick linework."),
             },
+            (Finish::Gutter, pts) if !pts.is_empty() => self.place_gutter(pts),
             (Finish::Stretch, [c1, c2, base, to, ..]) => {
                 let (lo, hi) = (c1.min(*c2), c1.max(*c2));
                 let by = *to - *base;
@@ -769,17 +1094,29 @@ impl CreaBimApp {
                         _ => None,
                     })
                     .collect();
-                if moved.is_empty() {
-                    self.say("STRETCH: no linework in the window.");
+                // the model too, in a plan: walls, slabs, roofs, rooms by
+                // their ends and corners in the window, the rest whole
+                let level = match self.view(view).map(|v| &v.kind) {
+                    Some(creabim_core::ViewKind::Plan { level, .. }) => Some(Some(*level)),
+                    _ => None,
+                };
+                let (mut tx, bim) = match level {
+                    Some(l) => creabim_core::stretchbim::stretch(self.doc.model(), l, lo, hi, by),
+                    None => (Transaction::new("Stretch"), 0),
+                };
+                if moved.is_empty() && bim == 0 {
+                    self.say("STRETCH: nothing in the window.");
                 } else {
-                    let mut tx = Transaction::new("Stretch");
                     for (e, d) in &moved {
                         let mut after = e.clone();
                         after.kind = ElementKind::Detail(d.clone());
                         tx = tx.replace(e.clone(), after);
                     }
                     match self.doc.commit(tx) {
-                        Ok(_) => self.say(format!("STRETCH: {} pieces stretched.", moved.len())),
+                        Ok(_) => self.say(format!(
+                            "STRETCH: {} pieces of linework and {bim} elements stretched.",
+                            moved.len()
+                        )),
                         Err(e) => self.say(format!("Couldn't do that: {e}")),
                     }
                 }
@@ -835,14 +1172,19 @@ impl CreaBimApp {
                 let size = (hi - lo).max(DVec2::splat(1e-3));
                 let pane = self.rect_2d.map_or(egui::vec2(800.0, 600.0), |r| r.size());
                 let scale = (pane.x as f64 / size.x).min(pane.y as f64 / size.y) * 0.95;
-                self.plan
-                    .cameras
-                    .insert(view, ((lo + hi) / 2.0, scale as f32));
+                self.set_camera(view, ((lo + hi) / 2.0, scale as f32));
                 self.say("ZOOM Window.");
             }
             (Finish::ZoomWindow, []) => self.zoom_extents(),
             (Finish::Pline, _) => self.finish_pline(false),
             // UCS with no point: the world's (Enter); one point: its origin
+            (Finish::NorthPoints, [a, b, ..]) => {
+                let d = *b - *a;
+                // anticlockwise from the drawing's up
+                let deg = (d.y.atan2(d.x).to_degrees() - 90.0).rem_euclid(360.0);
+                let deg = if deg > 180.0 { deg - 360.0 } else { deg };
+                self.set_true_north((deg * 100.0).round() / 100.0);
+            }
             (Finish::Ucs, []) => self.set_ucs(crate::planview::Ucs::default(), "UCS: World."),
             (Finish::Ucs, _) => self.say("UCS set."),
             (Finish::UcsObject, [p, ..]) => self.ucs_object(view, *p),
@@ -850,6 +1192,22 @@ impl CreaBimApp {
             _ => return false,
         }
         true
+    }
+
+    /// The project's true north, degrees anticlockwise from the drawing's up.
+    pub(super) fn set_true_north(&mut self, deg: f64) {
+        let mut info = self
+            .doc
+            .model()
+            .project_info()
+            .map(|(_, p)| p.clone())
+            .unwrap_or_default();
+        info.true_north = deg;
+        let tx = creabim_core::set_project(self.doc.model(), info);
+        match self.doc.commit(tx) {
+            Ok(_) => self.say(format!("True north at {deg}° from the drawing's up: the north icon and the north arrows follow it.")),
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
+        }
     }
 
     fn end_pick(&mut self) {
@@ -1074,6 +1432,303 @@ impl CreaBimApp {
                 }
                 _ => self.say("UCSICON: ON, OFF, ORigin or Noorigin."),
             },
+        }
+    }
+
+    /// Linework on a locked drafting layer can't be selected: it leaves the
+    /// selection as soon as it gets in.
+    pub(super) fn drop_locked_from_selection(&mut self) {
+        if self.selection.is_empty() {
+            return;
+        }
+        let table = creabim_core::detail::layers(self.doc.model());
+        if !table.layers.iter().any(|l| l.locked) {
+            return;
+        }
+        let locked: Vec<ElementId> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter(|id| match self.doc.model().get(*id).map(|e| &e.kind) {
+                Some(ElementKind::Detail(d)) => d
+                    .layer
+                    .as_deref()
+                    .and_then(|n| table.effective(n))
+                    .is_some_and(|l| l.locked),
+                _ => false,
+            })
+            .collect();
+        if locked.is_empty() {
+            return;
+        }
+        let keep: Vec<ElementId> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter(|id| !locked.contains(id))
+            .collect();
+        self.selection.clear();
+        self.selection.extend(keep, false);
+        self.status = "That is on a locked layer: unlock the layer to select it.".into();
+    }
+
+    /// The Home tab's layer buttons, as AutoCAD's LAYMCUR, LAYCUR, LAYOFF,
+    /// LAYLCK and LAYON.
+    pub(super) fn layer_quick(&mut self, what: &str) {
+        let model = self.doc.model();
+        let picked: Vec<(Element, DetailItem)> = self
+            .selection
+            .all()
+            .into_iter()
+            .filter_map(|id| {
+                let e = model.get(id)?;
+                match &e.kind {
+                    ElementKind::Detail(d) => Some((e.clone(), d.clone())),
+                    _ => None,
+                }
+            })
+            .collect();
+        let first_layer = picked.iter().find_map(|(_, d)| d.layer.clone());
+        match what {
+            "layer.fromsel" => match first_layer {
+                Some(l) => {
+                    self.plan.details.layer = Some(l.clone());
+                    self.say(format!("Current layer: {l}."));
+                }
+                None => self.say("Select linework on a layer first."),
+            },
+            "layer.tocurrent" => {
+                if picked.is_empty() {
+                    self.say("Select linework first.");
+                    return;
+                }
+                let cur = self.plan.details.layer.clone();
+                let mut tx = Transaction::new("Change to current layer");
+                for (e, d) in &picked {
+                    let mut after = e.clone();
+                    let mut d = d.clone();
+                    d.layer = cur.clone();
+                    after.kind = ElementKind::Detail(d);
+                    tx = tx.replace(e.clone(), after);
+                }
+                match self.doc.commit(tx) {
+                    Ok(_) => self.say(format!(
+                        "{} pieces on {}.",
+                        picked.len(),
+                        cur.as_deref().unwrap_or("no layer")
+                    )),
+                    Err(e) => self.say(format!("Couldn't do that: {e}")),
+                }
+            }
+            "layer.off" | "layer.lock" => {
+                let Some(name) = first_layer else {
+                    self.say("Select linework on a layer first.");
+                    return;
+                };
+                let mut table = creabim_core::detail::layers(model);
+                if let Some(l) = table.layers.iter_mut().find(|l| l.name == name) {
+                    if what == "layer.off" {
+                        l.hidden = true;
+                    } else {
+                        l.locked = true;
+                    }
+                }
+                let tx = creabim_core::detail::set_layers(model, table);
+                if self.doc.commit(tx).is_ok() {
+                    self.selection.clear();
+                    self.say(format!(
+                        "Layer {name} {}.",
+                        if what == "layer.off" { "off" } else { "locked" }
+                    ));
+                }
+            }
+            _ => {
+                let mut table = creabim_core::detail::layers(model);
+                for l in &mut table.layers {
+                    l.hidden = false;
+                    l.locked = false;
+                }
+                let tx = creabim_core::detail::set_layers(model, table);
+                if self.doc.commit(tx).is_ok() {
+                    self.say("Every layer on and unlocked.");
+                }
+            }
+        }
+    }
+}
+
+impl CreaBimApp {
+    /// AutoCAD's ADDSELECTED: the command that draws what is selected,
+    /// set as it is (its type; linework's kind, layer and line type).
+    pub(super) fn add_selected(&mut self, ctx: &egui::Context) {
+        let Some(e) = self
+            .selection
+            .active
+            .and_then(|id| self.doc.model().get(id))
+            .cloned()
+        else {
+            self.status = "Select an object first.".into();
+            return;
+        };
+        self.selection.clear();
+        match &e.kind {
+            ElementKind::Detail(d) => {
+                self.plan.details.layer = d.layer.clone();
+                self.plan.details.linetype = d.linetype;
+                match d.kind.as_draft() {
+                    Some((shape, _)) => {
+                        let cmd = match shape {
+                            DraftShape::Line if d.points.len() > 2 => "PLINE",
+                            DraftShape::Line => "LINE",
+                            DraftShape::Closed => "PLINE",
+                            DraftShape::Rectangle => "RECTANG",
+                            DraftShape::Polygon { .. } => "POLYGON",
+                            DraftShape::Circle => "CIRCLE",
+                            DraftShape::Arc => "ARC",
+                            DraftShape::Ellipse => "ELLIPSE",
+                            DraftShape::Spline => "SPLINE",
+                        };
+                        self.cmd_start(ctx, cmd);
+                    }
+                    None => {
+                        self.pick_tool(ctx, crate::planview::Tool::Detail);
+                        self.plan.details.pick(d.kind);
+                        self.plan.details.layer = d.layer.clone();
+                        self.say(format!("ADDSELECTED: {}.", d.kind.label()));
+                    }
+                }
+            }
+            ElementKind::Note(_) => self.cmd_start(ctx, "TEXT"),
+            ElementKind::Dimension(_) => self.cmd_start(ctx, "DIMLINEAR"),
+            _ => {
+                use crate::planview::Tool;
+                let model = self.doc.model();
+                let cat = creabim_core::TypeCategory::of(&e.kind);
+                let tool = [
+                    Tool::Wall,
+                    Tool::Door,
+                    Tool::Window,
+                    Tool::Slab,
+                    Tool::Roof,
+                    Tool::Column,
+                    Tool::Beam,
+                    Tool::Footing,
+                ]
+                .into_iter()
+                .find(|t| super::typesui::category_of_tool(*t) == cat && cat.is_some());
+                let Some(tool) = tool else {
+                    self.status = format!("{}: draw another with its own tool.", e.name);
+                    return;
+                };
+                if let (Some(c), Some((t, _))) = (cat, creabim_core::types::type_of(model, &e)) {
+                    let tid = t.id;
+                    self.plan.types.insert(c, tid);
+                }
+                self.pick_tool(ctx, tool);
+                self.say(format!("ADDSELECTED: {} like {}.", tool.label(), e.name));
+            }
+        }
+    }
+}
+
+impl CreaBimApp {
+    /// GUTTER: a half-round gutter along the eaves picked, on each roof
+    /// they belong to, following it (see [`creabim_core::parts::Path::Roof`]).
+    fn place_gutter(&mut self, pts: &[DVec2]) {
+        use creabim_core::parts::{Part, Path, RoofEdges};
+        let model = self.doc.model();
+        // each point: the nearest eave edge of any roof, within 1.5 m
+        let mut picked: Vec<(ElementId, ElementId, Vec<usize>)> = vec![];
+        for p in pts {
+            let mut best: Option<(f64, ElementId, ElementId, usize)> = None;
+            for e in model.iter() {
+                let ElementKind::Roof(r) = &e.kind else {
+                    continue;
+                };
+                let eaves = r.eave_outline();
+                let n = eaves.len();
+                for i in 0..n {
+                    let (a, b) = (eaves[i], eaves[(i + 1) % n]);
+                    let ab = b - a;
+                    let t = ((*p - a).dot(ab) / ab.length_squared().max(1e-12)).clamp(0.0, 1.0);
+                    let d = (a + ab * t).distance(*p);
+                    if d < 1.5 && best.is_none_or(|x| d < x.0) {
+                        best = Some((d, e.id, r.level, i));
+                    }
+                }
+            }
+            if let Some((_, roof, level, i)) = best {
+                match picked.iter_mut().find(|x| x.0 == roof) {
+                    Some(x) => {
+                        if !x.2.contains(&i) {
+                            x.2.push(i);
+                        }
+                    }
+                    None => picked.push((roof, level, vec![i])),
+                }
+            }
+        }
+        if picked.is_empty() {
+            self.say("GUTTER: no roof's eave near those points. Click close to the roof's outer edge in a plan.");
+            return;
+        }
+        let profile = creabim_core::profiles::preset("Gutter").unwrap_or_default();
+        let mut tx = Transaction::new("Gutter");
+        let mut ids = vec![];
+        // eaves next to each other make one run round the corner; apart
+        // (the two eaves of a gable), a gutter each
+        let mut runs: Vec<(ElementId, ElementId, Vec<usize>)> = vec![];
+        for (roof, level, mut edges) in picked {
+            let n = match model.get(roof).map(|e| &e.kind) {
+                Some(ElementKind::Roof(r)) => r.eave_outline().len(),
+                _ => continue,
+            };
+            edges.sort_unstable();
+            if edges.len() == n {
+                runs.push((roof, level, edges));
+                continue;
+            }
+            // start each run where the edge before isn't picked
+            let starts: Vec<usize> = edges
+                .iter()
+                .copied()
+                .filter(|e| !edges.contains(&((e + n - 1) % n)))
+                .collect();
+            for s in starts {
+                let mut run = vec![s];
+                let mut e = (s + 1) % n;
+                while edges.contains(&e) && e != s {
+                    run.push(e);
+                    e = (e + 1) % n;
+                }
+                runs.push((roof, level, run));
+            }
+        }
+        for (roof, level, edges) in runs {
+            let mut part = Part::sweep(
+                level,
+                profile.clone(),
+                Path::Roof(RoofEdges {
+                    roof,
+                    edges,
+                    // its middle just clear of the fascia, its rim under
+                    // the roof's edge
+                    out: 0.08,
+                    down: 0.08,
+                }),
+            );
+            part.profile = Some("Gutter".into());
+            let e = Element::new("Gutter", ElementKind::Part(part));
+            ids.push(e.id);
+            tx = tx.insert(e);
+        }
+        match self.doc.commit(tx) {
+            Ok(_) => {
+                self.selection.clear();
+                self.selection.extend(ids, false);
+                self.say("GUTTER placed. It follows the roof; Properties sets how far out and how low it sits, and its profile.");
+            }
+            Err(e) => self.say(format!("Couldn't do that: {e}")),
         }
     }
 }

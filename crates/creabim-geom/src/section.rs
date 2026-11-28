@@ -106,7 +106,18 @@ pub fn section_view_with(
     reveal: bool,
 ) -> Drawing {
     let scene = crate::scene::drawn_scene(model);
-    section_view_in(model, &scene, start, end, depth, cut, style, scale, reveal)
+    section_view_in(
+        model,
+        &scene,
+        start,
+        end,
+        depth,
+        cut,
+        style,
+        scale,
+        reveal,
+        Lit::default(),
+    )
 }
 
 /// [`section_view_with`] from a scene already built (the shared one,
@@ -122,19 +133,21 @@ pub fn section_view_in(
     style: ViewStyle,
     scale: f64,
     reveal: bool,
+    lit: Lit,
 ) -> Drawing {
     let frame = SectionFrame::new(start, end, depth);
     let mut items = Vec::new();
 
     let project = |p: DVec3| frame.project(p);
     let revealed = reveal.then(|| revealable(model));
-    let (lines, image) = hidden_lines(
+    let (lines, image) = hidden_lines_lit(
         scene,
         &project,
         frame.depth,
         Some((0.0, frame.length)),
         style,
         revealed.as_ref(),
+        lit,
     );
     items.extend(image);
     items.extend(lines);
@@ -626,24 +639,56 @@ pub fn axonometric_view_with(
 /// [`axonometric_view_with`] from a scene already built.
 pub fn axonometric_view_in(
     model: &Model,
-    mut scene: Vec<SceneItem>,
+    scene: Vec<SceneItem>,
     azimuth: f64,
     altitude: f64,
     style: ViewStyle,
     reveal: bool,
     crop: &[creabim_core::CropBox],
 ) -> Drawing {
+    axonometric_view_lit(
+        model,
+        scene,
+        azimuth,
+        altitude,
+        style,
+        reveal,
+        crop,
+        Lit::default(),
+    )
+}
+
+/// [`axonometric_view_in`] with the sun's shadows, when shaded.
+#[allow(clippy::too_many_arguments)]
+pub fn axonometric_view_lit(
+    model: &Model,
+    mut scene: Vec<SceneItem>,
+    azimuth: f64,
+    altitude: f64,
+    style: ViewStyle,
+    reveal: bool,
+    crop: &[creabim_core::CropBox],
+    lit: Lit,
+) -> Drawing {
     let frame = AxoFrame::new(model, azimuth, altitude);
+    let mut lit = lit;
+    if lit.follows_view {
+        if let Some(sun) = &mut lit.sun {
+            let fall = (-frame.right * 0.75 + frame.forward * 0.66).truncate();
+            sun.direction = fall.y.atan2(fall.x).to_degrees();
+        }
+    }
     crate::cropbox::crop_scene(model, &mut scene, crop);
     let project = |p: DVec3| frame.project(p);
     let revealed = reveal.then(|| revealable(model));
-    let (lines, image) = hidden_lines(
+    let (lines, image) = hidden_lines_lit(
         &scene,
         &project,
         frame.radius * 2.0,
         None,
         style,
         revealed.as_ref(),
+        lit,
     );
     let voids = if crop.is_empty() {
         void_lines(model, &project, frame.radius * 2.0, None)
@@ -762,13 +807,71 @@ pub(crate) fn hidden_lines(
     style: ViewStyle,
     reveal: Option<&HashSet<ElementId>>,
 ) -> (Vec<PlanItem>, Option<PlanItem>) {
-    let shade = style == ViewStyle::Shaded;
+    hidden_lines_lit(scene, project, depth, crop, style, reveal, Lit::default())
+}
+
+/// [`hidden_lines`] with the sun's shadows (`sun`) on the shaded image:
+/// on the model and on the ground it stands on.
+pub(crate) fn hidden_lines_lit(
+    scene: &[SceneItem],
+    project: &(dyn Fn(DVec3) -> DVec3 + Sync),
+    depth: f64,
+    crop: Option<(f64, f64)>,
+    style: ViewStyle,
+    reveal: Option<&HashSet<ElementId>>,
+    lit: Lit,
+) -> (Vec<PlanItem>, Option<PlanItem>) {
+    let shade = style.shades();
     let wire = style == ViewStyle::Wireframe;
-    let faces = project_faces(scene, project, depth);
-    let (lo, hi) = extents(&faces, crop);
-    let mut zbuf = DepthBuffer::render(&faces, lo, hi, shade);
+    let white = style.is_model();
+    let maquette = style == ViewStyle::Maquette;
+    let mut faces = project_faces(scene, project, depth);
+    // which faces are wood, by their place in the scene
+    let wood: Vec<bool> = scene.iter().map(|s| maquette && lit.is_wood(s)).collect();
+    if white {
+        // white card, the glass a darker grey-blue; the maquette's wood
+        // in its own colour
+        for (k, f) in faces.iter_mut().enumerate() {
+            f.1 = if scene[k].surface[2] < 0.999 {
+                if maquette {
+                    [0.62, 0.68, 0.72]
+                } else {
+                    [0.50, 0.55, 0.60]
+                }
+            } else if wood[k] {
+                f.1.map(|c| (c * 1.08).min(1.0))
+            } else if maquette {
+                [0.99, 0.99, 0.985]
+            } else {
+                [0.97, 0.97, 0.96]
+            };
+        }
+    }
+    let light = if maquette {
+        (MAQUETTE_AMBIENT, MAQUETTE_SUN_SHARE)
+    } else {
+        (WHITE_AMBIENT, WHITE_SUN_SHARE)
+    };
+    let (mut lo, mut hi) = extents(&faces, crop);
+    // room round the model for its shadow on the ground
+    if let (true, Some(sh)) = (shade, lit.sun) {
+        let reach = (hi - lo).max_element() * 0.5 * sh.length.clamp(0.2, 3.0);
+        lo -= DVec2::splat(reach);
+        hi += DVec2::splat(reach);
+    }
+    // the white model lit by its sun, turned into the view's terms
+    let o = project(DVec3::ZERO);
+    let sun_view = lit
+        .sun
+        .and_then(sun_toward)
+        .filter(|_| white)
+        .map(|s| (project(s) - o).normalize_or_zero());
+    let mut zbuf = DepthBuffer::render_lit(&faces, lo, hi, shade, sun_view, light);
     if reveal.is_some() {
         zbuf.render_backs(&faces);
+    }
+    if shade && (lit.sun.is_some() || lit.occlusion > 0.0) {
+        zbuf.cast_sun(scene, project, &lit, white, light, &wood);
     }
     let image = zbuf.image();
     let zbuf = &zbuf;
@@ -781,10 +884,15 @@ pub(crate) fn hidden_lines(
         (project(DVec3::Y).z - o.z) as f32,
         (project(DVec3::Z).z - o.z) as f32,
     );
+    // the joints between like faces left out, when the look says so
+    let joints = (!lit.joints && !wire).then(|| crate::flush::FlushIndex::new(scene));
     let per_item = par_map(scene, |index, s| {
         let mut items = Vec::new();
         let revealed = reveal.is_some_and(|r| r.contains(&s.id));
         for (a, b) in feature_edges_seen(s, view) {
+            if joints.as_ref().is_some_and(|j| j.is_joint(index, a, b)) {
+                continue;
+            }
             let Some((a, b)) = clip_segment(project(a), project(b), 1e-4, depth) else {
                 continue;
             };
@@ -940,6 +1048,7 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 style,
                 v.scale,
                 reveal,
+                Lit::of(model, v, style, false),
             );
             // rooms washed behind the cut, from floor to ceiling
             if v.room_colours && *cut {
@@ -951,7 +1060,16 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
         }
         creabim_core::ViewKind::Axonometric { azimuth, altitude } => {
             let crop = crate::cropbox::active(model, Some(view));
-            axonometric_view_in(model, scene(), *azimuth, *altitude, style, reveal, &crop)
+            axonometric_view_lit(
+                model,
+                scene(),
+                *azimuth,
+                *altitude,
+                style,
+                reveal,
+                &crop,
+                Lit::of(model, v, style, false),
+            )
         }
         creabim_core::ViewKind::Perspective {
             eye,
@@ -1058,6 +1176,10 @@ pub fn view_drawing_with(model: &Model, view: ElementId, xray: bool) -> Option<D
                 d.items = under;
             }
         }
+    }
+    // the white model over whatever the drawing style coloured
+    if style.is_model() {
+        whiten(model, &mut d.items, style == ViewStyle::Maquette);
     }
     Some(d)
 }
@@ -1647,16 +1769,196 @@ struct DepthBuffer {
     /// How deep that element goes in each cell (its far side), once
     /// [`DepthBuffer::render_backs`] has run.
     back: Vec<f32>,
+    /// How squarely each cell's face looks at the sun (0..1), when lit by
+    /// it (the white model); empty otherwise.
+    facing: Vec<f32>,
+}
+
+/// The white model's light: the sky's share and the sun's.
+const WHITE_AMBIENT: f64 = 0.68;
+const WHITE_SUN_SHARE: f64 = 0.45;
+
+/// The maquette's light: brighter still.
+const MAQUETTE_AMBIENT: f64 = 0.80;
+const MAQUETTE_SUN_SHARE: f64 = 0.34;
+
+/// How a shaded view is lit: the sun's shadows and how much its corners
+/// are shaded.
+#[derive(Clone, Debug)]
+pub struct Lit {
+    pub sun: Option<creabim_core::styles::Shadows>,
+    pub occlusion: f32,
+    /// The sun is the model style's own: a 3D view turns it with the view,
+    /// so the shadow always falls to the left and away, where it shows.
+    pub follows_view: bool,
+    /// Draw the joints between like faces in one plane.
+    pub joints: bool,
+    /// The scene's wooden items (by element and layer), for the maquette.
+    pub wood: std::sync::Arc<HashSet<(ElementId, Option<usize>)>>,
+}
+
+impl Default for Lit {
+    fn default() -> Self {
+        Self {
+            sun: None,
+            occlusion: 0.0,
+            follows_view: false,
+            joints: true,
+            wood: Default::default(),
+        }
+    }
+}
+
+impl Lit {
+    /// As view `v` in `style` has it (`plan` for a plan's shorter sun).
+    pub fn of(model: &Model, v: &creabim_core::View, style: ViewStyle, plan: bool) -> Self {
+        let wood = if style == ViewStyle::Maquette {
+            crate::scene::shared_scene(model)
+                .iter()
+                .filter(|s| crate::scene::is_wood(model, s))
+                .map(|s| (s.id, s.layer.as_ref().map(|l| l.index)))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        Self {
+            sun: v.look.cues.shadows_for(style, plan),
+            occlusion: v.look.cues.occlusion_for(style),
+            follows_view: v.look.cues.shadows.is_none(),
+            joints: v.look.cues.joints_for(style),
+            wood: std::sync::Arc::new(wood),
+        }
+    }
+
+    fn is_wood(&self, s: &SceneItem) -> bool {
+        self.wood
+            .contains(&(s.id, s.layer.as_ref().map(|l| l.index)))
+    }
 }
 
 /// No element in the cell.
 const EMPTY: u32 = u32::MAX;
+
+/// A drawing in the white model style: what is cut solid dark grey, no
+/// colours on rooms and hidden elements, coloured surfaces white.
+pub fn whiten(model: &Model, items: &mut Vec<PlanItem>, maquette: bool) {
+    let cut = if maquette { 0.45 } else { 0.26 };
+    let wood = |id: ElementId| {
+        maquette
+            && model
+                .get(id)
+                .is_some_and(|e| crate::scene::is_wood_element(model, e))
+    };
+    // drafting (sketches, notes, marks) keeps its own fills
+    let drafted = |id: ElementId| {
+        !matches!(
+            model.get(id).map(|e| &e.kind),
+            Some(
+                ElementKind::Wall(_)
+                    | ElementKind::Slab(_)
+                    | ElementKind::Roof(_)
+                    | ElementKind::Column(_)
+                    | ElementKind::Beam(_)
+                    | ElementKind::Stair(_)
+                    | ElementKind::Railing(_)
+                    | ElementKind::FreeMesh(_)
+                    | ElementKind::Footing(_)
+                    | ElementKind::Part(_)
+                    | ElementKind::Object(_)
+                    | ElementKind::Site(_)
+                    | ElementKind::Opening(_)
+                    | ElementKind::Shaft(_)
+            )
+        )
+    };
+    items.retain(|it| !matches!(it, PlanItem::Tint { .. }));
+    // a cut outline fills in its look's grey: a dark fill under its lines
+    // instead
+    let mut out = Vec::with_capacity(items.len());
+    for it in std::mem::take(items) {
+        match it {
+            PlanItem::Polygon {
+                id,
+                pen: Pen::Cut,
+                points,
+            } if points.len() >= 3 && !drafted(id) => {
+                let n = points.len();
+                let edges: Vec<PlanItem> = (0..n)
+                    .map(|i| PlanItem::Line {
+                        id,
+                        pen: Pen::Cut,
+                        a: points[i],
+                        b: points[(i + 1) % n],
+                    })
+                    .collect();
+                out.push(PlanItem::Fill {
+                    id,
+                    points,
+                    hatch: creabim_core::Hatch::Solid,
+                    rgb: None,
+                });
+                out.extend(edges);
+            }
+            it => out.push(it),
+        }
+    }
+    *items = out;
+    for it in items.iter_mut() {
+        match it {
+            PlanItem::Fill { id, hatch, rgb, .. } if !drafted(*id) => {
+                *hatch = creabim_core::Hatch::Solid;
+                *rgb = Some([cut, cut, cut + 0.02]);
+            }
+            PlanItem::Room { rgb, .. } => *rgb = None,
+            // a shadow is grey and stays; a coloured surface goes white
+            PlanItem::Shade { id, rgb, .. }
+                if !drafted(*id) && !wood(*id) && !(rgb[0] == rgb[1] && rgb[1] == rgb[2]) =>
+            {
+                *rgb = [0.97, 0.97, 0.96];
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The grain of wood at a point: long streaks, wavering, and a fine
+/// mottle, as a factor round 1.
+fn grain(p: DVec3) -> f64 {
+    let along = p.x * 0.8 + p.y * 0.6;
+    let waver = (p.z * 2.3 + p.x * 1.7 + p.y * 1.1).sin() * 2.5;
+    let streak = 0.5 + 0.5 * (along * 9.0 + waver).sin();
+    let fine = 0.5 + 0.5 * (along * 41.0 + waver * 3.0 + p.z * 17.0).sin();
+    0.86 + 0.09 * streak + 0.05 * fine
+}
+
+/// Toward the sun, in model terms, from a look's shadows: they fall
+/// along `direction`, `length` per metre of height.
+pub fn sun_toward(sh: creabim_core::styles::Shadows) -> Option<DVec3> {
+    let fall = DVec2::from_angle(sh.direction.to_radians());
+    let alt = (1.0 / sh.length.max(0.05)).atan();
+    let d = DVec3::new(-fall.x * alt.cos(), -fall.y * alt.cos(), alt.sin());
+    d.is_finite().then_some(d)
+}
 
 /// Direction light comes from, in view coordinates (x right, y up, depth away).
 const LIGHT: DVec3 = DVec3::new(-0.45, 0.65, -0.62);
 
 impl DepthBuffer {
     fn render(faces: &Faces, lo: DVec2, hi: DVec2, shade: bool) -> Self {
+        Self::render_lit(faces, lo, hi, shade, None, (WHITE_AMBIENT, WHITE_SUN_SHARE))
+    }
+
+    /// [`DepthBuffer::render`], with `sun` (toward it, in view terms)
+    /// lighting the faces as the white model's are, instead of the fixed
+    /// light from the upper left.
+    fn render_lit(
+        faces: &Faces,
+        lo: DVec2,
+        hi: DVec2,
+        shade: bool,
+        sun: Option<DVec3>,
+        (ambient, sun_share): (f64, f64),
+    ) -> Self {
         let size = hi - lo;
         let px = (size.x.max(size.y) / 2048.0).max(0.005);
         let w = (size.x / px).ceil() as usize + 1;
@@ -1670,19 +1972,35 @@ impl DepthBuffer {
             rgba: shade.then(|| vec![0; w * h * 4]),
             nearest: vec![EMPTY; w * h],
             back: vec![f32::NEG_INFINITY; w * h],
+            facing: if sun.is_some() {
+                vec![0.0; w * h]
+            } else {
+                vec![]
+            },
         };
         let light = LIGHT.normalize();
-        // every triangle in cells, with its shade and its element, in order
-        let tris: Vec<([DVec3; 3], [u8; 3], u32)> = faces
+        // every triangle in cells, with its shade, its element and how it
+        // faces the sun, in order
+        let tris: Vec<([DVec3; 3], [u8; 3], u32, f32)> = faces
             .iter()
             .enumerate()
             .flat_map(|(index, (_, color, tris))| {
                 let buf = &buf;
                 tris.iter().map(move |t| {
-                    let n = (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
-                    let lit = 0.55 + 0.45 * n.dot(light).abs();
+                    let mut n = (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
+                    let (lit, f) = match sun {
+                        Some(s) => {
+                            // a face seen looks toward the viewer
+                            if n.z > 0.0 {
+                                n = -n;
+                            }
+                            let f = n.dot(s).max(0.0);
+                            (ambient + sun_share * f, f as f32)
+                        }
+                        None => (0.55 + 0.45 * n.dot(light).abs(), 0.0),
+                    };
                     let c = color.map(|c| ((c as f64 * lit).clamp(0.0, 1.0) * 255.0) as u8);
-                    (t.map(|p| buf.to_px(p)), c, index as u32)
+                    (t.map(|p| buf.to_px(p)), c, index as u32, f)
                 })
             })
             .collect();
@@ -1694,18 +2012,24 @@ impl DepthBuffer {
             Some(r) => r.chunks_mut(rows * w * 4).map(Some).collect(),
             None => (0..h.div_ceil(rows)).map(|_| None).collect(),
         };
+        let mut facing: Vec<Option<&mut [f32]>> = if buf.facing.is_empty() {
+            (0..h.div_ceil(rows)).map(|_| None).collect()
+        } else {
+            buf.facing.chunks_mut(rows * w).map(Some).collect()
+        };
         std::thread::scope(|scope| {
-            for (k, ((dc, nc), rc)) in depth
+            for (k, (((dc, nc), rc), fc)) in depth
                 .chunks_mut(rows * w)
                 .zip(nearest.chunks_mut(rows * w))
                 .zip(rgba.iter_mut())
+                .zip(facing.iter_mut())
                 .enumerate()
             {
                 let tris = &tris;
                 scope.spawn(move || {
                     let y0 = k * rows;
                     let base = y0 * w;
-                    for (t, c, index) in tris {
+                    for (t, c, index, f) in tris {
                         cover_rows(t, w, h, y0..(y0 + rows).min(h), |i, d| {
                             let j = i - base;
                             if d < dc[j] {
@@ -1714,6 +2038,9 @@ impl DepthBuffer {
                                 if let Some(rc) = rc.as_deref_mut() {
                                     rc[j * 4..j * 4 + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
                                 }
+                                if let Some(fc) = fc.as_deref_mut() {
+                                    fc[j] = *f;
+                                }
                             }
                         });
                     }
@@ -1721,6 +2048,256 @@ impl DepthBuffer {
             }
         });
         buf
+    }
+
+    /// The sun's shadows and the shading of corners on the shaded image,
+    /// for a parallel view: each cell's point found back in the model and
+    /// looked for from the sun; each cell shaded as much as what is near
+    /// it stands in front of it. Where nothing is drawn, the ground under
+    /// the model takes both, see-through. A perspective has neither (its
+    /// projection is not undone this simply).
+    fn cast_sun(
+        &mut self,
+        scene: &[SceneItem],
+        project: &(dyn Fn(DVec3) -> DVec3 + Sync),
+        lit: &Lit,
+        white: bool,
+        (ambient, sun_share): (f64, f64),
+        wood: &[bool],
+    ) {
+        let o = project(DVec3::ZERO);
+        let a = glam::DMat3::from_cols(
+            project(DVec3::X) - o,
+            project(DVec3::Y) - o,
+            project(DVec3::Z) - o,
+        );
+        if (project(DVec3::new(1.0, 2.0, 3.0)) - (o + a * DVec3::new(1.0, 2.0, 3.0))).length()
+            > 1e-6
+            || a.determinant().abs() < 1e-12
+        {
+            return;
+        }
+        let inv = a.inverse();
+        let sun = lit.sun.and_then(sun_toward);
+        let opacity = lit.sun.map_or(0.0, |s| s.opacity.clamp(0.0, 1.0) as f64);
+        let occlusion = lit.occlusion.clamp(0.0, 1.0) as f64;
+        if sun.is_none() && occlusion <= 0.0 {
+            return;
+        }
+        let ground = scene
+            .iter()
+            .flat_map(|s| s.mesh.positions.iter())
+            .map(|p| p[2] as f64)
+            .fold(f64::MAX, f64::min);
+        if ground == f64::MAX {
+            return;
+        }
+        let ground = ground - 0.002;
+        // the map of the model seen from the sun
+        let map = sun.map(|sun| {
+            let side = if sun.z.abs() > 0.95 {
+                DVec3::X
+            } else {
+                DVec3::Z
+            };
+            let u = sun.cross(side).normalize();
+            let v = sun.cross(u);
+            let top = scene
+                .iter()
+                .flat_map(|s| s.mesh.positions.iter())
+                .map(|p| Vec3::from(*p).as_dvec3().dot(sun))
+                .fold(f64::MIN, f64::max);
+            let from_sun = move |p: DVec3| DVec3::new(p.dot(u), p.dot(v), top + 1.0 - p.dot(sun));
+            let faces = project_faces(scene, &from_sun, 1e7);
+            let (lo, hi) = extents(&faces, None);
+            (DepthBuffer::render(&faces, lo, hi, false), from_sun)
+        });
+        // how much sun reaches a point: 1 lit, 0 in shadow, soft at edges
+        let light = |p: DVec3| -> f64 {
+            let Some((map, from_sun)) = &map else {
+                return 1.0;
+            };
+            let q = from_sun(p);
+            let bias = 0.03 + map.px * 2.5;
+            let (cx, cy) = (
+                ((q.x - map.lo.x) / map.px).floor() as isize,
+                ((q.y - map.lo.y) / map.px).floor() as isize,
+            );
+            let mut dark = 0;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (x, y) = (cx + dx, cy + dy);
+                    if x < 0 || y < 0 || x >= map.w as isize || y >= map.h as isize {
+                        continue;
+                    }
+                    if (map.depth[y as usize * map.w + x as usize] as f64) < q.z - bias {
+                        dark += 1;
+                    }
+                }
+            }
+            1.0 - dark as f64 / 9.0
+        };
+        let (w, h, px, lo) = (self.w, self.h, self.px, self.lo);
+        let along = inv * DVec3::Z;
+        let sees_ground = along.z.abs() > 1e-9;
+        // every cell's depth, the ground's where nothing is drawn
+        let full: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let d = self.depth[i];
+                if d.is_finite() || !sees_ground {
+                    return d;
+                }
+                let q = lo + DVec2::new((i % w) as f64 + 0.5, (i / w) as f64 + 0.5) * px;
+                let start = inv * (DVec3::new(q.x, q.y, 0.0) - o);
+                ((ground - start.z) / along.z) as f32
+            })
+            .collect();
+        // the shading of corners: samples round each cell, out to `reach`
+        let reach = 0.9;
+        let rp = (reach / px).clamp(2.0, 60.0);
+        let samples: Vec<(isize, isize, f64)> = (0..16)
+            .map(|k| {
+                let t = (k as f64 + 0.5) / 16.0;
+                let r = rp * t.sqrt();
+                let a = k as f64 * 2.399_963;
+                (
+                    (a.cos() * r).round() as isize,
+                    (a.sin() * r).round() as isize,
+                    r * px,
+                )
+            })
+            .collect();
+        let shade_at = |i: usize| -> f64 {
+            if occlusion <= 0.0 {
+                return 1.0;
+            }
+            let d = full[i] as f64;
+            if !d.is_finite() {
+                return 1.0;
+            }
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let at = |x: isize, y: isize| -> f64 {
+                if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
+                    return f64::INFINITY;
+                }
+                full[y as usize * w + x as usize] as f64
+            };
+            // the surface's own slope here, each way (the gentler side, so
+            // an edge next to it does not count): a tilted face is not a
+            // corner
+            let slope = |a: f64, b: f64| -> f64 {
+                let (da, db) = (d - a, b - d);
+                match (da.is_finite(), db.is_finite()) {
+                    (true, true) => {
+                        if da.abs() < db.abs() {
+                            da
+                        } else {
+                            db
+                        }
+                    }
+                    (true, false) => da,
+                    (false, true) => db,
+                    _ => 0.0,
+                }
+            };
+            let gx = slope(at(x - 1, y), at(x + 1, y));
+            let gy = slope(at(x, y - 1), at(x, y + 1));
+            let mut occ = 0.0;
+            // the samples turned a little for each cell, so their pattern
+            // blurs away instead of showing
+            let turn = ((x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)) & 1023) as f64
+                / 1024.0
+                * std::f64::consts::TAU;
+            let (sn, cs) = turn.sin_cos();
+            for &(dx, dy, dist) in &samples {
+                let (dx, dy) = (
+                    (dx as f64 * cs - dy as f64 * sn).round() as isize,
+                    (dx as f64 * sn + dy as f64 * cs).round() as isize,
+                );
+                let dq = at(x + dx, y + dy);
+                if !dq.is_finite() {
+                    continue;
+                }
+                // how far in front of the surface's own plane it stands
+                let rise = d + gx * dx as f64 + gy * dy as f64 - dq;
+                // something in front, near enough to hide the sky
+                if rise > 0.03 + dist * 0.04 && rise < reach * 2.5 {
+                    occ += 1.0 - rise / (reach * 2.5);
+                }
+            }
+            1.0 - occlusion * (occ / samples.len() as f64 * 1.8).min(1.0) * 0.75
+        };
+        // every cell's shading, on every core, then smoothed
+        let mut shading = vec![1f32; w * h];
+        if occlusion > 0.0 {
+            let rows = band_rows(h);
+            std::thread::scope(|scope| {
+                for (k, chunk) in shading.chunks_mut(rows * w).enumerate() {
+                    let shade_at = &shade_at;
+                    scope.spawn(move || {
+                        for (j, v) in chunk.iter_mut().enumerate() {
+                            *v = shade_at(k * rows * w + j) as f32;
+                        }
+                    });
+                }
+            });
+            let r = ((rp / 10.0).round() as usize).max(1);
+            shading = crate::ranges::box_blur(&shading, w, h, r, true);
+            shading = crate::ranges::box_blur(&shading, w, h, r, false);
+        }
+        let shade_of = |i: usize| shading[i] as f64;
+        let facing = &self.facing;
+        let depth = &self.depth;
+        let nearest = &self.nearest;
+        let Some(rgba) = self.rgba.as_mut() else {
+            return;
+        };
+        let rows = band_rows(h);
+        std::thread::scope(|scope| {
+            for (k, chunk) in rgba.chunks_mut(rows * w * 4).enumerate() {
+                let (light, shade_of, full) = (&light, &shade_of, &full);
+                scope.spawn(move || {
+                    for (j, px4) in chunk.chunks_mut(4).enumerate() {
+                        let i = k * rows * w + j;
+                        let q = lo + DVec2::new((i % w) as f64 + 0.5, (i / w) as f64 + 0.5) * px;
+                        let ao = shade_of(i);
+                        if depth[i].is_finite() {
+                            let p = inv * (DVec3::new(q.x, q.y, depth[i] as f64) - o);
+                            let sun_in = 1.0 - opacity * (1.0 - light(p));
+                            if white && !facing.is_empty() {
+                                // the sky's share shaded in corners, the
+                                // sun's where it reaches
+                                let f = facing[i] as f64;
+                                let was = ambient + sun_share * f;
+                                let now = ambient * ao + sun_share * f * sun_in;
+                                let mut k = now / was;
+                                // the maquette's wood in its grain
+                                if wood.get(nearest[i] as usize).copied().unwrap_or(false) {
+                                    k *= grain(p);
+                                }
+                                for c in &mut px4[..3] {
+                                    *c = (*c as f64 * k).round().clamp(0.0, 255.0) as u8;
+                                }
+                            } else {
+                                let k = (1.0 - 0.75 * (1.0 - sun_in)) * ao;
+                                for c in &mut px4[..3] {
+                                    *c = (*c as f64 * k).round() as u8;
+                                }
+                            }
+                        } else if full[i].is_finite() {
+                            // the ground, where the line of sight meets it
+                            let p = inv * (DVec3::new(q.x, q.y, full[i] as f64) - o);
+                            let sun_in = 1.0 - opacity * 0.85 * (1.0 - light(p));
+                            let dark = 1.0 - sun_in * ao;
+                            if dark > 0.004 {
+                                let alpha = (dark * 255.0).round() as u8;
+                                px4.copy_from_slice(&[24, 26, 32, alpha]);
+                            }
+                        }
+                    }
+                });
+            }
+        });
     }
 
     /// Find how deep the nearest element goes in each cell: the furthest
@@ -2023,6 +2600,35 @@ mod tests {
     }
 
     #[test]
+    fn white_model_plans_and_sections_are_white_with_dark_cuts_and_shadows() {
+        let m = sample();
+        let plan = m
+            .iter()
+            .find(|e| matches!(&e.kind, ElementKind::View(v) if matches!(v.kind, creabim_core::ViewKind::Plan { .. })))
+            .unwrap()
+            .id;
+        for id in [plan, section_a(&m)] {
+            let m = set_view(&m, id, |v| v.style = ViewStyle::White);
+            let d = view_drawing(&m, id).unwrap();
+            // what is cut is solid dark grey, nothing is tinted
+            assert!(d.items.iter().any(|i| matches!(i,
+                PlanItem::Fill { hatch: creabim_core::Hatch::Solid, rgb: Some(c), .. } if c[0] < 0.3)));
+            assert!(!d.items.iter().any(|i| matches!(i,
+                PlanItem::Fill { id, rgb, .. } if matches!(m.get(*id).map(|e| &e.kind), Some(ElementKind::Wall(_))) && rgb.is_none_or(|c| c[0] > 0.3))));
+            assert!(!d.items.iter().any(|i| matches!(i, PlanItem::Tint { .. })));
+            // and the sun's shadows come as an image
+            let shadowed = d.items.iter().any(|i| match i {
+                PlanItem::Image { raster, .. } => raster
+                    .rgba
+                    .chunks(4)
+                    .any(|p| p[3] > 0 && (p[3] < 255 || p[0] < 200)),
+                _ => false,
+            });
+            assert!(shadowed, "{id:?}");
+        }
+    }
+
+    #[test]
     fn x_ray_draws_a_beam_buried_in_a_wall_without_changing_the_view() {
         let (m, beam) = creabim_core::sample::sample_with_buried_beam();
         let sec = section_a(&m);
@@ -2275,6 +2881,52 @@ mod tests {
             .items
             .iter()
             .any(|i| matches!(i, PlanItem::Image { .. })));
+    }
+
+    #[test]
+    fn a_shaded_3d_view_takes_the_suns_shadows_on_the_model_and_the_ground() {
+        let m = sample();
+        let image = |sun| {
+            let d = axonometric_view_lit(
+                &m,
+                crate::scene::drawn_scene(&m),
+                35.0,
+                30.0,
+                ViewStyle::Shaded,
+                false,
+                &[],
+                sun,
+            );
+            match d.items.first() {
+                Some(PlanItem::Image { raster, .. }) => raster.clone(),
+                _ => panic!("an image"),
+            }
+        };
+        let plain = image(Lit::default());
+        let lit = image(Lit {
+            sun: Some(creabim_core::styles::Shadows {
+                direction: -50.0,
+                length: 1.0,
+                opacity: 0.6,
+            }),
+            occlusion: 0.5,
+            ..Lit::default()
+        });
+        // the ground's shadow: see-through dark where nothing stood before
+        assert!(lit
+            .rgba
+            .chunks(4)
+            .any(|p| p[3] > 20 && p[3] < 255 && p[0] < 60));
+        assert!(!plain.rgba.chunks(4).any(|p| p[3] > 0 && p[3] < 255));
+        // and some of the model is darker: faces in shadow
+        let solid = |r: &crate::raster::Raster| {
+            r.rgba
+                .chunks(4)
+                .filter(|p| p[3] == 255)
+                .map(|p| p[0] as u64)
+                .sum::<u64>()
+        };
+        assert!(solid(&lit) < solid(&plain));
     }
 
     #[test]

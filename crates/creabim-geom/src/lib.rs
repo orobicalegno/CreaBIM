@@ -13,6 +13,7 @@ pub mod curtain;
 pub mod declutter;
 pub mod detail;
 pub mod dxf;
+pub mod flush;
 pub mod looks;
 pub mod markers;
 pub mod members;

@@ -539,6 +539,7 @@ impl CreaBimApp {
                 };
             }
             "app.report" => self.report_problem(),
+            "app.diagnostics" => self.toggle_diagnostics(),
             "app.settings" => self.settings_open = true,
             "app.exit" => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             "units.kind" => {
@@ -582,6 +583,7 @@ impl CreaBimApp {
         let mut crosshair = self.shell.settings.crosshair;
         let mut command_line = self.shell.settings.command_line;
         let mut cursor_size = self.shell.settings.cursor_size;
+        let mut autosave = self.shell.settings.autosave_minutes;
         let mut interaction = self.shell.settings.interaction.clone();
         let mut edge_w = self.shell.settings.edit_edge_width;
         let mut vert_s = self.shell.settings.edit_vertex_size;
@@ -601,7 +603,9 @@ impl CreaBimApp {
             ("Project", "folder"),
             ("Keymap", "keyboard"),
         ];
-        let height = (area.height() - 80.0).clamp(300.0, 560.0);
+        let height = (area.height() - 80.0).clamp(300.0, 520.0);
+        self.dialog_begin("settings");
+        let mut footer = None;
         crate::app::shell::window("Settings")
             .open(&mut open)
             .default_pos(area.center() - Vec2::new(310.0, height / 2.0))
@@ -846,6 +850,17 @@ impl CreaBimApp {
                                         yours(ui);
                                     }
                                     4 => {
+                                        crate::props::section(ui, "Automatic save");
+                                        let mut on = autosave > 0;
+                                        if ui.checkbox(&mut on, "Save a copy automatically")
+                                            .on_hover_text("As AutoCAD's SAVETIME: a copy of the project is saved beside it as <name>.autosave.creabim (an unsaved project's in the system's temporary folder). Your own file is only written when you save.")
+                                            .changed()
+                                        {
+                                            autosave = if on { 10 } else { 0 };
+                                        }
+                                        crate::props::row(ui, "Every", |ui| {
+                                            ui.add_enabled(autosave > 0, egui::Slider::new(&mut autosave, 1..=120).suffix(" min"))
+                                        });
                                         crate::props::section(ui, "This project");
                                         crate::props::row(ui, "Units", |ui| {
                                             egui::ComboBox::from_id_salt("settings.units").icon(crate::props::combo_icon)
@@ -877,8 +892,18 @@ impl CreaBimApp {
                             });
                     });
                 });
+                footer = Self::dialog_footer(ui);
             });
         ctx.data_mut(|d| d.insert_temp(tab_id, tab));
+        // Save keeps, Cancel and the cross put it all back
+        let keep = match footer {
+            Some(k) => Some(k),
+            None if !open => Some(false),
+            None => None,
+        };
+        if keep.is_some() {
+            open = false;
+        }
         self.settings_open = open;
         if !open {
             ctx.data_mut(|d| d.remove::<f64>(egui::Id::new("settings.logo.t0")));
@@ -891,6 +916,10 @@ impl CreaBimApp {
             crate::handles::set_edit_display(edge_w, vert_s);
             self.shell.settings.edit_edge_width = edge_w;
             self.shell.settings.edit_vertex_size = vert_s;
+            self.shell.settings.store();
+        }
+        if autosave != self.shell.settings.autosave_minutes {
+            self.shell.settings.autosave_minutes = autosave;
             self.shell.settings.store();
         }
         if interaction != self.shell.settings.interaction {
@@ -942,6 +971,10 @@ impl CreaBimApp {
         }
         if keys {
             self.open_help("shortcuts");
+        }
+        // last, once what was picked is applied: kept, or put back
+        if let Some(k) = keep {
+            self.dialog_end("settings", k);
         }
     }
 }
@@ -1182,7 +1215,7 @@ pub(crate) fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
     static TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
     TEX.get_or_init(|| {
         let img =
-            image::load_from_memory(include_bytes!("../assets/logo/png/creabim-mark-128.png"))
+            image::load_from_memory(include_bytes!("../assets/logo/png/volumen-mark-128.png"))
                 .map(|i| i.to_rgba8())
                 .unwrap_or_default();
         let (w, h) = img.dimensions();
@@ -1511,7 +1544,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(file, ["new.project", "new.sheet"]);
+        // (New sheet is in the View menu, with the other views)
+        assert_eq!(file, ["new.project"]);
         let help = app.help_menu();
         assert!(help.iter().any(|i| matches!(i, Item::Sub { label, items, .. } if label == "Samples to learn from" && items.len() == 6)));
     }

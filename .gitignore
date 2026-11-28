@@ -4,3 +4,4 @@ target/
 .DS_Store
 !crates/*/fixtures/*.ifc
 !crates/*/fixtures/thirdparty/*.ifc
+*.autosave.creabim

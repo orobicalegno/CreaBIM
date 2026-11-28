@@ -11,6 +11,7 @@ mod aligntool;
 mod annotate;
 mod app;
 mod areas;
+mod boundary;
 mod boxsel;
 mod browser;
 mod builds;
@@ -19,9 +20,12 @@ mod centres;
 mod choices;
 mod commands;
 mod detailtool;
+mod diag;
 mod editmode;
 mod files;
 mod fillpreview;
+#[cfg(test)]
+mod gesture_tests;
 mod ghost;
 mod handles;
 mod help;
@@ -60,7 +64,7 @@ mod webui;
 
 /// The window's and the taskbar's icon: the app tile, sage.
 fn app_icon() -> std::sync::Arc<eframe::egui::IconData> {
-    let png = include_bytes!("../assets/logo/png/creabim-app-icon-256.png");
+    let png = include_bytes!("../assets/logo/png/volumen-app-icon-256.png");
     std::sync::Arc::new(eframe::icon_data::from_png_bytes(png).unwrap_or_default())
 }
 

@@ -136,6 +136,23 @@ pub fn label(model: &Model, source: &RefSource) -> String {
     }
 }
 
+/// A CAD colour made for black (yellow, cyan) readable on white paper:
+/// the brightest are darkened a little.
+fn dim_on_paper(c: Color32) -> Color32 {
+    let [r, g, b, _] = c.to_array();
+    let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    if lum > 170.0 {
+        let k = 170.0 / lum;
+        Color32::from_rgb(
+            (r as f32 * k) as u8,
+            (g as f32 * k) as u8,
+            (b as f32 * k) as u8,
+        )
+    } else {
+        c
+    }
+}
+
 /// The ink a reference is drawn in; none keeps its own colours.
 pub fn colour(r: &Reference) -> Option<Color32> {
     r.colour.map(|i| {
@@ -203,11 +220,30 @@ pub fn draw(
                 .unwrap_or(Color32::from_gray(70))
                 .gamma_multiply(a);
             let stroke = Stroke::new(1.0, ink);
-            for line in lines.iter() {
+            // a DXF in its own colours, unless the reference is given one
+            let own = if r.colour.is_none() {
+                dxf_colours(r)
+            } else {
+                None
+            };
+            let clip = painter.clip_rect().expand(4.0);
+            for (i, line) in lines.iter().enumerate() {
                 let pts: Vec<Pos2> = line.iter().map(|p| to_screen(r.place(*p))).collect();
-                if pts.len() >= 2 {
-                    painter.add(egui::Shape::line(pts, stroke));
+                if pts.len() < 2 {
+                    continue;
                 }
+                // out of sight: not drawn
+                if !egui::Rect::from_points(&pts).intersects(clip) {
+                    continue;
+                }
+                let stroke = match own.as_ref().and_then(|c| c.get(i).copied().flatten()) {
+                    Some([cr, cg, cb]) => Stroke::new(
+                        1.0,
+                        dim_on_paper(Color32::from_rgb(cr, cg, cb)).gamma_multiply(a),
+                    ),
+                    None => stroke,
+                };
+                painter.add(egui::Shape::line(pts, stroke));
             }
         }
         Shown::Missing(_) => {}
@@ -268,20 +304,40 @@ pub fn picture(path: &str) -> Result<Raster, String> {
 pub fn dxf_lines(path: &str) -> Result<Vec<Vec<DVec2>>, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("couldn't read {path}: {e}"))?;
     let text = creabim_exchange::titleblock::dxf_text(&bytes);
-    let items = creabim_exchange::titleblock::dxf_items(&text)?;
+    let (items, _) = creabim_exchange::titleblock::dxf_items_coloured(&text)?;
+    let plain: Vec<_> = items.iter().map(|(it, ..)| it.clone()).collect();
     DXF_CAPPED.store(
-        creabim_exchange::titleblock::dxf_capped(&items),
+        creabim_exchange::titleblock::dxf_capped(&plain),
         std::sync::atomic::Ordering::Relaxed,
     );
-    Ok(items
+    let mut colours = vec![];
+    let lines = items
         .into_iter()
-        .filter_map(|it| match it {
+        .filter_map(|(it, _, rgb)| match it {
             creabim_core::titleblock::TitleItem::Line { points, .. } => {
+                colours.push(rgb);
                 Some(points.into_iter().map(|p| p / 1000.0).collect())
             }
             _ => None,
         })
-        .collect())
+        .collect();
+    if let Ok(mut m) = DXF_COLOURS.lock() {
+        m.insert(path.to_string(), Arc::new(colours));
+    }
+    Ok(lines)
+}
+
+/// Each DXF line's own colour (as [`dxf_lines`] read it), by file.
+#[allow(clippy::type_complexity)]
+static DXF_COLOURS: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<String, Arc<Vec<Option<[u8; 3]>>>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn dxf_colours(r: &Reference) -> Option<Arc<Vec<Option<[u8; 3]>>>> {
+    let RefSource::Dxf { path } = &r.source else {
+        return None;
+    };
+    DXF_COLOURS.lock().ok()?.get(path).cloned()
 }
 
 fn path_key(path: &str) -> u64 {

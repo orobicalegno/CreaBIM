@@ -861,7 +861,7 @@ impl Snapper {
     /// snaps to corners and edges instead.
     pub fn add_intersections(&mut self) {
         let flat = |p: DVec3| p.truncate();
-        let n = self.segments.len().min(4000);
+        let n = self.segments.len().min(80_000);
         // the pairs worth trying: segments whose boxes overlap, found by a
         // sweep along x, and every guide (endless) with everything (MU39:
         // trying every pair took ~90 ms on the starter house)
@@ -1222,6 +1222,15 @@ impl Snapper {
             let mut seen: Vec<(DVec3, f64)> = vec![];
             for sg in segments() {
                 let Some((c, r, ..)) = sg.arc else { continue };
+                // only circles passing near the pointer can touch there:
+                // the rest are passed over before anything costly (an
+                // exploded DXF has thousands of arcs)
+                let (Some(sc), Some(se)) = (project(c), project(c + DVec3::X * r)) else {
+                    continue;
+                };
+                if (sc.distance(cursor) - sc.distance(se)).abs() > aperture() {
+                    continue;
+                }
                 if seen
                     .iter()
                     .any(|(k, q)| k.distance(c) < 1e-9 && (q - r).abs() < 1e-9)
@@ -2000,7 +2009,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
     let k = match kind {
         // Extension and Parallel, drawn as AutoCAD's
         SnapKind::OnTempGuide => {
-            let s = Stroke::new(1.5, MARKER);
+            let s = Stroke::new(1.5, Color32::from_gray(20));
             for i in 0..3 {
                 let x = -6.0 + 4.5 * i as f32;
                 painter.line_segment([at + egui::vec2(x, 0.0), at + egui::vec2(x + 2.0, 0.0)], s);
@@ -2009,7 +2018,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
             return;
         }
         SnapKind::GuideCross => {
-            let s = Stroke::new(1.5, MARKER);
+            let s = Stroke::new(1.5, Color32::from_gray(20));
             painter.line_segment([at + egui::vec2(-5.0, 4.0), at + egui::vec2(1.0, -4.0)], s);
             painter.line_segment([at + egui::vec2(-1.0, 4.0), at + egui::vec2(5.0, -4.0)], s);
             return;
@@ -2017,6 +2026,7 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
         k => k,
     };
     let m = MARKER_PX.swap(5, std::sync::atomic::Ordering::Relaxed);
+    ICON_INK.with(|i| i.set(Some(Color32::from_gray(20))));
     marker(
         painter,
         Snap {
@@ -2027,8 +2037,13 @@ pub fn draw_marker_icon(painter: &Painter, kind: SnapKind, at: Pos2) {
         at,
         None,
     );
+    ICON_INK.with(|i| i.set(None));
     MARKER_PX.store(m, std::sync::atomic::Ordering::Relaxed);
     MARK.with(|c| c.set(keep));
+}
+
+thread_local! {
+    static ICON_INK: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
 }
 
 /// The marker of [`draw`] without its label; its colour, if it drew one.
@@ -2045,6 +2060,8 @@ fn marker(painter: &Painter, snap: Snap, at: Pos2, from: Option<Pos2>) -> Option
         SnapKind::Grid => return None,
         _ => MARKER,
     };
+    // the settings' icons are drawn in black
+    let c = ICON_INK.with(|i| i.get()).unwrap_or(c);
     let s = Stroke::new(2.0, c);
     let r = MARKER_PX.load(std::sync::atomic::Ordering::Relaxed) as f32;
     let v = egui::vec2;
@@ -2579,7 +2596,7 @@ pub struct Guided {
 }
 
 impl Guided {
-    fn plain(snap: Snap, align: Option<Alignment>) -> Self {
+    pub fn plain(snap: Snap, align: Option<Alignment>) -> Self {
         Self {
             snap,
             align,

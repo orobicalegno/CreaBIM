@@ -1,0 +1,8 @@
+# The Rust version Volumen is built and checked with, here and in the CI
+# (both workflows install exactly this). A new Rust adds lints and can stop
+# the build with no change of ours: update it on purpose, in a commit of its
+# own, with every check green.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

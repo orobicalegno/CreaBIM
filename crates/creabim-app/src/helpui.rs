@@ -64,6 +64,9 @@ impl CreaBimApp {
             Item::new("app.report", "Report a problem…")
                 .icon("file-text")
                 .hint("Save one file to attach to a bug report: what Volumen did lately, your settings and, if you like, the project. Nothing is sent anywhere"),
+            Item::new("app.diagnostics", "Performance diagnostics")
+                .icon("log")
+                .hint("A small panel with what each frame costs while you work, and a 30 s recording to save and send. Off by default"),
             Item::new("area.show:log", "Show the log")
                 .icon("log")
                 .hint("The activity log in a view of its own, problems in red"),

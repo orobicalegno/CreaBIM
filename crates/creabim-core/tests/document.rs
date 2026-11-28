@@ -279,3 +279,48 @@ fn kind_name_matches_the_serde_tag() {
         assert_eq!(e.kind.name(), tag);
     }
 }
+
+/// V-01: a step is taken away for good only when it is the one asked for
+/// and the last one, whatever the names of the steps.
+#[test]
+fn discard_step_takes_only_the_step_named_by_its_id_and_only_on_top() {
+    let mut doc = Document::new();
+    let l = level();
+    let lid = l.id;
+    doc.commit(Transaction::new("Move Wall").insert(l)).unwrap();
+    let a = doc.last_step_id().unwrap();
+    let w = wall(lid);
+    doc.commit(Transaction::new("Move Wall").insert(w.clone()))
+        .unwrap();
+    let b = doc.last_step_id().unwrap();
+    assert_ne!(a, b, "two steps with one name, two ids");
+    // not the last: nothing happens
+    assert!(!doc.discard_step(a));
+    assert_eq!(doc.undo_steps().len(), 2);
+    assert!(doc.model().get(w.id).is_some());
+    // the last: it goes, and is not offered to redo
+    assert!(doc.discard_step(b));
+    assert_eq!(doc.last_step_id(), Some(a));
+    assert!(doc.model().get(w.id).is_none());
+    assert!(doc.redo_steps().is_empty());
+    // once undone, a step is no longer there to discard
+    assert!(doc.undo());
+    assert!(!doc.discard_step(a));
+    assert_eq!(doc.redo_steps().len(), 1);
+}
+
+/// V-10: every document, even one opened from the same model, is told
+/// apart from every other.
+#[test]
+fn each_document_has_an_identity_of_its_own() {
+    let m = Model::default();
+    let a = Document::from_model(m.clone());
+    let b = Document::from_model(m);
+    let c = Document::new();
+    assert_ne!(a.id(), b.id());
+    assert_ne!(a.id(), c.id());
+    assert_ne!(b.id(), c.id());
+    let (model, undo, redo) = a.into_parts();
+    let d = Document::from_parts(model, undo, redo).unwrap();
+    assert_ne!(d.id(), b.id());
+}

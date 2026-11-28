@@ -54,6 +54,11 @@ pub struct DetailSettings {
     /// A polar array's count and the angle it is spread over, degrees.
     pub count: u32,
     pub angle: f64,
+    /// TRIM's cutting edges (EXTEND's boundaries), picked first as in
+    /// AutoCAD; none picked, every line cuts.
+    pub cutters: Vec<ElementId>,
+    /// Still picking them (Enter goes on to what to trim).
+    pub choosing_cutters: bool,
 }
 
 /// A change to the project's drafting layers made from Properties.
@@ -67,6 +72,10 @@ pub enum LayerEdit {
     MakeSymbol,
     /// Turn this placed symbol back into linework.
     Explode,
+    /// Delete a layer and its linework.
+    Delete(String),
+    /// Merge a layer into another: its linework moves there.
+    Merge { from: String, into: String },
 }
 
 /// An edit of plain linework against other linework, CAD-style.
@@ -142,6 +151,8 @@ impl Default for DetailSettings {
             step: DVec2::new(1.0, 1.0),
             count: 6,
             angle: 360.0,
+            cutters: vec![],
+            choosing_cutters: false,
         }
     }
 }
@@ -184,6 +195,8 @@ impl DetailSettings {
 
     /// Pick an edit of linework: the next clicks edit instead of drawing.
     pub fn pick_edit(&mut self, edit: DraftEdit) {
+        self.choosing_cutters = matches!(edit, DraftEdit::Trim | DraftEdit::Extend);
+        self.cutters.clear();
         self.edit = Some(edit);
         self.picked = None;
         self.path.clear();
@@ -359,6 +372,108 @@ fn linework(model: &Model, view: ElementId) -> Vec<(Element, DetailItem)> {
         .collect()
 }
 
+/// TRIM or EXTEND over a window (AutoCAD's crossing, quick mode): each
+/// line the box from `a` to `b` crosses is trimmed where it passes through
+/// the box (or extended at its end inside it), as one undo step.
+pub fn fence_edit(
+    doc: &mut Document,
+    view: ElementId,
+    a: DVec2,
+    b: DVec2,
+    state: &mut PlanState,
+) -> Result<(), ModelError> {
+    use creabim_core::draftedit as de;
+    let Some(edit) = state.details.edit else {
+        return Ok(());
+    };
+    let lines = linework(doc.model(), view);
+    let cutters = state.details.cutters.clone();
+    let others = |i: usize| -> Vec<&DetailItem> {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(k, l)| *k != i && (cutters.is_empty() || cutters.contains(&l.0.id)))
+            .map(|(_, l)| &l.1)
+            .collect()
+    };
+    // where the fence line crosses a piece: the first crossing along it
+    let crossing = |d: &DetailItem| -> Option<DVec2> {
+        let (mut path, closed) = d.draft_path()?;
+        if closed {
+            path.push(*path.first()?);
+        }
+        let mut best: Option<(f64, DVec2)> = None;
+        for w in path.windows(2) {
+            let (p, q) = (w[0], w[1]);
+            let (r, s2) = (q - p, b - a);
+            let den = r.perp_dot(s2);
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let t = (a - p).perp_dot(s2) / den;
+            let u = (a - p).perp_dot(r) / den;
+            if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) && best.is_none_or(|x| u < x.0)
+            {
+                best = Some((u, p + r * t));
+            }
+        }
+        best.map(|x| x.1)
+    };
+    let mut tx = Transaction::new(match edit {
+        DraftEdit::Extend => "Extend lines",
+        _ => "Trim lines",
+    });
+    let mut n = 0;
+    for (i, (e, d)) in lines.iter().enumerate() {
+        if cutters.contains(&e.id) {
+            continue;
+        }
+        let Some(at) = crossing(d) else { continue };
+        match edit {
+            DraftEdit::Extend => {
+                if let Some(longer) = de::extend(d, &others(i), at) {
+                    let mut after = e.clone();
+                    after.kind = ElementKind::Detail(longer);
+                    tx = tx.replace(e.clone(), after);
+                    n += 1;
+                }
+            }
+            _ => {
+                if let Some(mut left) = de::trim(d, &others(i), at) {
+                    if left.is_empty() {
+                        tx = tx.remove_cascade(doc.model(), e.id);
+                    } else {
+                        let mut after = e.clone();
+                        after.kind = ElementKind::Detail(left.remove(0));
+                        tx = tx.replace(e.clone(), after);
+                        for rest in left {
+                            tx = tx
+                                .insert(Element::new(rest.kind.label(), ElementKind::Detail(rest)));
+                        }
+                    }
+                    n += 1;
+                }
+            }
+        }
+    }
+    state.status = Some(if n == 0 {
+        "Nothing the fence crosses could be trimmed or extended.".into()
+    } else {
+        format!(
+            "{} {n} lines. Draw another fence, or click a stretch.",
+            if edit == DraftEdit::Extend {
+                "Extended"
+            } else {
+                "Trimmed"
+            }
+        )
+    });
+    if n == 0 {
+        return Ok(());
+    }
+    doc.commit(tx).map(|_| ())
+}
+
 /// A click while editing linework in `view`: `raw` is where the pointer
 /// is, to pick a line by, and `p` that point snapped, for a side or a
 /// centre.
@@ -384,14 +499,38 @@ fn edit_click(
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i)
     };
+    let cutters = state.details.cutters.clone();
     let others = |i: usize| -> Vec<&DetailItem> {
         lines
             .iter()
             .enumerate()
-            .filter(|(k, _)| *k != i)
+            .filter(|(k, l)| *k != i && (cutters.is_empty() || cutters.contains(&l.0.id)))
             .map(|(_, l)| &l.1)
             .collect()
     };
+    // TRIM and EXTEND pick their cutting edges first: a click adds or
+    // takes one away, Enter goes on
+    if state.details.choosing_cutters && matches!(edit, DraftEdit::Trim | DraftEdit::Extend) {
+        let Some(i) = under(raw) else {
+            state.status =
+                Some("Select the cutting edges, then Enter (Enter alone: every line cuts).".into());
+            return Ok(());
+        };
+        let id = lines[i].0.id;
+        let c = &mut state.details.cutters;
+        if let Some(k) = c.iter().position(|x| *x == id) {
+            c.remove(k);
+        } else {
+            c.push(id);
+        }
+        selection.clear();
+        selection.extend(c.clone(), false);
+        state.status = Some(format!(
+            "{} cutting edges. Select more, or Enter to go on.",
+            c.len()
+        ));
+        return Ok(());
+    }
     let changed = |e: &Element, d: DetailItem| {
         let mut after = e.clone();
         after.kind = ElementKind::Detail(d);
@@ -425,6 +564,13 @@ fn edit_click(
                 return Ok(());
             };
             let mut tx = Transaction::new("Trim line");
+            // nothing left (a line from one crossing to the next): it goes,
+            // as in AutoCAD
+            if left.is_empty() {
+                state.status = Some("Trimmed away. Click another stretch.".into());
+                let tx = tx.remove_cascade(doc.model(), lines[i].0.id);
+                return doc.commit(tx);
+            }
             let kept = left.remove(0);
             tx = tx.replace(lines[i].0.clone(), changed(&lines[i].0, kept));
             for d in left {
@@ -873,6 +1019,34 @@ pub fn preview(
     }
 }
 
+/// A hatch's scale and angle, as AutoCAD's: rows in Properties.
+fn hatch_rows(
+    ui: &mut egui::Ui,
+    scale: &mut f64,
+    angle: &mut f64,
+    mut label: &'static str,
+) -> &'static str {
+    crate::props::row(ui, "Hatch scale", |ui| {
+        if ui
+            .add(egui::DragValue::new(scale).speed(0.05).range(0.05..=100.0))
+            .on_hover_text("How many times its usual size the hatch is drawn")
+            .changed()
+        {
+            label = "Hatch scale";
+        }
+    });
+    crate::props::row(ui, "Hatch angle", |ui| {
+        if ui
+            .add(egui::DragValue::new(angle).speed(1.0).suffix("°"))
+            .on_hover_text("How far the hatch is turned, degrees anticlockwise")
+            .changed()
+        {
+            label = "Hatch angle";
+        }
+    });
+    label
+}
+
 /// A component's settings in Properties; returns the edit's name when one
 /// changed. Plain linework also shows the project's drafting `layers`,
 /// and puts a change to them in `layer_edit`.
@@ -930,11 +1104,28 @@ pub fn detail_fields(
     if let DetailKind::Draft { shape, pen } = &mut d.kind {
         // plain linework: its shape is what its points mean
         let name = shape.label();
+        // ByLayer, or one of its own (thin, medium, thick…)
+        let layer_pen = d
+            .layer
+            .as_deref()
+            .and_then(|n| layers.effective(n))
+            .and_then(|l| l.pen);
+        let own = d.own_pen || layer_pen.is_none();
         crate::props::Combo::new("Pen")
-            .selected_text(pen.label())
+            .selected_text(if own {
+                pen.label().to_string()
+            } else {
+                format!("By layer ({})", layer_pen.map_or("", |p| p.label()))
+            })
             .show_ui(ui, |ui| {
+                if layer_pen.is_some() && ui.selectable_label(!own, "By layer").clicked() {
+                    d.own_pen = false;
+                    label = "Line pen";
+                }
                 for p in LinePen::ALL {
-                    if ui.selectable_value(pen, p, p.label()).changed() {
+                    if ui.selectable_label(own && *pen == p, p.label()).clicked() {
+                        *pen = p;
+                        d.own_pen = true;
                         label = "Line pen";
                     }
                 }
@@ -1007,15 +1198,23 @@ pub fn detail_fields(
                         label = "Line fill";
                     }
                     for h in Hatch::ALL {
-                        if h != Hatch::Empty
-                            && ui
+                        if h == Hatch::Empty {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            crate::app::materials::hatch_swatch(ui, h, 18.0);
+                            if ui
                                 .selectable_value(&mut d.fill, Some(h), h.label())
                                 .changed()
-                        {
-                            label = "Line fill";
-                        }
+                            {
+                                label = "Line fill";
+                            }
+                        });
                     }
                 });
+        }
+        if fillable && d.fill.is_some() {
+            label = hatch_rows(ui, &mut d.hatch_scale, &mut d.hatch_angle, label);
         }
         if let DraftShape::Line | DraftShape::Closed = shape {
             let mut closed = *shape == DraftShape::Closed;
@@ -1051,7 +1250,7 @@ pub fn detail_fields(
         }
         // the project's layers, edited here: they are every view's
         if crate::props::subsection(ui, "draft.layers", "Drafting layers", false) {
-            layer_tree(ui, layers, layer_edit);
+            layer_tree(ui, layers, &std::collections::HashMap::new(), layer_edit);
         }
         return label;
     }
@@ -1105,16 +1304,23 @@ pub fn detail_fields(
             });
         }
         DetailKind::Region { hatch } => {
-            egui::ComboBox::from_id_salt("detail.hatch")
-                .icon(crate::props::combo_icon)
-                .selected_text(hatch.label())
-                .show_ui(ui, |ui| {
-                    for h in Hatch::ALL {
-                        if ui.selectable_value(hatch, h, h.label()).changed() {
-                            label = "Detail hatch";
+            ui.horizontal(|ui| {
+                crate::app::materials::hatch_swatch(ui, *hatch, 22.0);
+                egui::ComboBox::from_id_salt("detail.hatch")
+                    .icon(crate::props::combo_icon)
+                    .selected_text(hatch.label())
+                    .show_ui(ui, |ui| {
+                        for h in Hatch::ALL {
+                            ui.horizontal(|ui| {
+                                crate::app::materials::hatch_swatch(ui, h, 18.0);
+                                if ui.selectable_value(hatch, h, h.label()).changed() {
+                                    label = "Detail hatch";
+                                }
+                            });
                         }
-                    }
-                });
+                    });
+            });
+            label = hatch_rows(ui, &mut d.hatch_scale, &mut d.hatch_angle, label);
         }
         _ => {}
     }
@@ -1181,6 +1387,7 @@ pub fn join_fields(ui: &mut egui::Ui, model: &Model, j: &mut JoinRule) -> &'stat
 pub fn layer_tree(
     ui: &mut egui::Ui,
     layers: &creabim_core::DraftLayers,
+    counts: &std::collections::HashMap<String, usize>,
     layer_edit: &mut Option<LayerEdit>,
 ) {
     use creabim_core::{DraftLayer, LineType};
@@ -1201,6 +1408,34 @@ pub fn layer_tree(
     let mut fold_changed = false;
     let tree = layers.tree();
     let mut hide_below: Option<usize> = None;
+    // the layers picked together, kept for the session
+    let chosen_id = egui::Id::new("draft.layers.chosen");
+    let mut chosen: Vec<String> = ui.data(|d| d.get_temp(chosen_id)).unwrap_or_default();
+    chosen.retain(|n| layers.get(n).is_some());
+    let mut chosen_changed = false;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button("Pick all")
+            .on_hover_text("Pick every layer: a change to one is made to all")
+            .clicked()
+        {
+            chosen = layers.layers.iter().map(|l| l.name.clone()).collect();
+            chosen_changed = true;
+        }
+        if ui.small_button("Pick none").clicked() {
+            chosen.clear();
+            chosen_changed = true;
+        }
+        if !chosen.is_empty() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} picked: a change to one is made to all",
+                    chosen.len()
+                ))
+                .weak(),
+            );
+        }
+    });
 
     for (i, depth) in tree {
         if let Some(d) = hide_below {
@@ -1219,7 +1454,22 @@ pub fn layer_tree(
             hide_below = Some(depth);
         }
         let parent_hidden = layers.chain(&name).iter().skip(1).any(|l| l.hidden);
+        let before = table.layers.iter().find(|l| l.name == name).cloned();
         ui.horizontal(|ui| {
+            // picked with others: a change to one is made to all of them
+            let picked = chosen.contains(&name);
+            if ui
+                .selectable_label(picked, "Pick")
+                .on_hover_text("Pick this layer with others: what you change on one picked layer (shown, colour, line type, lock, pen) is changed on all of them")
+                .clicked()
+            {
+                if !picked {
+                    chosen.push(name.clone());
+                } else {
+                    chosen.retain(|n| *n != name);
+                }
+                chosen_changed = true;
+            }
             ui.add_space(14.0 * depth as f32);
             // fold the branch
             if has_children {
@@ -1321,17 +1571,124 @@ pub fn layer_tree(
             })
             .response
             .on_hover_text("Put this layer under another one, or make it a top-level layer");
+            // locked: it shows and snaps, it can't be picked
+            let mut locked = l.locked;
+            if ui
+                .toggle_value(&mut locked, if l.locked { "Locked" } else { "Lock" })
+                .on_hover_text("A locked layer's linework shows and snaps but can't be selected or changed")
+                .changed()
+            {
+                l.locked = locked;
+                changed = true;
+            }
+            // its pen: thin, medium or thick, for linework By layer
+            egui::ComboBox::from_id_salt(("draft.layer.pen", &name))
+                .icon(crate::props::combo_icon)
+                .width(70.0)
+                .selected_text(match l.pen {
+                    Some(creabim_core::LinePen::Light) => "Thin",
+                    Some(creabim_core::LinePen::Medium) => "Medium",
+                    Some(creabim_core::LinePen::Heavy) => "Thick",
+                    Some(p) => p.label(),
+                    None => "Pen",
+                })
+                .show_ui(ui, |ui| {
+                    for (p, t) in [
+                        (None, "As each line"),
+                        (Some(creabim_core::LinePen::Light), "Thin"),
+                        (Some(creabim_core::LinePen::Medium), "Medium"),
+                        (Some(creabim_core::LinePen::Heavy), "Thick"),
+                    ] {
+                        changed |= ui.selectable_value(&mut l.pen, p, t).changed();
+                    }
+                })
+                .response
+                .on_hover_text("The pen of its linework, unless a line has its own");
+            ui.menu_button("Merge…", |ui| {
+                ui.label(egui::RichText::new("Move its linework onto:").weak());
+                for (k, d) in layers.tree() {
+                    let other = &layers.layers[k].name;
+                    if *other == name {
+                        continue;
+                    }
+                    if ui.button(format!("{}{}", "    ".repeat(d), other)).clicked() {
+                        *layer_edit = Some(LayerEdit::Merge {
+                            from: name.clone(),
+                            into: other.clone(),
+                        });
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Merge this layer into another: its linework moves there, and it goes");
+            let n = counts.get(&name).copied().unwrap_or(0);
             if ui
                 .small_button("x")
-                .on_hover_text("Remove the layer. Its linework stays, on no layer; its sub-layers move up.")
+                .on_hover_text("Delete the layer. With linework on it, you are asked first: its linework goes too.")
                 .clicked()
             {
-                remove = Some(name.clone());
+                if n == 0 {
+                    remove = Some(name.clone());
+                } else {
+                    ui.data_mut(|m| m.insert_temp(egui::Id::new("draft.layer.ask"), name.clone()));
+                }
             }
         });
+        // the change made to a picked layer, made to the others picked
+        if chosen.contains(&name) {
+            let after = table.layers.iter().find(|l| l.name == name).cloned();
+            if let (Some(b), Some(a)) = (before, after) {
+                if b != a {
+                    for l in table.layers.iter_mut() {
+                        if l.name == name || !chosen.contains(&l.name) {
+                            continue;
+                        }
+                        if a.hidden != b.hidden {
+                            l.hidden = a.hidden;
+                        }
+                        if a.color != b.color {
+                            l.color = a.color;
+                        }
+                        if a.linetype != b.linetype {
+                            l.linetype = a.linetype;
+                        }
+                        if a.locked != b.locked {
+                            l.locked = a.locked;
+                        }
+                        if a.pen != b.pen {
+                            l.pen = a.pen;
+                        }
+                    }
+                }
+            }
+        }
+        // deleting a layer with linework on it: asked first
+        let ask: Option<String> = ui.data(|m| m.get_temp(egui::Id::new("draft.layer.ask")));
+        if ask.as_deref() == Some(name.as_str()) {
+            let n = counts.get(&name).copied().unwrap_or(0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Delete \"{name}\" and its {n} pieces of linework?"
+                    ))
+                    .color(ui.visuals().warn_fg_color),
+                );
+                if ui.button("Delete").clicked() {
+                    *layer_edit = Some(LayerEdit::Delete(name.clone()));
+                    ui.data_mut(|m| m.remove::<String>(egui::Id::new("draft.layer.ask")));
+                }
+                if ui.button("Cancel").clicked() {
+                    ui.data_mut(|m| m.remove::<String>(egui::Id::new("draft.layer.ask")));
+                }
+            });
+        }
     }
     if fold_changed {
         ui.data_mut(|d| d.insert_temp(folded_id, folded));
+    }
+    if chosen_changed {
+        ui.data_mut(|d| d.insert_temp(chosen_id, chosen));
     }
     if let Some(name) = remove {
         table.remove(&name);
@@ -1367,6 +1724,57 @@ pub fn layer_tree(
 mod tests {
     use super::*;
     use crate::planview::Tool;
+
+    #[test]
+    fn trim_cuts_back_to_the_edges_picked_first_and_a_fence_trims_what_it_crosses() {
+        let (mut doc, v) = doc_with_section();
+        let line = |a: DVec2, b: DVec2| {
+            Element::new(
+                "Line",
+                ElementKind::Detail(DetailItem::new(
+                    v,
+                    creabim_core::DetailKind::draft(creabim_core::DraftShape::Line),
+                    vec![a, b],
+                )),
+            )
+        };
+        let p = DVec2::new;
+        // a cutting edge across, two edges more, and two lines through them
+        let cut = line(p(0.0, 1.0), p(4.0, 1.0));
+        let other = line(p(0.0, 2.0), p(4.0, 2.0));
+        let a = line(p(1.0, 0.0), p(1.0, 3.0));
+        let b = line(p(3.0, 0.0), p(3.0, 3.0));
+        let (cid, aid, bid) = (cut.id, a.id, b.id);
+        doc.commit(
+            Transaction::new("setup")
+                .insert(cut)
+                .insert(other)
+                .insert(a)
+                .insert(b),
+        )
+        .unwrap();
+        let mut state = PlanState::default();
+        state.tool = Tool::Detail;
+        state.details.pick_edit(DraftEdit::Trim);
+        let mut sel = Selection::default();
+        // the cutting edge first
+        detail_click(&mut doc, v, p(0.5, 1.0), p(0.5, 1.0), &mut state, &mut sel).unwrap();
+        assert_eq!(state.details.cutters, vec![cid]);
+        state.details.choosing_cutters = false;
+        // a click below it on a: trimmed back to the cutting edge only (the
+        // other edge at 2 doesn't count)
+        detail_click(&mut doc, v, p(1.0, 0.5), p(1.0, 0.5), &mut state, &mut sel).unwrap();
+        fn pts(doc: &Document, id: ElementId) -> Vec<DVec2> {
+            match &doc.model().get(id).unwrap().kind {
+                ElementKind::Detail(d) => d.points.clone(),
+                _ => panic!(),
+            }
+        }
+        assert_eq!(pts(&doc, aid), vec![p(1.0, 1.0), p(1.0, 3.0)]);
+        // a fence across b below the edge
+        fence_edit(&mut doc, v, p(2.5, 0.5), p(3.5, 0.5), &mut state).unwrap();
+        assert_eq!(pts(&doc, bid), vec![p(3.0, 1.0), p(3.0, 3.0)]);
+    }
 
     fn doc_with_section() -> (Document, ElementId) {
         let mut doc = Document::new();
@@ -1574,8 +1982,10 @@ mod tests {
             }
         }
         assert_eq!(lines(&doc).len(), 3);
-        // trim the floor line between the uprights: two pieces of it are left
+        // trim the floor line between the uprights (Enter at once: every
+        // line cuts): two pieces of it are left
         state.details.pick_edit(DraftEdit::Trim);
+        state.details.choosing_cutters = false;
         let at = p(2.0, 0.0);
         detail_click(&mut doc, section, at, at, &mut state, &mut sel).unwrap();
         assert_eq!(lines(&doc).len(), 4);

@@ -1,0 +1,300 @@
+diff --git a/crates/creabim-app/src/gesture_tests.rs b/crates/creabim-app/src/gesture_tests.rs
+index 23b4eaf..fd75948 100644
+--- a/crates/creabim-app/src/gesture_tests.rs
++++ b/crates/creabim-app/src/gesture_tests.rs
+@@ -380,3 +380,48 @@ mod g1_wheel {
+         assert_eq!(pane.camera(), before);
+     }
+ }
++
++// ===== PROVA ESPLORATIVA selezione (analisi; non nel progetto) =====
++#[test]
++fn probe_sel_click_on_door_window_tag() {
++    let m = creabim_core::starter::starter_house();
++    let level = m.iter().find_map(|e| match &e.kind { ElementKind::View(v) if e.name == "Ground Floor plan" => match v.kind { creabim_core::ViewKind::Plan { level, .. } => Some(level), _ => None }, _ => None }).unwrap();
++    let mut probes: Vec<(String, DVec2)> = vec![];
++    for e in m.iter() {
++        if let ElementKind::Opening(o) = &e.kind {
++            if let Some(ElementKind::Wall(w)) = m.get(o.host).map(|h| &h.kind) {
++                if w.level != level { continue; }
++                let dir = (w.end - w.start).normalize();
++                let c = w.start + dir * (o.offset + o.width / 2.0);
++                probes.push((format!("{:?} '{}' (centro, asse muro)", o.kind, e.name), c));
++                probes.push((format!("{:?} '{}' (bordo telaio)", o.kind, e.name), w.start + dir * (o.offset + 0.03)));
++            }
++        }
++        if probes.len() > 8 { break; }
++    }
++    for (what, p) in probes {
++        let mut pane = Pane::open("Ground Floor plan", p, 150.0);
++        let (center, scale) = pane.camera();
++        let at = Xf { rect: pane.rect, center, scale, rot: 0.0 }.to_screen(p);
++        pane.hover(at);
++        let press = |pressed| Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
++        pane.frame(vec![press(true)]);
++        pane.frame(vec![press(false)]);
++        pane.frame(vec![]);
++        let picked: Vec<String> = pane.sel.all().into_iter().filter_map(|id| pane.doc.model().get(id).map(|e| format!("{}:{}", match &e.kind { ElementKind::Wall(_) => "Muro", ElementKind::Opening(_) => "Apertura", ElementKind::Tag(_) => "Etichetta", ElementKind::Dimension(_) => "Quota", ElementKind::Grid(_) => "Griglia", _ => "Altro" }, e.name))).collect();
++        println!("SEL clic su {what}: preso {picked:?}");
++    }
++}
++#[test]
++fn probe_sel_windows_detail() {
++    let m = creabim_core::starter::starter_house();
++    let (vid, level, cut) = m.iter().find_map(|e| match &e.kind { ElementKind::View(v) if e.name == "Ground Floor plan" => match v.kind { creabim_core::ViewKind::Plan { level, cut_height, .. } => Some((e.id, level, cut_height)), _ => None }, _ => None }).unwrap();
++    let pv = creabim_geom::plan::plan_view(&m, level, cut);
++    for e in m.iter() {
++        if let ElementKind::Opening(o) = &e.kind {
++            let drawn = pv.items.iter().filter(|it| it.id() == e.id).count();
++            println!("OPN '{}' {:?} sill={:.2} h={:.2} w={:.2} offset={:.2} host={:?} elementi disegnati in pianta={drawn} (taglio {cut:.2})", e.name, o.kind, o.sill, o.height, o.width, o.offset, m.get(o.host).map(|h| h.name.clone()));
++        }
++    }
++    let _ = vid;
++}
+diff --git a/crates/creabim-app/src/undo_tests.rs b/crates/creabim-app/src/undo_tests.rs
+index e5e7536..2f06c03 100644
+--- a/crates/creabim-app/src/undo_tests.rs
++++ b/crates/creabim-app/src/undo_tests.rs
+@@ -1408,3 +1408,242 @@ fn c2_the_walls_left_meet_as_they_did_before_the_last_one() {
+         "the plan, layers and joins"
+     );
+ }
++
++// =====================================================================
++// PROVE ESPLORATIVE (analisi retrospettiva). Non fanno parte del progetto.
++// =====================================================================
++
++fn wall_of(app: &CreaBimApp) -> creabim_core::Element {
++    let id = first(app, |k| matches!(k, ElementKind::Wall(_)));
++    app.doc.model().get(id).unwrap().clone()
++}
++fn shifted(e: &creabim_core::Element, dx: f64) -> creabim_core::Element {
++    let mut e = e.clone();
++    if let ElementKind::Wall(w) = &mut e.kind {
++        w.start.x += dx;
++        w.end.x += dx;
++    }
++    e
++}
++
++/// Q8: Ctrl+Z durante uno spostamento dal vivo, dopo uno spostamento
++/// confermato con lo stesso nome: il primo resta?
++#[test]
++fn probe_q8_undo_during_a_live_move_after_a_confirmed_move() {
++    let mut app = house();
++    let ctx = egui::Context::default();
++    let w0 = wall_of(&app);
++    // spostamento A, confermato (LiveEdit aggiornato e poi lasciato)
++    let mut a = crate::modal::LiveEdit::new("Move Wall", vec![w0.clone()]);
++    a.update(&mut app.doc, vec![shifted(&w0, 1.0)]).unwrap();
++    drop(a);
++    let after_a = snap(&app);
++    let steps_a = app.doc.undo_steps().len();
++    // spostamento B, dal vivo
++    let w1 = app.doc.model().get(w0.id).unwrap().clone();
++    let mut b = crate::modal::LiveEdit::new("Move Wall", vec![w1.clone()]);
++    b.update(&mut app.doc, vec![shifted(&w1, 0.5)]).unwrap();
++    // Ctrl+Z nel mezzo
++    app.run_command(&ctx, crate::commands::Command::Undo, None);
++    let after_undo = snap(&app);
++    // il puntatore si muove ancora: il fotogramma successivo
++    b.update(&mut app.doc, vec![shifted(&w1, 0.7)]).unwrap();
++    // poi Esc: lo spostamento B viene annullato
++    b.cancel(&mut app.doc);
++    let now = snap(&app);
++    println!(
++        "Q8: passi dopo A={steps_a}, ora={}; redo={}; A dopo Ctrl+Z presente={}; ora uguale a dopo-A={}; ora uguale a dopo-Ctrl+Z={}",
++        app.doc.undo_steps().len(),
++        app.doc.redo_steps().len(),
++        after_undo == after_a,
++        now == after_a,
++        now == after_undo
++    );
++    let x = |m: &Model| match &m.get(w0.id).unwrap().kind { ElementKind::Wall(w) => w.start.x - match &w0.kind { ElementKind::Wall(w) => w.start.x, _ => 0.0 }, _ => 0.0 };
++    println!("Q8: spostamento del muro rispetto all'origine: dopo A={:.2}, dopo Ctrl+Z={:.2}, ora={:.2}", x(&after_a), x(&after_undo), x(&now));
++    let labels: Vec<_> = app.doc.undo_steps().iter().rev().take(3).map(|s| s.tx.label.clone()).collect();
++    println!("Q8: ultimi passi: {labels:?}");
++}
++
++/// Q1: Cancel nella finestra Impostazioni dopo che la finestra ha cambiato
++/// tema e stile delle maniglie: valore memorizzato e stato applicato
++/// coincidono?
++#[test]
++fn probe_q1_settings_cancel_and_applied_state() {
++    let w = WINDOWS.iter().find(|w| w.key == "settings").unwrap();
++    let mut r = Run::new();
++    let theme0 = r.app.shell.theme;
++    let grips0 = r.app.shell.settings.grips;
++    r.open(w);
++    let ctx = r.ctx.clone();
++    let other_theme = theme0.next();
++    r.app.in_dialog("settings", |a| {
++        a.set_theme(&ctx, other_theme);
++        let g = crate::handles::GripStyle::ALL.iter().copied().find(|g| *g != grips0).unwrap();
++        a.shell.settings.grips = g;
++        crate::handles::set_grip_style(g);
++    });
++    r.close(w, false);
++    println!(
++        "Q1: tema applicato={:?} memorizzato={:?} (all'apertura {:?}); maniglie applicate={:?} memorizzate={:?} (all'apertura {:?})",
++        r.app.shell.theme, r.app.shell.settings.theme, theme0, crate::handles::grip_style(), r.app.shell.settings.grips, grips0
++    );
++}
++
++/// Q2: Ripristina mentre il primo punto di un muro e' in attesa.
++#[test]
++fn probe_q2_redo_with_a_wall_part_way() {
++    let (mut app, ctx, mut t, _before) = drawing_with(crate::planview::Tool::Wall);
++    // annulla il lavoro precedente: c'e' qualcosa da ripristinare
++    app.run_command(&ctx, crate::commands::Command::Undo, None);
++    let undone = snap(&app);
++    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(400.0, 380.0));
++    let pending = app.plan.pending;
++    app.run_command(&ctx, crate::commands::Command::Redo, None);
++    println!(
++        "Q2: punto in attesa prima={:?} dopo Ctrl+Y={:?}; progetto cambiato da Ctrl+Y={}; stato={}",
++        pending, app.plan.pending, snap(&app) != undone, app.status
++    );
++}
++
++/// Q4: Canc, Annulla, Ripristina e la selezione.
++#[test]
++fn probe_q4_delete_undo_redo_selection() {
++    let mut app = house();
++    let ctx = egui::Context::default();
++    let w = first(&app, |k| matches!(k, ElementKind::Wall(_)));
++    let before = snap(&app);
++    app.selection.only(w);
++    app.run_command(&ctx, crate::commands::Command::Delete, None);
++    let deleted = snap(&app);
++    let sel_after_delete = app.selection.all();
++    app.run_command(&ctx, crate::commands::Command::Undo, None);
++    let back_equal = snap(&app) == before;
++    let sel_after_undo = app.selection.all();
++    app.run_command(&ctx, crate::commands::Command::Redo, None);
++    let redo_equal = snap(&app) == deleted;
++    let sel_after_redo = app.selection.all();
++    let stale = sel_after_redo.iter().filter(|id| app.doc.model().get(**id).is_none()).count();
++    println!(
++        "Q4: removed={} sel dopo Canc={:?} undo identico={back_equal} sel dopo undo={:?} redo identico={redo_equal} sel dopo redo={:?} selezionati inesistenti={stale}",
++        before.len() - deleted.len(), sel_after_delete, sel_after_undo, sel_after_redo
++    );
++}
++
++#[test]
++fn probe_q4b_delete_then_undo_detail() {
++    let mut app = house();
++    let ctx = egui::Context::default();
++    let w = first(&app, |k| matches!(k, ElementKind::Wall(_)));
++    let before = snap(&app);
++    app.selection.only(w);
++    app.run_command(&ctx, crate::commands::Command::Delete, None);
++    println!("Q4b: stato dopo Canc: {}", app.status);
++    println!("Q4b: ultimo passo: {:?} ops={}", app.doc.undo_steps().last().map(|s| s.tx.label.clone()), app.doc.undo_steps().last().map_or(0, |s| s.tx.ops.len()));
++    let removed: Vec<_> = before.iter().filter(|e| app.doc.model().get(e.id).is_none()).map(|e| format!("{}:{}", format!("{:?}", std::mem::discriminant(&e.kind)), e.name)).collect();
++    println!("Q4b: tolti {}: {:?}", removed.len(), &removed[..removed.len().min(12)]);
++    app.run_command(&ctx, crate::commands::Command::Undo, None);
++    println!("Q4b: stato dopo Annulla: {}", app.status);
++    same(app.doc.model(), &before, "Q4b dopo Annulla");
++}
++
++/// Q8b: lo stesso nel flusso reale: Sposta, punto base, punto finale;
++/// di nuovo Sposta, punto base, puntatore che si muove, Ctrl+Z, puntatore,
++/// Esc.
++#[test]
++fn probe_q8b_real_move_flow() {
++    let (mut app, ctx, mut t, _) = drawing_with(crate::planview::Tool::Select);
++    let w = first(&app, |k| matches!(k, ElementKind::Wall(_)));
++    let mv = |app: &mut CreaBimApp, t: &mut f64, p: egui::Pos2| plan_frame(app, &ctx, t, vec![egui::Event::PointerMoved(p)]);
++    let wx = |app: &CreaBimApp| match &app.doc.model().get(w).unwrap().kind { ElementKind::Wall(w) => w.start, _ => DVec2::ZERO };
++    let x0 = wx(&app);
++    let s0 = app.doc.undo_steps().len();
++    app.selection.only(w);
++    app.run_command(&ctx, crate::commands::Command::Move, None);
++    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 400.0));
++    mv(&mut app, &mut t, egui::Pos2::new(540.0, 400.0));
++    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(560.0, 400.0));
++    let after_a = snap(&app);
++    let xa = wx(&app);
++    let labels = |app: &CreaBimApp| app.doc.undo_steps().iter().skip(s0).map(|s| s.tx.label.clone()).collect::<Vec<_>>();
++    println!("Q8b: dopo A: muro {:?} -> {:?}; passi nuovi {:?}; modal={}; stato={}", x0, xa, labels(&app), app.plan.modal.is_some(), app.status);
++    app.selection.only(w);
++    app.run_command(&ctx, crate::commands::Command::Move, None);
++    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 450.0));
++    mv(&mut app, &mut t, egui::Pos2::new(520.0, 450.0));
++    mv(&mut app, &mut t, egui::Pos2::new(525.0, 450.0));
++    println!("Q8b: B dal vivo: muro {:?}; passi {:?}; modal={}", wx(&app), labels(&app), app.plan.modal.is_some());
++    app.run_command(&ctx, crate::commands::Command::Undo, None);
++    println!("Q8b: dopo Ctrl+Z: muro {:?}; passi {:?}; redo={}; stato={}", wx(&app), labels(&app), app.doc.redo_steps().len(), app.status);
++    mv(&mut app, &mut t, egui::Pos2::new(530.0, 450.0));
++    mv(&mut app, &mut t, egui::Pos2::new(535.0, 450.0));
++    println!("Q8b: puntatore ancora: muro {:?}; passi {:?}; modal={}", wx(&app), labels(&app), app.plan.modal.is_some());
++    let esc = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
++    plan_frame(&mut app, &ctx, &mut t, vec![esc]);
++    plan_frame(&mut app, &ctx, &mut t, vec![]);
++    println!("Q8b: dopo Esc: muro {:?}; passi {:?}; redo={}; modal={}; uguale a dopo-A={}", wx(&app), labels(&app), app.doc.redo_steps().len(), app.plan.modal.is_some(), snap(&app) == after_a);
++    while app.doc.undo_steps().len() > s0 { app.doc.undo(); }
++    println!("Q8b: annullando tutto fino a prima di A: muro {:?} (all'inizio {:?})", wx(&app), x0);
++}
++
++/// Q9: cambio di progetto (Ctrl+Tab / apertura) con uno spostamento dal
++/// vivo in corso nel progetto A, e nel progetto B uno spostamento
++/// confermato di un muro con lo stesso nome (es. una copia "Salva con nome").
++#[test]
++fn probe_q9_switch_project_during_live_move() {
++    let (mut app, ctx, mut t, _) = drawing_with(crate::planview::Tool::Select);
++    app.multi = true;
++    // progetto B: una copia della casa, con un muro spostato (passo "Move GF South")
++    let mut b = house();
++    let ctxb = egui::Context::default();
++    let _ = ctxb;
++    let wb = first(&b, |k| matches!(k, ElementKind::Wall(_)));
++    let ob = b.doc.model().get(wb).unwrap().clone();
++    let mut nb = ob.clone();
++    if let ElementKind::Wall(w) = &mut nb.kind { w.start.x += 0.5; w.end.x += 0.5; }
++    let label = format!("Move {}", ob.name);
++    b.doc.commit(creabim_core::Transaction::new(label.clone()).replace(ob, nb)).unwrap();
++    let b_doc = std::mem::replace(&mut b.doc, creabim_core::Document::default());
++    // A: Sposta dal vivo
++    let w = first(&app, |k| matches!(k, ElementKind::Wall(_)));
++    app.selection.only(w);
++    app.run_command(&ctx, crate::commands::Command::Move, None);
++    click_plan(&mut app, &ctx, &mut t, egui::Pos2::new(500.0, 400.0));
++    plan_frame(&mut app, &ctx, &mut t, vec![egui::Event::PointerMoved(egui::Pos2::new(530.0, 400.0))]);
++    println!("Q9: A modal={} passi A={:?}", app.plan.modal.is_some(), app.doc.undo_label());
++    // si apre / si passa al progetto B (stessi passi di load_model + documento con la sua cronologia)
++    app.keep_open();
++    app.doc = b_doc;
++    let b_steps = app.doc.undo_steps().len();
++    let b_label = app.doc.undo_label().map(str::to_owned);
++    println!("Q9: ora B: passi={b_steps} ultimo={b_label:?}; modal ancora attivo={}", app.plan.modal.is_some());
++    // il puntatore si muove, poi Esc
++    plan_frame(&mut app, &ctx, &mut t, vec![egui::Event::PointerMoved(egui::Pos2::new(540.0, 400.0))]);
++    let esc = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
++    plan_frame(&mut app, &ctx, &mut t, vec![esc]);
++    if let Some(mut m) = app.plan.modal.take() { m.discard(&mut app.doc); }
++    println!("Q9: B dopo: passi={} ultimo={:?} (prima {b_steps} {b_label:?}) redo={}", app.doc.undo_steps().len(), app.doc.undo_label(), app.doc.redo_steps().len());
++}
++
++/// Q10: import DXF lontano e vicino: dove finisce, in quale vista, si annulla?
++#[test]
++fn probe_q10_dxf_import() {
++    for (label, x0) in [("lontano", 500000.0), ("vicino", 1000.0)] {
++        let mut app = house();
++        let ctx = egui::Context::default();
++        let _ = &ctx;
++        let gf = app.doc.model().iter().find(|e| e.name == "Ground Floor plan").map(|e| e.id).unwrap();
++        let ff = app.doc.model().iter().find(|e| e.name == "First Floor plan").map(|e| e.id).unwrap();
++        app.active_view = Some(ff);
++        let path = std::env::temp_dir().join(format!("probe-{label}-{}.dxf", std::process::id()));
++        let text = format!("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n{x0}\n20\n300000\n11\n{}\n21\n300000\n0\nENDSEC\n0\nEOF\n", x0 + 5000.0);
++        std::fs::write(&path, text).unwrap();
++        let before = snap(&app);
++        app.import_dxf(&path.to_string_lossy());
++        let added: Vec<_> = app.doc.model().iter().filter(|e| before.get(e.id).is_none()).map(|e| format!("{} {:?}", e.name, e.kind).chars().take(260).collect::<String>()).collect();
++        println!("DXF {label}: vista attiva prima First Floor; dopo={:?} (GF={:?}, FF={:?}); aggiunti {added:?}; stato: {}", app.active_view.and_then(|v| app.doc.model().get(v)).map(|e| e.name.clone()), gf, ff, app.status);
++        app.run_command(&ctx, crate::commands::Command::Undo, None);
++        println!("DXF {label}: dopo Annulla progetto identico a prima = {}", snap(&app) == before);
++        let _ = std::fs::remove_file(&path);
++    }
++}
