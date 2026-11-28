@@ -31,6 +31,9 @@ pub(crate) mod appmenu;
 mod areasui;
 #[path = "assemblies.rs"]
 mod assemblies;
+#[cfg(test)]
+#[path = "bench_tests.rs"]
+mod bench_tests;
 #[path = "cmdline.rs"]
 pub(crate) mod cmdline;
 #[path = "cmdmore.rs"]

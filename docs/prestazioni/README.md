@@ -89,6 +89,49 @@ Macchina di riferimento:
 - monitor BenQ PD2700U, 3840×2160 via HDMI, 60 Hz, HDR spento;
 - mouse verticale CSL / WD Plus GmbH 303887.
 
+## Benchmark permanenti
+
+`crates/creabim-app/src/bench_tests.rs` guida il vero riquadro della pianta
+(`show_plan`) con eventi reali di puntatore, fotogramma per fotogramma.
+Scenari:
+
+- Sposta da 1 a 10.000 linee: in un progetto che contiene solo quelle
+  (selezione = progetto) e in uno con 10.000 linee (conta il resto del
+  progetto), con snap spenti e accesi;
+- Sposta un muro e i muri del piano terra;
+- Ruota, Scala, Copia (Duplica);
+- trascinamento di un muro;
+- elastico del muro e della polilinea;
+- pan, zoom, selezione a finestra;
+- costruzione della scena 3D (solo CPU).
+
+Regole dei banchi:
+
+- **Prima di misurare, ogni caso verifica di fare quello che dichiara:**
+  comando attivo, fase di inseguimento, dimensione esatta della selezione,
+  elementi effettivamente spostati, trascinamento in corso. Il test
+  ordinario `bench_tests::benches_do_what_they_say` ne esegue una versione
+  breve a ogni `cargo test`, così un banco rotto se ne accorge la CI.
+- **Esecuzione:** 3 fotogrammi di riscaldamento, poi 3 ripetizioni (meno
+  fotogrammi per i casi lenti, circa 20 s al massimo per caso).
+- **Tempi:** solo CPU (interfaccia e triangolazione); GPU, presentazione e
+  schermo non sono compresi. Per quelli c'è la diagnostica nell'app.
+- **Nessuna soglia di tempo nella CI.** I tempi variano troppo da una
+  macchina all'altra: i confronti si fanno prima e dopo, sulla stessa
+  macchina.
+
+```bash
+# tutti i banchi, build ottimizzata, CSV in docs/prestazioni/misure/
+bash docs/prestazioni/esegui-banchi.sh
+# solo Sposta in 2D, a 4K con scala 150%
+bash docs/prestazioni/esegui-banchi.sh bench_move_2d_lines 3840x2160x1.5
+```
+
+Misura di riferimento: [misure/20261128-base-6f6f94f-macchina-sviluppo.csv](misure/20261128-base-6f6f94f-macchina-sviluppo.csv).
+È il codice di 6f6f94f con i banchi aggiunti, sulla macchina di sviluppo
+(4 thread virtuali, senza GPU). Va confrontata solo con misure fatte sulla
+stessa macchina.
+
 ## Interventi proposti (nessuno ancora autorizzato)
 
 O-10 (esclusione degli snap una volta sola), O-1 (niente lavoro col mouse
