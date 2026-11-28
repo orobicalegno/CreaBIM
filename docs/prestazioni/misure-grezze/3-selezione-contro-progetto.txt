@@ -1,0 +1,17 @@
+test app::bench_tests::bench_model_clone_and_print ... BENCH impronta del disegno (1643 elementi grafici): 0.008 ms
+BENCH casa + 0 linee (640 elementi): copia del modello 0.48 ms; elementi disegnati 1643
+BENCH impronta del disegno (11643 elementi grafici): 0.082 ms
+BENCH casa + 10000 linee (10640 elementi): copia del modello 2.47 ms; elementi disegnati 11643
+ok
+test app::bench_tests::bench_selected_vs_rest ... BENCH 10.000 linee, sposta     1, snap no frames= 40 ui mediana= 143.29 p95= 180.10 max= 190.85 | tess media=  1.42 | totale mediana= 144.99 p95= 181.65 | vertici=116591
+BENCH 10.000 linee, sposta    10, snap no frames= 40 ui mediana= 148.58 p95= 170.72 max= 189.68 | tess media=  1.59 | totale mediana= 150.27 p95= 172.90 | vertici=116591
+BENCH 10.000 linee, sposta   100, snap no frames= 40 ui mediana= 156.06 p95= 195.92 max= 270.68 | tess media=  1.42 | totale mediana= 157.22 p95= 197.42 | vertici=116591
+BENCH 10.000 linee, sposta  1000, snap no frames= 40 ui mediana= 352.06 p95= 431.59 max= 444.04 | tess media=  1.83 | totale mediana= 354.12 p95= 433.03 | vertici=116591
+BENCH 10.000 linee, sposta 10000, snap no frames= 40 ui mediana=2168.99 p95=2485.93 max=2537.12 | tess media=  1.59 | totale mediana=2170.70 p95=2487.40 | vertici=116603
+BENCH 10.000 linee, sposta     1, snap si frames= 40 ui mediana= 119.46 p95= 158.84 max= 178.52 | tess media=  1.62 | totale mediana= 121.06 p95= 160.76 | vertici=116759
+BENCH 10.000 linee, sposta    10, snap si frames= 40 ui mediana= 142.18 p95= 179.51 max= 234.11 | tess media=  1.65 | totale mediana= 143.93 p95= 181.54 | vertici=116759
+BENCH 10.000 linee, sposta   100, snap si frames= 40 ui mediana= 172.07 p95= 191.97 max= 211.15 | tess media=  1.46 | totale mediana= 173.42 p95= 193.99 | vertici=116759
+BENCH 10.000 linee, sposta  1000, snap si frames= 40 ui mediana= 377.38 p95= 459.82 max= 487.65 | tess media=  1.82 | totale mediana= 379.42 p95= 461.96 | vertici=116759
+BENCH 10.000 linee, sposta 10000, snap si frames= 40 ui mediana=2342.56 p95=2523.00 max=2583.36 | tess media=  1.56 | totale mediana=2344.21 p95=2525.01 | vertici=116913
+ok
+

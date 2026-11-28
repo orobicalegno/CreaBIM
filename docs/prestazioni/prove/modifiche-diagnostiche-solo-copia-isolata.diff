@@ -1,0 +1,215 @@
+diff --git a/crates/creabim-app/src/app.rs b/crates/creabim-app/src/app.rs
+index b9e1835..9845e46 100644
+--- a/crates/creabim-app/src/app.rs
++++ b/crates/creabim-app/src/app.rs
+@@ -14047,3 +14047,6 @@ mod sun_tests {
+         assert!(d[0] > 0.7 && d[1].abs() < 1e-6);
+     }
+ }
++#[cfg(test)]
++#[path = "bench_tests.rs"]
++mod bench_tests;
+diff --git a/crates/creabim-app/src/modal.rs b/crates/creabim-app/src/modal.rs
+index 17bcb96..48ad4ec 100644
+--- a/crates/creabim-app/src/modal.rs
++++ b/crates/creabim-app/src/modal.rs
+@@ -76,6 +76,7 @@ impl LiveEdit {
+     /// no longer there (its preview taken back, or its elements changed
+     /// by something else).
+     pub fn update(&mut self, doc: &mut Document, changed: Vec<Element>) -> Result<(), ModelError> {
++        let _pd = crate::app::Perf::new("DIAG LiveEdit::update");
+         let Some(first) = self.originals.first().map(|e| e.id) else {
+             return Ok(());
+         };
+@@ -922,6 +923,16 @@ impl Modal {
+             // still on the original, so nothing snaps to it moving (MU26)
+             Stage::Follow if self.duplicated => vec![],
+             Stage::Follow => {
++                // DIAGNOSTICA (solo copia isolata): calcolato una volta per spostamento
++                if std::env::var_os("DIAG_EXCL_ONCE").is_some() {
++                    thread_local! { static C: std::cell::RefCell<Option<(Vec<ElementId>, Vec<ElementId>)>> = Default::default(); }
++                    let key = self.ids();
++                    if let Some(v) = C.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) { return Some(v); }
++                    let mut ids = self.ids();
++                    for id in self.ids() { ids.extend(doc.model().dependents(id)); }
++                    C.with(|c| *c.borrow_mut() = Some((key, ids.clone())));
++                    return Some(ids);
++                }
+                 let mut ids = self.ids();
+                 for id in self.ids() {
+                     ids.extend(doc.model().dependents(id));
+@@ -967,8 +978,12 @@ impl Modal {
+         let mut before = self.ctrl_before;
+         let ev = Events::read(ctx, pointer, click, right, &mut before);
+         self.ctrl_before = before;
++        let p1 = crate::app::Perf::new("DIAG modal step");
+         let out = self.step(doc, &ev, map);
++        drop(p1);
++        let p2 = crate::app::Perf::new("DIAG modal draw");
+         self.draw(painter, map);
++        drop(p2);
+         out
+     }
+ 
+@@ -2100,6 +2115,7 @@ impl Modal {
+                 vec![e]
+             }
+             _ => {
++                let _pt = crate::app::Perf::new("DIAG apply: transform all");
+                 let mut out = Vec::with_capacity(originals.len());
+                 for (i, o) in originals.iter().enumerate() {
+                     let t = if self.individual {
+diff --git a/crates/creabim-app/src/planview.rs b/crates/creabim-app/src/planview.rs
+index a32957d..62e16ab 100644
+--- a/crates/creabim-app/src/planview.rs
++++ b/crates/creabim-app/src/planview.rs
+@@ -1166,6 +1166,7 @@ pub fn show(
+     style: PaneStyle,
+ ) -> Option<String> {
+     // while a point is asked for, a click gives it and selects nothing
++    let mut _diag = crate::app::Perf::new("DIAG show @1169");
+     let picking = state.point_pick && matches!(kind, PaneKind::Plan { .. });
+     let sense = if picking {
+         Sense::drag()
+@@ -1212,6 +1213,7 @@ pub fn show(
+             }
+         }
+     };
++    _diag = crate::app::Perf::new("DIAG show @1215");
+     if style.camera.is_none() && state.zoom_to_scale == Some(view) {
+         state.zoom_to_scale = None;
+         if let Some(ElementKind::View(v)) = doc.model().get(view).map(|e| &e.kind) {
+@@ -1329,6 +1331,7 @@ pub fn show(
+         let d = response.drag_delta() / scale;
+         center -= DVec2::from_angle(rot).rotate(DVec2::new(d.x as f64, -d.y as f64));
+     }
++    _diag = crate::app::Perf::new("DIAG show @1332");
+     if response.hovered() {
+         // a touchpad's two fingers pan; a wheel and a pinch zoom (MU24)
+         let (pan, scroll) = wheel(ui);
+@@ -1571,6 +1574,7 @@ pub fn show(
+     };
+     // pre-selection: what a click here would take, and what else is
+     // under the pointer (Tab cycles them)
++    _diag = crate::app::Perf::new("DIAG show @1574");
+     let pane = Pane::View(view);
+     // nothing is looked up under the pointer while the view zooms or pans
+     let zooming = ui.input(|i| i.time) < state.nav_until;
+@@ -1639,6 +1643,7 @@ pub fn show(
+         let pad = DVec2::splat(8.0 / xf.scale as f64);
+         (lo - pad, hi + pad)
+     };
++    _diag = crate::app::Perf::new("DIAG show @1642");
+     let px = 1.0 / xf.scale as f64;
+     // while the view is zoomed or panned, the drawing as last drawn is
+     // moved and scaled on screen rather than drawn again item by item (a
+@@ -1837,6 +1842,7 @@ pub fn show(
+     }
+     // 3D crop boxes in plans and sections (A4-5): the selected one, and
+     // every one whose frame is shown, dashed in the crop colour
++    _diag = crate::app::Perf::new("DIAG show @1840");
+     if style.decorations {
+         for (id, lo, hi) in crop_rects(doc.model(), view) {
+             let selected = selection.contains(id);
+@@ -1915,6 +1921,7 @@ pub fn show(
+         Some(k) => state.snap.only(k),
+         None => state.snap,
+     };
++    _diag = crate::app::Perf::new("DIAG show @1918");
+     if state.snap_once.is_some() && pick {
+         state.snap_once_spent = true;
+     }
+@@ -1983,6 +1990,7 @@ pub fn show(
+         .filter(|(v, _)| v.is_none_or(|v| v == view))
+         .filter(|_| !state.pick_window)
+         .and_then(|(_, p)| p.last().copied());
++    _diag = crate::app::Perf::new("DIAG show @1986");
+     let drawing_from = state
+         .pending
+         .or(sketch_last.map(from_pane))
+@@ -2106,6 +2114,7 @@ pub fn show(
+             _ => tracked,
+         }
+     };
++    _diag = crate::app::Perf::new("DIAG show @2109");
+     let tool_snap = tracked.as_ref().map(|t| t.snap);
+     let tool_align = tracked.as_ref().and_then(|t| t.align);
+     let now = ui.input(|i| i.time);
+@@ -2266,6 +2275,7 @@ pub fn show(
+     }
+ 
+     // the Slab tool's modes, and Line / Arc while clicking a slab outline
++    _diag = crate::app::Perf::new("DIAG show @2269");
+     if let PaneKind::Plan { level } = kind {
+         let slab_outline = state
+             .outline
+@@ -2667,6 +2677,7 @@ pub fn show(
+                 .into_iter()
+                 .any(|id| selection.contains(id))
+         });
++    _diag = crate::app::Perf::new("DIAG show @2670");
+     let annotation_drag = state.anno.grab.is_some()
+         || !response.drag_started_by(egui::PointerButton::Primary)
+         || press_on_selected;
+@@ -2857,6 +2868,7 @@ pub fn show(
+             state.dim_axis.unwrap_or_default()
+         }
+     };
++    _diag = crate::app::Perf::new("DIAG show @2860");
+     let dim_look = annotate::look_of(doc.model(), state.anno.dim_style, None);
+     if crate::annotate::is_tool(tool) {
+         let raw = response.hover_pos().map(|p| xf.to_world(p));
+@@ -3251,6 +3263,7 @@ pub fn show(
+     // Shift + right-click: AutoCAD's object snap menu, in plans and
+     // sections; Ctrl + Shift + right-click places the pivot cursor
+     let ctrl = ui.input(|i| i.modifiers.command);
++    _diag = crate::app::Perf::new("DIAG show @3254");
+     if response.secondary_clicked()
+         && shift
+         && !ctrl
+@@ -3303,6 +3316,7 @@ pub fn show(
+         ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input();
+     // a detail path that can be made is finished, never dropped
+     let finish = state.cmd_finish && state.details.view == Some(view);
++    _diag = crate::app::Perf::new("DIAG show @3306");
+     if finish {
+         state.cmd_finish = false;
+     }
+@@ -3405,6 +3419,7 @@ pub fn show(
+     }
+ 
+     let mut error = None;
++    _diag = crate::app::Perf::new("DIAG show @3408");
+     if let (true, Some(p), PaneKind::Plan { level }) = (tracker_enter, hover_world, kind) {
+         state.tracker.clear();
+         if let Err(e) = plan_tool(doc, level, tool, p, state, selection) {
+@@ -9663,3 +9678,8 @@ mod lod_tests {
+         ));
+     }
+ }
++
++#[cfg(test)]
++pub(crate) fn drawing_print_for_bench(items: &[PlanItem]) -> u64 {
++    drawing_print(items)
++}
+diff --git a/crates/creabim-app/src/selection.rs b/crates/creabim-app/src/selection.rs
+index f8e8daa..4f1183c 100644
+--- a/crates/creabim-app/src/selection.rs
++++ b/crates/creabim-app/src/selection.rs
+@@ -42,6 +42,16 @@ impl Selection {
+     }
+ 
+     pub fn contains(&self, id: ElementId) -> bool {
++        // DIAGNOSTICA (solo copia isolata): ricerca a costo costante
++        if std::env::var_os("DIAG_HASHSEL").is_some() && self.others.len() > 32 {
++            thread_local! { static C: std::cell::RefCell<(usize, usize, std::collections::HashSet<ElementId>)> = Default::default(); }
++            let key = (self.others.as_ptr() as usize, self.others.len());
++            return self.active == Some(id) || C.with(|c| {
++                let mut c = c.borrow_mut();
++                if (c.0, c.1) != key { *c = (key.0, key.1, self.others.iter().copied().collect()); }
++                c.2.contains(&id)
++            });
++        }
+         self.active == Some(id) || self.others.contains(&id)
+     }
+ 

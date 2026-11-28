@@ -12,6 +12,16 @@ dirige è un architetto (AutoCAD, Archicad), non un programmatore.
 - Prima di modifiche ampie o rischiose, proporre un piano e aspettare
   l'approvazione. Non allargare il lavoro oltre la richiesta.
 
+## Priorità
+
+- Dal 28/11/2026 la priorità strategica è la **fluidità interattiva**:
+  immediatezza, precisione e sensazione di controllo del disegno al livello
+  di AutoCAD (`docs/prestazioni/`). Le nuove funzionalità non indispensabili
+  sono sospese; le correzioni sull'integrità dei progetti hanno la
+  precedenza.
+- Ogni ottimizzazione: misure prima e dopo nelle stesse condizioni, test
+  funzionali e di equivalenza, commit separato.
+
 ## Regole di sviluppo (obbligatorie)
 
 1. **Un commit per argomento.** Niente commit che mescolano funzioni diverse.

@@ -1,0 +1,1070 @@
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 2.2 ms
+planview::show: 8.7 ms
+show_plan: after: 0.2 ms
+show_plan: 25.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.9 ms
+show_plan: after: 0.0 ms
+show_plan: 0.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 150.1 ms
+drawing_live: 150.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 10.2 ms
+plan snaps: guided: 0.3 ms
+planview::show: 111.0 ms
+show_plan: after: 0.0 ms
+show_plan: 261.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+DIAG modal step: 0.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 18.6 ms
+show_plan: after: 0.0 ms
+show_plan: 18.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.4 ms
+DIAG modal step: 0.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 17.3 ms
+show_plan: after: 0.0 ms
+show_plan: 17.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 4.9 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 0.4 ms
+DIAG modal step: 5.8 ms
+DIAG modal draw: 0.0 ms
+planview::show: 273.2 ms
+show_plan: after: 0.0 ms
+show_plan: 273.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.5 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 0.5 ms
+DIAG modal step: 7.7 ms
+DIAG modal draw: 0.0 ms
+planview::show: 201.8 ms
+show_plan: after: 0.0 ms
+show_plan: 201.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.4 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 0.7 ms
+DIAG modal step: 7.9 ms
+DIAG modal draw: 0.0 ms
+planview::show: 258.6 ms
+show_plan: after: 0.0 ms
+show_plan: 258.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.1 ms
+DIAG modal step: 7.9 ms
+DIAG modal draw: 0.0 ms
+planview::show: 240.7 ms
+show_plan: after: 0.0 ms
+show_plan: 240.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 132.8 ms
+drawing_live: 132.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.5 ms
+DIAG modal step: 9.7 ms
+DIAG modal draw: 0.0 ms
+planview::show: 266.2 ms
+show_plan: after: 0.0 ms
+show_plan: 399.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 127.6 ms
+drawing_live: 127.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 9.1 ms
+DIAG modal draw: 0.0 ms
+planview::show: 216.7 ms
+show_plan: after: 0.0 ms
+show_plan: 344.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 129.6 ms
+drawing_live: 129.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 9.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 230.9 ms
+show_plan: after: 0.0 ms
+show_plan: 360.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 131.0 ms
+drawing_live: 131.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 7.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.8 ms
+DIAG modal step: 10.9 ms
+DIAG modal draw: 0.0 ms
+planview::show: 268.8 ms
+show_plan: after: 0.0 ms
+show_plan: 399.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 129.8 ms
+drawing_live: 129.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 4.9 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 7.6 ms
+DIAG modal draw: 0.0 ms
+planview::show: 203.0 ms
+show_plan: after: 0.0 ms
+show_plan: 332.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 125.1 ms
+drawing_live: 125.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 8.1 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 7.7 ms
+DIAG modal draw: 0.0 ms
+planview::show: 267.6 ms
+show_plan: after: 0.0 ms
+show_plan: 392.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 113.3 ms
+drawing_live: 113.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.1 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 7.5 ms
+DIAG modal draw: 0.0 ms
+planview::show: 190.9 ms
+show_plan: after: 0.0 ms
+show_plan: 304.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 107.0 ms
+drawing_live: 107.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 8.0 ms
+DIAG modal draw: 0.3 ms
+planview::show: 183.5 ms
+show_plan: after: 0.0 ms
+show_plan: 290.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 111.8 ms
+drawing_live: 111.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.3 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 9.3 ms
+DIAG modal draw: 0.2 ms
+planview::show: 232.8 ms
+show_plan: after: 0.0 ms
+show_plan: 344.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 139.2 ms
+drawing_live: 139.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.5 ms
+DIAG modal step: 10.9 ms
+DIAG modal draw: 0.2 ms
+planview::show: 207.0 ms
+show_plan: after: 0.0 ms
+show_plan: 346.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 132.6 ms
+drawing_live: 132.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.0 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 7.6 ms
+DIAG modal draw: 0.2 ms
+planview::show: 215.7 ms
+show_plan: after: 0.0 ms
+show_plan: 348.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 106.2 ms
+drawing_live: 106.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.1 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.7 ms
+DIAG modal step: 7.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 179.0 ms
+show_plan: after: 0.0 ms
+show_plan: 285.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 104.1 ms
+drawing_live: 104.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.1 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 7.7 ms
+DIAG modal draw: 0.2 ms
+planview::show: 182.4 ms
+show_plan: after: 0.0 ms
+show_plan: 286.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 133.4 ms
+drawing_live: 133.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.4 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 8.1 ms
+DIAG modal draw: 0.1 ms
+planview::show: 195.5 ms
+show_plan: after: 0.0 ms
+show_plan: 328.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 114.2 ms
+drawing_live: 114.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.0 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 3.0 ms
+DIAG modal step: 14.1 ms
+DIAG modal draw: 0.3 ms
+planview::show: 395.5 ms
+show_plan: after: 0.0 ms
+show_plan: 509.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 172.1 ms
+drawing_live: 172.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 7.9 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 9.2 ms
+DIAG modal draw: 0.1 ms
+planview::show: 407.2 ms
+show_plan: after: 0.0 ms
+show_plan: 579.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 135.1 ms
+drawing_live: 135.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.3 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 9.8 ms
+DIAG modal draw: 0.2 ms
+planview::show: 246.8 ms
+show_plan: after: 0.0 ms
+show_plan: 382.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 204.4 ms
+drawing_live: 204.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 8.2 ms
+DIAG modal draw: 0.1 ms
+planview::show: 205.3 ms
+show_plan: after: 0.0 ms
+show_plan: 409.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 115.1 ms
+drawing_live: 115.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 3.0 ms
+DIAG modal step: 9.9 ms
+DIAG modal draw: 0.3 ms
+planview::show: 241.5 ms
+show_plan: after: 0.0 ms
+show_plan: 356.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 147.4 ms
+drawing_live: 147.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 8.1 ms
+DIAG modal draw: 0.1 ms
+planview::show: 300.6 ms
+show_plan: after: 0.0 ms
+show_plan: 448.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 122.1 ms
+drawing_live: 122.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.2 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 7.8 ms
+DIAG modal draw: 0.1 ms
+planview::show: 264.6 ms
+show_plan: after: 0.0 ms
+show_plan: 386.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 122.5 ms
+drawing_live: 122.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.7 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 9.1 ms
+DIAG modal draw: 0.2 ms
+planview::show: 254.3 ms
+show_plan: after: 0.0 ms
+show_plan: 377.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 152.1 ms
+drawing_live: 152.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.7 ms
+DIAG modal step: 7.6 ms
+DIAG modal draw: 0.1 ms
+planview::show: 271.7 ms
+show_plan: after: 0.0 ms
+show_plan: 423.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 106.8 ms
+drawing_live: 106.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.3 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 10.0 ms
+DIAG modal draw: 0.1 ms
+planview::show: 223.1 ms
+show_plan: after: 0.0 ms
+show_plan: 330.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 155.3 ms
+drawing_live: 155.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.3 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 9.2 ms
+DIAG modal draw: 0.1 ms
+planview::show: 240.3 ms
+show_plan: after: 0.0 ms
+show_plan: 395.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 138.6 ms
+drawing_live: 138.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 9.1 ms
+DIAG modal draw: 0.1 ms
+planview::show: 318.1 ms
+show_plan: after: 0.0 ms
+show_plan: 456.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 136.3 ms
+drawing_live: 136.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.3 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 9.2 ms
+DIAG modal draw: 0.2 ms
+planview::show: 233.9 ms
+show_plan: after: 0.0 ms
+show_plan: 370.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 156.4 ms
+drawing_live: 156.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 7.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 9.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 313.3 ms
+show_plan: after: 0.0 ms
+show_plan: 469.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 194.8 ms
+drawing_live: 194.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 9.7 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 2.9 ms
+DIAG modal step: 13.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 394.4 ms
+show_plan: after: 0.0 ms
+show_plan: 589.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 179.8 ms
+drawing_live: 179.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.8 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 3.3 ms
+DIAG modal step: 13.4 ms
+DIAG modal draw: 0.1 ms
+planview::show: 299.4 ms
+show_plan: after: 0.0 ms
+show_plan: 479.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 162.7 ms
+drawing_live: 162.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 9.8 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 3.0 ms
+DIAG modal step: 13.8 ms
+DIAG modal draw: 0.1 ms
+planview::show: 337.3 ms
+show_plan: after: 0.0 ms
+show_plan: 500.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 141.1 ms
+drawing_live: 141.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.1 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 8.6 ms
+DIAG modal draw: 0.1 ms
+planview::show: 220.1 ms
+show_plan: after: 0.0 ms
+show_plan: 361.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 144.6 ms
+drawing_live: 145.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 8.9 ms
+DIAG modal draw: 0.1 ms
+planview::show: 245.7 ms
+show_plan: after: 0.0 ms
+show_plan: 391.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 137.5 ms
+drawing_live: 137.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 7.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.5 ms
+DIAG modal step: 9.8 ms
+DIAG modal draw: 0.1 ms
+planview::show: 305.0 ms
+show_plan: after: 0.0 ms
+show_plan: 442.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 155.7 ms
+drawing_live: 155.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 7.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 8.9 ms
+DIAG modal draw: 0.1 ms
+planview::show: 285.2 ms
+show_plan: after: 0.0 ms
+show_plan: 441.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 128.3 ms
+drawing_live: 128.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 6.8 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 2.6 ms
+DIAG modal step: 10.0 ms
+DIAG modal draw: 0.1 ms
+planview::show: 297.3 ms
+show_plan: after: 0.0 ms
+show_plan: 425.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 145.5 ms
+drawing_live: 145.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 5.8 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 8.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 251.3 ms
+show_plan: after: 0.0 ms
+show_plan: 396.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.1 ms
+drawing_live: 19.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 5.4 ms
+show_plan: after: 0.3 ms
+show_plan: 24.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.8 ms
+show_plan: after: 0.0 ms
+show_plan: 0.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.8 ms
+show_plan: after: 0.0 ms
+show_plan: 0.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 139.3 ms
+drawing_live: 139.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 10.9 ms
+plan snaps: guided: 0.6 ms
+planview::show: 98.6 ms
+show_plan: after: 0.0 ms
+show_plan: 238.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.5 ms
+DIAG modal step: 0.4 ms
+DIAG modal draw: 0.1 ms
+planview::show: 16.0 ms
+show_plan: after: 0.0 ms
+show_plan: 16.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 0.5 ms
+DIAG modal step: 0.5 ms
+DIAG modal draw: 0.0 ms
+planview::show: 14.8 ms
+show_plan: after: 0.0 ms
+show_plan: 14.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 0.5 ms
+DIAG modal step: 11.8 ms
+DIAG modal draw: 0.0 ms
+planview::show: 229.6 ms
+show_plan: after: 0.0 ms
+show_plan: 229.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 0.5 ms
+DIAG modal step: 12.9 ms
+DIAG modal draw: 0.0 ms
+planview::show: 185.0 ms
+show_plan: after: 0.0 ms
+show_plan: 185.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.7 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 0.5 ms
+DIAG modal step: 11.8 ms
+DIAG modal draw: 0.0 ms
+planview::show: 180.6 ms
+show_plan: after: 0.0 ms
+show_plan: 180.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.0 ms
+DIAG modal step: 12.2 ms
+DIAG modal draw: 0.0 ms
+planview::show: 179.2 ms
+show_plan: after: 0.0 ms
+show_plan: 179.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 105.1 ms
+drawing_live: 105.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 13.1 ms
+DIAG modal draw: 0.0 ms
+planview::show: 190.5 ms
+show_plan: after: 0.0 ms
+show_plan: 295.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 101.8 ms
+drawing_live: 101.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.7 ms
+DIAG modal step: 12.9 ms
+DIAG modal draw: 0.0 ms
+planview::show: 189.8 ms
+show_plan: after: 0.0 ms
+show_plan: 291.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 104.2 ms
+drawing_live: 104.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 10.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.8 ms
+DIAG modal step: 13.2 ms
+DIAG modal draw: 0.0 ms
+planview::show: 196.7 ms
+show_plan: after: 0.0 ms
+show_plan: 301.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 101.0 ms
+drawing_live: 101.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 14.6 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 3.3 ms
+DIAG modal step: 25.6 ms
+DIAG modal draw: 0.0 ms
+planview::show: 272.7 ms
+show_plan: after: 0.0 ms
+show_plan: 373.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 143.5 ms
+drawing_live: 143.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 17.3 ms
+DIAG modal draw: 0.0 ms
+planview::show: 234.0 ms
+show_plan: after: 0.0 ms
+show_plan: 377.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 127.2 ms
+drawing_live: 127.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.6 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 16.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 233.3 ms
+show_plan: after: 0.0 ms
+show_plan: 360.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 120.9 ms
+drawing_live: 121.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 17.0 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.5 ms
+DIAG modal draw: 0.0 ms
+planview::show: 215.0 ms
+show_plan: after: 0.0 ms
+show_plan: 336.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 131.2 ms
+drawing_live: 131.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 12.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 17.5 ms
+DIAG modal draw: 0.2 ms
+planview::show: 211.9 ms
+show_plan: after: 0.0 ms
+show_plan: 343.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 134.2 ms
+drawing_live: 134.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 222.9 ms
+show_plan: after: 0.0 ms
+show_plan: 357.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 137.1 ms
+drawing_live: 137.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.7 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 18.6 ms
+DIAG modal draw: 0.3 ms
+planview::show: 279.4 ms
+show_plan: after: 0.0 ms
+show_plan: 416.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 146.6 ms
+drawing_live: 146.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 16.6 ms
+DIAG modal draw: 0.0 ms
+planview::show: 247.1 ms
+show_plan: after: 0.0 ms
+show_plan: 393.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 127.4 ms
+drawing_live: 127.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 16.7 ms
+DIAG modal draw: 0.1 ms
+planview::show: 251.9 ms
+show_plan: after: 0.0 ms
+show_plan: 379.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 136.6 ms
+drawing_live: 136.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 16.8 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 16.6 ms
+DIAG modal draw: 0.2 ms
+planview::show: 279.9 ms
+show_plan: after: 0.0 ms
+show_plan: 416.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 114.7 ms
+drawing_live: 114.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 11.3 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 14.4 ms
+DIAG modal draw: 0.1 ms
+planview::show: 230.5 ms
+show_plan: after: 0.0 ms
+show_plan: 345.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 111.0 ms
+drawing_live: 111.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 11.2 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 14.1 ms
+DIAG modal draw: 0.1 ms
+planview::show: 216.1 ms
+show_plan: after: 0.0 ms
+show_plan: 327.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 127.2 ms
+drawing_live: 127.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 11.4 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 15.7 ms
+DIAG modal draw: 0.0 ms
+planview::show: 210.8 ms
+show_plan: after: 0.0 ms
+show_plan: 338.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 108.3 ms
+drawing_live: 108.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 11.4 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 14.0 ms
+DIAG modal draw: 0.1 ms
+planview::show: 201.8 ms
+show_plan: after: 0.0 ms
+show_plan: 310.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 106.9 ms
+drawing_live: 107.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 14.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 17.0 ms
+DIAG modal draw: 0.0 ms
+planview::show: 247.9 ms
+show_plan: after: 0.0 ms
+show_plan: 355.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 163.2 ms
+drawing_live: 163.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.7 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.8 ms
+DIAG modal draw: 0.1 ms
+planview::show: 240.1 ms
+show_plan: after: 0.0 ms
+show_plan: 403.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 128.9 ms
+drawing_live: 129.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.7 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.7 ms
+DIAG modal draw: 0.2 ms
+planview::show: 232.6 ms
+show_plan: after: 0.0 ms
+show_plan: 361.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 127.9 ms
+drawing_live: 127.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.8 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.6 ms
+DIAG modal draw: 0.1 ms
+planview::show: 243.5 ms
+show_plan: after: 0.0 ms
+show_plan: 371.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 130.5 ms
+drawing_live: 130.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.8 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.6 ms
+DIAG modal draw: 0.2 ms
+planview::show: 234.1 ms
+show_plan: after: 0.0 ms
+show_plan: 364.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 131.8 ms
+drawing_live: 131.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.8 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.6 ms
+DIAG modal draw: 0.0 ms
+planview::show: 238.5 ms
+show_plan: after: 0.0 ms
+show_plan: 370.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 132.0 ms
+drawing_live: 132.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.7 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 16.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 232.5 ms
+show_plan: after: 0.0 ms
+show_plan: 364.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 167.5 ms
+drawing_live: 167.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.8 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.8 ms
+DIAG modal draw: 0.0 ms
+planview::show: 268.3 ms
+show_plan: after: 0.0 ms
+show_plan: 435.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 135.1 ms
+drawing_live: 135.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.7 ms
+DIAG modal draw: 0.2 ms
+planview::show: 251.9 ms
+show_plan: after: 0.0 ms
+show_plan: 387.1 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 134.1 ms
+drawing_live: 134.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 16.3 ms
+DIAG modal draw: 0.1 ms
+planview::show: 239.6 ms
+show_plan: after: 0.0 ms
+show_plan: 373.8 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 126.0 ms
+drawing_live: 126.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 16.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 237.2 ms
+show_plan: after: 0.0 ms
+show_plan: 363.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 130.2 ms
+drawing_live: 130.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.7 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.1 ms
+DIAG modal step: 16.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 229.7 ms
+show_plan: after: 0.0 ms
+show_plan: 360.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 108.5 ms
+drawing_live: 108.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 16.8 ms
+DIAG modal draw: 0.0 ms
+planview::show: 212.4 ms
+show_plan: after: 0.0 ms
+show_plan: 321.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 132.9 ms
+drawing_live: 133.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 11.9 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 1.9 ms
+DIAG modal step: 15.1 ms
+DIAG modal draw: 0.1 ms
+planview::show: 201.9 ms
+show_plan: after: 0.0 ms
+show_plan: 334.9 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 120.3 ms
+drawing_live: 120.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 14.1 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 17.4 ms
+DIAG modal draw: 0.0 ms
+planview::show: 345.4 ms
+show_plan: after: 0.0 ms
+show_plan: 465.7 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 164.4 ms
+drawing_live: 164.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 16.2 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.4 ms
+DIAG modal step: 19.5 ms
+DIAG modal draw: 0.1 ms
+planview::show: 285.0 ms
+show_plan: after: 0.0 ms
+show_plan: 449.5 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 138.2 ms
+drawing_live: 138.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.6 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.2 ms
+DIAG modal step: 16.8 ms
+DIAG modal draw: 0.1 ms
+planview::show: 245.0 ms
+show_plan: after: 0.0 ms
+show_plan: 383.3 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 139.9 ms
+drawing_live: 140.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 21.8 ms
+DIAG apply: transform all: 0.4 ms
+DIAG LiveEdit::update: 3.1 ms
+DIAG modal step: 25.8 ms
+DIAG modal draw: 0.2 ms
+planview::show: 378.6 ms
+show_plan: after: 0.0 ms
+show_plan: 518.6 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 142.4 ms
+drawing_live: 142.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 12.4 ms
+DIAG apply: transform all: 0.2 ms
+DIAG LiveEdit::update: 2.0 ms
+DIAG modal step: 14.7 ms
+DIAG modal draw: 0.1 ms
+planview::show: 211.8 ms
+show_plan: after: 0.0 ms
+show_plan: 354.4 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 116.5 ms
+drawing_live: 116.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: guided: 13.5 ms
+DIAG apply: transform all: 0.3 ms
+DIAG LiveEdit::update: 2.3 ms
+DIAG modal step: 16.7 ms
+DIAG modal draw: 0.0 ms
+planview::show: 222.3 ms
+show_plan: after: 0.0 ms
+show_plan: 338.9 ms

@@ -1,0 +1,42 @@
+1600x1000x1 BENCH piccola + 10 linee: solo puntatore frames= 40 ui mediana=   0.11 p95=   0.22 max=   1.95 | tess media=  0.07 | totale mediana=   0.18 p95=   0.32 | vertici=9310
+1600x1000x1 BENCH piccola + 10 linee: Sposta in corso frames= 60 ui mediana=   1.11 p95=   1.30 max=   1.37 | tess media=  0.11 | totale mediana=   1.21 p95=   1.40 | vertici=11102
+1600x1000x1 BENCH piccola + 10 linee: Sposta, mouse fermo frames= 20 ui mediana=   1.05 p95=   1.35 max=   1.40 | tess media=  0.12 | totale mediana=   1.15 p95=   1.45 | vertici=11102
+1600x1000x1 BENCH piccola + 1000 linee: solo puntatore frames= 40 ui mediana=   0.23 p95=   0.46 max=   8.15 | tess media=  0.13 | totale mediana=   0.33 p95=   0.59 | vertici=17230
+1600x1000x1 BENCH piccola + 1000 linee: Sposta in corso frames= 60 ui mediana=   5.40 p95=   7.13 max=   8.37 | tess media=  0.18 | totale mediana=   5.57 p95=   7.34 | vertici=19022
+1600x1000x1 BENCH piccola + 1000 linee: Sposta, mouse fermo frames= 20 ui mediana=   6.04 p95=   7.75 max=   8.33 | tess media=  0.20 | totale mediana=   6.25 p95=   7.98 | vertici=19022
+1600x1000x1 BENCH piccola + 10000 linee: solo puntatore frames= 40 ui mediana=   1.83 p95=   2.48 max= 122.72 | tess media=  0.53 | totale mediana=   2.22 p95=   2.91 | vertici=88894
+1600x1000x1 BENCH piccola + 10000 linee: Sposta in corso frames= 60 ui mediana= 106.25 p95= 123.74 max= 158.09 | tess media=  1.20 | totale mediana= 107.31 p95= 125.00 | vertici=90782
+1600x1000x1 BENCH piccola + 10000 linee: Sposta, mouse fermo frames= 20 ui mediana= 104.64 p95= 125.19 max= 130.56 | tess media=  1.26 | totale mediana= 105.65 p95= 126.26 | vertici=90782
+1600x1000x1 BENCH casa, 1 muro: solo puntatore       frames= 40 ui mediana=   1.07 p95=   1.26 max=  34.13 | tess media=  0.28 | totale mediana=   1.34 p95=   1.58 | vertici=35473
+1600x1000x1 BENCH casa, 1 muro: Sposta in corso      frames= 60 ui mediana=  18.78 p95=  25.00 max=  26.67 | tess media=  0.41 | totale mediana=  19.24 p95=  25.41 | vertici=37245
+1600x1000x1 BENCH casa, 1 muro: Sposta, mouse fermo  frames= 20 ui mediana=  16.26 p95=  17.30 max=  17.91 | tess media=  0.36 | totale mediana=  16.69 p95=  17.63 | vertici=36794
+1600x1000x1 BENCH casa: pan (tasto centrale)         frames= 60 ui mediana=   0.28 p95=   0.32 max=   0.39 | tess media=  0.26 | totale mediana=   0.54 p95=   0.62 | vertici=34897
+1600x1000x1 BENCH casa: rotellina                    frames= 40 ui mediana=   0.25 p95=   3.86 max=  13.22 | tess media=  0.15 | totale mediana=   0.40 p95=   4.17 | vertici=35061
+3840x2160x1.5 BENCH piccola + 10 linee: solo puntatore frames= 40 ui mediana=   0.13 p95=   0.19 max=   2.02 | tess media=  0.06 | totale mediana=   0.19 p95=   0.30 | vertici=10002
+3840x2160x1.5 BENCH piccola + 10 linee: Sposta in corso frames= 60 ui mediana=   0.82 p95=   1.16 max=   1.36 | tess media=  0.10 | totale mediana=   0.91 p95=   1.28 | vertici=12344
+3840x2160x1.5 BENCH piccola + 10 linee: Sposta, mouse fermo frames= 20 ui mediana=   0.78 p95=   0.83 max=   0.83 | tess media=  0.10 | totale mediana=   0.87 p95=   0.93 | vertici=12344
+3840x2160x1.5 BENCH piccola + 1000 linee: solo puntatore frames= 40 ui mediana=   0.20 p95=   0.28 max=   6.10 | tess media=  0.12 | totale mediana=   0.30 p95=   0.42 | vertici=17922
+3840x2160x1.5 BENCH piccola + 1000 linee: Sposta in corso frames= 60 ui mediana=   4.13 p95=   4.47 max=   4.69 | tess media=  0.15 | totale mediana=   4.29 p95=   4.62 | vertici=20264
+3840x2160x1.5 BENCH piccola + 1000 linee: Sposta, mouse fermo frames= 20 ui mediana=   4.83 p95=   5.04 max=   5.07 | tess media=  0.16 | totale mediana=   5.00 p95=   5.22 | vertici=20264
+3840x2160x1.5 BENCH piccola + 10000 linee: solo puntatore frames= 40 ui mediana=   1.93 p95=   2.78 max= 123.50 | tess media=  0.55 | totale mediana=   2.42 p95=   3.37 | vertici=89922
+3840x2160x1.5 BENCH piccola + 10000 linee: Sposta in corso frames= 60 ui mediana= 104.59 p95= 126.46 max= 164.98 | tess media=  1.27 | totale mediana= 105.76 p95= 128.40 | vertici=92264
+3840x2160x1.5 BENCH piccola + 10000 linee: Sposta, mouse fermo frames= 20 ui mediana= 111.12 p95= 157.57 max= 162.38 | tess media=  1.37 | totale mediana= 112.21 p95= 158.66 | vertici=92264
+3840x2160x1.5 BENCH casa, 1 muro: solo puntatore       frames= 40 ui mediana=   1.04 p95=   1.39 max=  34.69 | tess media=  0.40 | totale mediana=   1.45 p95=   1.74 | vertici=48453
+3840x2160x1.5 BENCH casa, 1 muro: Sposta in corso      frames= 60 ui mediana=  19.55 p95=  34.40 max=  39.26 | tess media=  0.55 | totale mediana=  20.04 p95=  35.07 | vertici=51217
+3840x2160x1.5 BENCH casa, 1 muro: Sposta, mouse fermo  frames= 20 ui mediana=  20.45 p95=  21.29 max=  21.95 | tess media=  0.52 | totale mediana=  20.91 p95=  21.82 | vertici=51184
+3840x2160x1.5 BENCH casa: pan (tasto centrale)         frames= 60 ui mediana=   0.31 p95=   0.37 max=   0.39 | tess media=  0.38 | totale mediana=   0.70 p95=   0.76 | vertici=48281
+3840x2160x1.5 BENCH casa: rotellina                    frames= 40 ui mediana=   0.22 p95=  21.89 max=  68.03 | tess media=  0.17 | totale mediana=   0.39 p95=  21.99 | vertici=48237
+3840x2160x2 BENCH piccola + 10 linee: solo puntatore frames= 40 ui mediana=   0.10 p95=   0.19 max=   1.90 | tess media=  0.07 | totale mediana=   0.16 p95=   0.31 | vertici=9662
+3840x2160x2 BENCH piccola + 10 linee: Sposta in corso frames= 60 ui mediana=   1.00 p95=   1.17 max=   1.29 | tess media=  0.12 | totale mediana=   1.11 p95=   1.30 | vertici=11496
+3840x2160x2 BENCH piccola + 10 linee: Sposta, mouse fermo frames= 20 ui mediana=   0.92 p95=   1.02 max=   1.04 | tess media=  0.12 | totale mediana=   1.03 p95=   1.14 | vertici=11496
+3840x2160x2 BENCH piccola + 1000 linee: solo puntatore frames= 40 ui mediana=   0.27 p95=   0.36 max=   7.08 | tess media=  0.14 | totale mediana=   0.39 p95=   0.52 | vertici=17582
+3840x2160x2 BENCH piccola + 1000 linee: Sposta in corso frames= 60 ui mediana=   5.05 p95=   5.62 max=   6.15 | tess media=  0.16 | totale mediana=   5.21 p95=   5.82 | vertici=19416
+3840x2160x2 BENCH piccola + 1000 linee: Sposta, mouse fermo frames= 20 ui mediana=   5.11 p95=   5.93 max=   6.30 | tess media=  0.16 | totale mediana=   5.26 p95=   6.14 | vertici=19416
+3840x2160x2 BENCH piccola + 10000 linee: solo puntatore frames= 40 ui mediana=   2.41 p95=   3.46 max= 156.68 | tess media=  0.78 | totale mediana=   3.11 p95=   4.35 | vertici=89582
+3840x2160x2 BENCH piccola + 10000 linee: Sposta in corso frames= 60 ui mediana= 106.55 p95= 125.20 max= 165.08 | tess media=  1.27 | totale mediana= 107.83 p95= 126.41 | vertici=91400
+3840x2160x2 BENCH piccola + 10000 linee: Sposta, mouse fermo frames= 20 ui mediana=  95.08 p95= 114.51 max= 115.41 | tess media=  1.76 | totale mediana=  99.60 p95= 116.09 | vertici=91400
+3840x2160x2 BENCH casa, 1 muro: solo puntatore       frames= 40 ui mediana=   1.04 p95=   1.36 max=  35.02 | tess media=  0.38 | totale mediana=   1.42 p95=   1.71 | vertici=46637
+3840x2160x2 BENCH casa, 1 muro: Sposta in corso      frames= 60 ui mediana=  15.70 p95=  19.48 max=  22.02 | tess media=  0.50 | totale mediana=  16.20 p95=  20.10 | vertici=49433
+3840x2160x2 BENCH casa, 1 muro: Sposta, mouse fermo  frames= 20 ui mediana=  18.63 p95=  19.85 max=  20.01 | tess media=  0.56 | totale mediana=  19.18 p95=  20.48 | vertici=49162
+3840x2160x2 BENCH casa: pan (tasto centrale)         frames= 60 ui mediana=   0.26 p95=   0.30 max=   0.31 | tess media=  0.30 | totale mediana=   0.57 p95=   0.60 | vertici=46393
+3840x2160x2 BENCH casa: rotellina                    frames= 40 ui mediana=   0.24 p95=  16.17 max=  87.42 | tess media=  0.16 | totale mediana=   0.41 p95=  16.39 | vertici=46465

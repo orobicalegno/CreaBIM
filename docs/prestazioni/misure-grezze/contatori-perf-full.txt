@@ -1,0 +1,2464 @@
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.5 ms
+outliner: 2.0 ms
+properties: 2.9 ms
+show_3d: 0.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.9 ms
+drawing_live: 14.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 2.1 ms
+planview::show: 5.1 ms
+show_plan: after: 0.0 ms
+show_plan: 19.1 ms
+frame: areas on: 20.1 ms
+frame: properties on: 26.0 ms
+frame: 31.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.4 ms
+frame: areas on: 0.6 ms
+frame: properties on: 2.7 ms
+frame: 3.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.5 ms
+frame: 3.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.5 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.4 ms
+frame: areas on: 0.6 ms
+frame: properties on: 3.6 ms
+frame: 4.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.6 ms
+frame: 4.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 3.2 ms
+frame: 4.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.1 ms
+frame: 4.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.6 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 3.2 ms
+frame: 4.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.6 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 4.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.5 ms
+frame: 4.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.1 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.7 ms
+frame: properties on: 3.3 ms
+frame: 4.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.5 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.6 ms
+frame: properties on: 3.9 ms
+frame: 4.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.3 ms
+frame: 4.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.8 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.7 ms
+frame: 4.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.7 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.6 ms
+frame: properties on: 4.0 ms
+frame: 5.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.7 ms
+drawing_live: 16.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.8 ms
+planview::show: 4.2 ms
+show_plan: after: 0.0 ms
+show_plan: 20.9 ms
+frame: areas on: 21.2 ms
+frame: properties on: 23.8 ms
+frame: 24.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.3 ms
+drawing_live: 17.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.7 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 20.5 ms
+frame: areas on: 20.8 ms
+frame: properties on: 23.5 ms
+frame: 24.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 3.0 ms
+show_plan: after: 0.0 ms
+show_plan: 19.6 ms
+frame: areas on: 19.9 ms
+frame: properties on: 22.6 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.6 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.3 ms
+drawing_live: 17.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 20.5 ms
+frame: areas on: 20.7 ms
+frame: properties on: 23.6 ms
+frame: 24.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 19.4 ms
+frame: areas on: 19.7 ms
+frame: properties on: 22.2 ms
+frame: 23.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.3 ms
+frame: areas on: 19.5 ms
+frame: properties on: 22.1 ms
+frame: 23.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 3.4 ms
+show_plan: after: 0.0 ms
+show_plan: 20.2 ms
+frame: areas on: 20.4 ms
+frame: properties on: 23.0 ms
+frame: 24.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.1 ms
+drawing_live: 17.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.9 ms
+frame: areas on: 20.1 ms
+frame: properties on: 22.7 ms
+frame: 23.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.4 ms
+frame: areas on: 19.6 ms
+frame: properties on: 22.2 ms
+frame: 23.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 19.3 ms
+frame: areas on: 19.6 ms
+frame: properties on: 22.1 ms
+frame: 23.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.4 ms
+drawing_live: 16.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 19.2 ms
+frame: areas on: 19.5 ms
+frame: properties on: 22.0 ms
+frame: 23.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.9 ms
+drawing_live: 16.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 19.8 ms
+frame: areas on: 20.0 ms
+frame: properties on: 22.6 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 4.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 20.8 ms
+drawing_live: 20.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 23.6 ms
+frame: areas on: 23.8 ms
+frame: properties on: 29.3 ms
+frame: 30.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.7 ms
+drawing_live: 16.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 19.5 ms
+frame: areas on: 19.7 ms
+frame: properties on: 22.4 ms
+frame: 23.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.9 ms
+drawing_live: 16.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.6 ms
+frame: areas on: 19.9 ms
+frame: properties on: 22.4 ms
+frame: 23.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 19.3 ms
+frame: areas on: 19.6 ms
+frame: properties on: 22.2 ms
+frame: 23.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.7 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 19.8 ms
+frame: areas on: 20.0 ms
+frame: properties on: 22.6 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.1 ms
+drawing_live: 17.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 20.4 ms
+frame: areas on: 20.6 ms
+frame: properties on: 23.2 ms
+frame: 24.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.7 ms
+drawing_live: 17.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.8 ms
+planview::show: 3.4 ms
+show_plan: after: 0.0 ms
+show_plan: 21.2 ms
+frame: areas on: 21.4 ms
+frame: properties on: 24.0 ms
+frame: 25.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.5 ms
+frame: areas on: 19.8 ms
+frame: properties on: 22.3 ms
+frame: 23.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.8 ms
+drawing_live: 17.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.7 ms
+show_plan: after: 0.0 ms
+show_plan: 21.6 ms
+frame: areas on: 21.8 ms
+frame: properties on: 24.3 ms
+frame: 25.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.9 ms
+drawing_live: 16.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 19.5 ms
+frame: areas on: 19.7 ms
+frame: properties on: 22.3 ms
+frame: 23.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.0 ms
+show_plan: after: 0.0 ms
+show_plan: 19.8 ms
+frame: areas on: 20.1 ms
+frame: properties on: 22.6 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.6 ms
+frame: areas on: 19.8 ms
+frame: properties on: 22.3 ms
+frame: 23.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.9 ms
+drawing_live: 16.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 19.7 ms
+frame: areas on: 20.0 ms
+frame: properties on: 22.5 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 19.8 ms
+drawing_live: 19.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 22.7 ms
+frame: areas on: 23.0 ms
+frame: properties on: 25.5 ms
+frame: 26.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.8 ms
+drawing_live: 16.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 19.6 ms
+frame: areas on: 19.9 ms
+frame: properties on: 22.4 ms
+frame: 23.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.6 ms
+drawing_live: 16.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 19.3 ms
+frame: areas on: 19.6 ms
+frame: properties on: 22.1 ms
+frame: 23.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.1 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.0 ms
+drawing_live: 17.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 19.9 ms
+frame: areas on: 20.1 ms
+frame: properties on: 22.7 ms
+frame: 23.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.7 ms
+drawing_live: 16.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 19.3 ms
+frame: areas on: 19.5 ms
+frame: properties on: 22.1 ms
+frame: 23.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 1.6 ms
+properties: 2.6 ms
+show_3d: 0.2 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.9 ms
+drawing_live: 13.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.8 ms
+planview::show: 4.8 ms
+show_plan: after: 0.1 ms
+show_plan: 18.8 ms
+frame: areas on: 19.8 ms
+frame: properties on: 23.9 ms
+frame: 28.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.5 ms
+frame: 3.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.3 ms
+frame: 3.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.3 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.5 ms
+frame: 3.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.3 ms
+frame: 3.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.5 ms
+frame: 3.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.3 ms
+frame: 3.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 2.4 ms
+frame: 3.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.2 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.6 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.1 ms
+frame: 4.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.6 ms
+properties: 1.7 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 4.1 ms
+frame: 5.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 2.9 ms
+frame: 3.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.6 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.4 ms
+frame: areas on: 0.7 ms
+frame: properties on: 3.5 ms
+frame: 4.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.4 ms
+show_plan: after: 0.0 ms
+show_plan: 0.4 ms
+frame: areas on: 0.6 ms
+frame: properties on: 3.1 ms
+frame: 4.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.4 ms
+frame: properties on: 3.3 ms
+frame: 4.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.2 ms
+show_plan: after: 0.0 ms
+show_plan: 0.2 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.1 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: 0.0 ms
+show_plan: hidden and guides: 0.0 ms
+planview::show: 0.3 ms
+show_plan: after: 0.0 ms
+show_plan: 0.3 ms
+frame: areas on: 0.5 ms
+frame: properties on: 3.0 ms
+frame: 4.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.6 ms
+drawing_live: 17.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.9 ms
+planview::show: 3.7 ms
+show_plan: after: 0.0 ms
+show_plan: 21.3 ms
+frame: areas on: 21.6 ms
+frame: properties on: 24.4 ms
+frame: 25.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.0 ms
+drawing_live: 17.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 19.9 ms
+frame: areas on: 20.1 ms
+frame: properties on: 22.7 ms
+frame: 23.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.5 ms
+drawing_live: 16.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.4 ms
+show_plan: after: 0.0 ms
+show_plan: 20.0 ms
+frame: areas on: 20.2 ms
+frame: properties on: 22.8 ms
+frame: 23.9 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 18.0 ms
+drawing_live: 18.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 20.5 ms
+frame: areas on: 20.8 ms
+frame: properties on: 23.4 ms
+frame: 24.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.7 ms
+drawing_live: 14.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 17.4 ms
+frame: areas on: 17.6 ms
+frame: properties on: 19.8 ms
+frame: 20.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.4 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 15.7 ms
+frame: areas on: 15.9 ms
+frame: properties on: 17.9 ms
+frame: 18.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.6 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.9 ms
+drawing_live: 14.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 17.7 ms
+frame: areas on: 18.0 ms
+frame: properties on: 20.7 ms
+frame: 21.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.3 ms
+drawing_live: 14.3 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 17.4 ms
+frame: areas on: 17.6 ms
+frame: properties on: 20.2 ms
+frame: 21.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.8 ms
+show_plan: after: 0.0 ms
+show_plan: 16.5 ms
+frame: areas on: 16.7 ms
+frame: properties on: 18.8 ms
+frame: 19.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.7 ms
+drawing_live: 13.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.1 ms
+show_plan: after: 0.0 ms
+show_plan: 15.9 ms
+frame: areas on: 16.0 ms
+frame: properties on: 18.1 ms
+frame: 19.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.8 ms
+drawing_live: 17.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 20.5 ms
+frame: areas on: 20.7 ms
+frame: properties on: 22.7 ms
+frame: 23.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.8 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 16.1 ms
+frame: areas on: 16.3 ms
+frame: properties on: 18.3 ms
+frame: 19.2 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 18.5 ms
+drawing_live: 18.6 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 3.5 ms
+show_plan: after: 0.0 ms
+show_plan: 22.2 ms
+frame: areas on: 22.7 ms
+frame: properties on: 24.8 ms
+frame: 25.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.1 ms
+drawing_live: build here: 14.1 ms
+drawing_live: 14.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.2 ms
+show_plan: after: 0.0 ms
+show_plan: 17.4 ms
+frame: areas on: 17.7 ms
+frame: properties on: 20.0 ms
+frame: 21.1 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.8 ms
+drawing_live: 14.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 17.1 ms
+frame: areas on: 17.3 ms
+frame: properties on: 19.6 ms
+frame: 20.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.6 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.9 ms
+drawing_live: 15.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.1 ms
+show_plan: after: 0.0 ms
+show_plan: 19.0 ms
+frame: areas on: 19.2 ms
+frame: properties on: 22.4 ms
+frame: 23.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.1 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.8 ms
+drawing_live: 13.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.5 ms
+planview::show: 2.6 ms
+show_plan: after: 0.0 ms
+show_plan: 16.4 ms
+frame: areas on: 16.7 ms
+frame: properties on: 18.8 ms
+frame: 19.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.8 ms
+drawing_live: 13.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.0 ms
+planview::show: 2.2 ms
+show_plan: after: 0.0 ms
+show_plan: 16.0 ms
+frame: areas on: 16.3 ms
+frame: properties on: 18.4 ms
+frame: 19.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 13.5 ms
+drawing_live: 13.5 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 15.9 ms
+frame: areas on: 16.1 ms
+frame: properties on: 18.2 ms
+frame: 19.0 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.0 ms
+drawing_live: 14.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 16.5 ms
+frame: areas on: 16.7 ms
+frame: properties on: 18.9 ms
+frame: 19.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.0 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.2 ms
+drawing_live: 14.2 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.1 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 16.6 ms
+frame: areas on: 16.8 ms
+frame: properties on: 18.9 ms
+frame: 19.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 0.9 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.7 ms
+drawing_live: 14.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.3 ms
+planview::show: 2.5 ms
+show_plan: after: 0.0 ms
+show_plan: 17.2 ms
+frame: areas on: 17.4 ms
+frame: properties on: 19.5 ms
+frame: 20.3 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.3 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 14.9 ms
+drawing_live: 15.0 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 17.3 ms
+frame: areas on: 17.5 ms
+frame: properties on: 19.9 ms
+frame: 20.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.3 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.9 ms
+drawing_live: 17.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.7 ms
+planview::show: 3.3 ms
+show_plan: after: 0.0 ms
+show_plan: 21.2 ms
+frame: areas on: 21.5 ms
+frame: properties on: 24.0 ms
+frame: 24.8 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.5 ms
+properties: 1.4 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 16.1 ms
+drawing_live: 16.1 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 2.7 ms
+show_plan: after: 0.0 ms
+show_plan: 18.8 ms
+frame: areas on: 19.1 ms
+frame: properties on: 22.3 ms
+frame: 23.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 20.7 ms
+drawing_live: 20.7 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 3.4 ms
+show_plan: after: 0.0 ms
+show_plan: 24.1 ms
+frame: areas on: 24.4 ms
+frame: properties on: 26.7 ms
+frame: 27.7 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.2 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.7 ms
+drawing_live: 15.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.6 ms
+planview::show: 2.9 ms
+show_plan: after: 0.0 ms
+show_plan: 18.7 ms
+frame: areas on: 18.9 ms
+frame: properties on: 21.4 ms
+frame: 22.4 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.4 ms
+drawing_live: 15.4 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.4 ms
+show_plan: after: 0.0 ms
+show_plan: 17.8 ms
+frame: areas on: 18.1 ms
+frame: properties on: 20.5 ms
+frame: 21.5 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.1 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 17.9 ms
+drawing_live: 17.9 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.4 ms
+planview::show: 3.3 ms
+show_plan: after: 0.0 ms
+show_plan: 21.2 ms
+frame: areas on: 21.4 ms
+frame: properties on: 23.6 ms
+frame: 24.6 ms
+frame to frame: 16.7 ms
+pre-frame: 0.0 ms
+frame: prompts and keys: 0.0 ms
+frame: edit mode and spotlight: 0.0 ms
+frame: watch files: 0.0 ms
+web_panels: 0.0 ms
+outliner: 0.4 ms
+properties: 1.5 ms
+show_3d: 0.0 ms
+drawing_live: take finished: 0.0 ms
+drawing_live: build here: 15.8 ms
+drawing_live: 15.8 ms
+show_plan: hidden and guides: 0.0 ms
+plan snaps: build: 1.2 ms
+planview::show: 2.3 ms
+show_plan: after: 0.0 ms
+show_plan: 18.1 ms
+frame: areas on: 18.4 ms
+frame: properties on: 21.2 ms
+frame: 22.1 ms
